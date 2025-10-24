@@ -1,7 +1,8 @@
 import { readFileSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { getCallSites } from 'node:util';
-import { getConfig } from "./config";
+
+import { getConfig } from "./config.js";
 
 export const DEFAULT_BUNDLE_NAME = "default";
 export const WILDCARD_BUNDLE_NAME = "*";

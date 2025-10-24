@@ -4,6 +4,9 @@
   "type": "module",
   "author": "Ryan Geyer",
   "license": "MIT",
+  "scripts": {
+    "test": "node --test"
+  },
   "devDependencies": {
     "@11ty/eleventy": "^3.1.2",
     "@types/node": "^24.9.1",
