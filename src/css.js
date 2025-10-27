@@ -27,33 +27,59 @@ export function css(strings, ...values) {
 
     let currentBundleName = DEFAULT_BUNDLE_NAME;
 
+    let currentBundleChunk = "";
+
     for (let i = 0; i < strings.length; i++) {
       const str = strings[i];
+      currentBundleChunk += str;
       const currentBundleArray = (rawCSSBundles[currentBundleName] ??= []);
-      currentBundleArray.push(str);
 
       const value = values[i];
       if (isBundleImportObject(value)) {
+        if (currentBundleChunk) {
+          currentBundleArray.push(currentBundleChunk.trim());
+          currentBundleChunk = "";
+        }
 
+        const importFilePath = getBundleImportFilePath(value);
+        cssBundleDependencies.add(importFilePath);
         let importBundleName = currentBundleName;
-        if (isBundleObject(value)) {
-          importBundleName = getBundleName(value);
+        const bundleName = getBundleName(value);
+        if (bundleName !== undefined) {
+          importBundleName = bundleName;
         }
         try {
           const fileContents = getBundleImportFileContents(value);
           const importBundleArray = (rawCSSBundles[importBundleName] ??= []);
-          importBundleArray.push(fileContents);
-          cssBundleDependencies.add(getBundleImportFilePath(value));
+          importBundleArray.push(fileContents.trim());
         } catch (err) {
-          throw new Error(`bundle.import failed to import file at path "${importBundleName}": ${err.message}`);
+          throw new Error(`bundle.import failed to import file at path "${importFilePath}"`, {
+            cause: err,
+          });
+        }
+      } else if (isBundleObject(value)) {
+        // A new bundle is being started.
+        if (currentBundleChunk) {
+          // Store the current chunk before switching bundles
+          currentBundleArray.push(currentBundleChunk.trim());
+          currentBundleChunk = "";
         }
 
-      } else if (isBundleObject(value)) {
-        currentBundleName = getBundleName(value);
+        const bundleName = getBundleName(value);
+        if (bundleName !== undefined) {
+          currentBundleName = bundleName;
+        }
       } else if (value !== undefined && value !== null) {
-        // If the value is not a bundle object, append it to the current bundle as a string
-        currentBundleArray.push(String(value));
+        // If the value is not a bundle object, append it to the current chunk as a string
+        currentBundleChunk += String(value);
       }
+    }
+
+    if (currentBundleChunk) {
+      // If we have a remaining chunk which hasn't been committed to the bundle yet,
+      // commit it now.
+      const currentBundleArray = (rawCSSBundles[currentBundleName] ??= []);
+      currentBundleArray.push(currentBundleChunk.trim());
     }
 
     /**
@@ -62,7 +88,7 @@ export function css(strings, ...values) {
     const cssBundles = {};
 
     for (const bundleName in rawCSSBundles) {
-      const combinedBundleString = rawCSSBundles[bundleName].join("").trim();
+      const combinedBundleString = rawCSSBundles[bundleName].join("\n").trim();
       if (!combinedBundleString) {
         // Skip empty bundles
         continue;

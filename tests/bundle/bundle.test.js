@@ -1,6 +1,8 @@
 import { describe, test } from 'node:test';
-import { bundle, bundleNameSymbol, importFilePathSymbol } from './bundle.js';
-import { getConfig, updateConfig } from './config.js';
+
+import { getConfig, updateConfig } from '../../src/config.js';
+import { bundle, bundleNameSymbol, importFilePathSymbol } from '../../src/bundle.js';
+import { fileURLToPath } from 'node:url';
 
 describe('bundle module', () => {
   test('bundle() throws on wildcard', async ({
@@ -47,14 +49,15 @@ describe('bundle module', () => {
   test("bundle.import() resolves absolute paths relative to config's input dir", async ({ assert, after }) => {
     // Hang onto the current config to restore after the test
     const prevConfig = structuredClone(getConfig());
+    const inputDir = fileURLToPath(import.meta.resolve("../../src"));
     updateConfig({
-      inputDir: "src",
+      inputDir,
     });
 
     assert.deepEqual(
       bundle.import("/some/path.js"),
       {
-        [importFilePathSymbol]: "/src/some/path.js",
+        [importFilePathSymbol]: `${inputDir}/some/path.js`,
         [bundleNameSymbol]: "default",
       },
       "bundle.import() should return bundle import object with the absolute path resolved relative to the config's inputDir",
@@ -72,6 +75,24 @@ describe('bundle module', () => {
         [importFilePathSymbol]: `${import.meta.dirname}/path.js`,
       },
       "bundle.import() should return bundle import object with the relative path resolved relative to the file it was called from",
+    );
+  });
+
+  test("bundle.src() creates a placeholder src string as expected", async ({ assert }) => {
+    const result = bundle.src("my-bundle");
+    assert.equal(
+      result,
+      "@bundle/my-bundle",
+      "bundle.src() should return the correctly prefixed bundle src placeholder",
+    );
+  });
+
+  test("bundle.inline() creates a comment placeholder for inlining bundles as expected", async ({ assert }) => {
+    const result = bundle.inline("my-bundle");
+    assert.equal(
+      result,
+      "/*@--BUNDLE--my-bundle--@*/",
+      "bundle.inline() should return the correctly formatted bundle inline placeholder comment",
     );
   });
 });

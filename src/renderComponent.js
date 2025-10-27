@@ -1,9 +1,14 @@
 /**
  * @import { CSSResult } from './css.js';
  * @import { JSResult } from './js.js';
- * @import { RenderResult } from './html.js';
+ * @import { RenderResult, Children } from './html.js';
  *
- * @typedef {((data: any) => RenderResult) & { css?: ()=>CSSResult; js?: ()=>JSResult; }} Component
+ * @template {{
+ *  [prop: string]: unknown;
+ * }} [Props={ [prop: string]: any; }]
+ * @typedef {((data: Props & {
+ *  children?: Children;
+ * }) => RenderResult | RenderResult[]) & { css?: ()=>CSSResult; js?: ()=>JSResult; }} Component
  */
 
 /**
@@ -13,45 +18,77 @@
  *
  * @param {Component} component
  * @param {*} props
- * 
+ *
  * @returns {Promise<RenderResult>}
  */
 export async function renderComponent(component, props = {}) {
-  const {
-    cssBundles,
-    cssDependencies,
-    jsBundles,
-    jsDependencies,
-    ...restRenderRestults
-  } = await component(props);
+  const result = await component(props);
 
+  const resultArray = Array.isArray(result) ? result : [result];
+
+  /**
+   * @type {RenderResult}
+   */
+  const mergedResult = {
+    cssBundles: {},
+    cssDependencies: new Set(),
+    jsBundles: {},
+    jsDependencies: new Set(),
+    html: "",
+    htmlDependencies: new Set(),
+  }
+
+  // Merge all results into a single RenderResult
+  for (const result of resultArray) {
+    mergedResult.html += result.html;
+
+    for (const bundleName in result.cssBundles) {
+      const {
+        cssBundles: mergedCSSBundles,
+        jsBundles: mergedJSBundles,
+      } = mergedResult;
+      const {
+        cssBundles: resultCSSBundles,
+        jsBundles: resultJSBundles,
+        cssDependencies: resultCSSDependencies,
+        jsDependencies: resultJSDependencies,
+        html: resultHTML,
+        htmlDependencies: resultHTMLDependencies,
+      } = result;
+
+      mergedCSSBundles[bundleName] = (mergedCSSBundles[bundleName] ?? new Set()).union(resultCSSBundles[bundleName]);
+      mergedJSBundles[bundleName] = (mergedJSBundles[bundleName] ?? new Set()).union(resultJSBundles[bundleName]);
+
+      mergedResult.cssDependencies = mergedResult.cssDependencies.union(resultCSSDependencies);
+      mergedResult.jsDependencies = mergedResult.jsDependencies.union(resultJSDependencies);
+
+      mergedResult.html += resultHTML;
+      mergedResult.htmlDependencies = mergedResult.htmlDependencies.union(resultHTMLDependencies);
+    }
+  }
+
+  // Merge in any component-level CSS/JS; the render result returned by the component only has CSS/JS from its children
   const componentCSS = component.css?.();
   if (componentCSS) {
     for (const bundleName in componentCSS.cssBundles) {
-      cssBundles[bundleName] ??= new Set();
-      cssBundles[bundleName].add(componentCSS.cssBundles[bundleName]);
+      mergedResult.cssBundles[bundleName] ??= new Set();
+      mergedResult.cssBundles[bundleName].add(componentCSS.cssBundles[bundleName]);
     }
     for (const dependency of componentCSS.cssDependencies) {
-      cssDependencies.add(dependency);
+      mergedResult.cssDependencies.add(dependency);
     }
   }
 
   const componentJS = component.js?.();
   if (componentJS) {
     for (const bundleName in componentJS.jsBundles) {
-      jsBundles[bundleName] ??= new Set();
-      jsBundles[bundleName].add(componentJS.jsBundles[bundleName]);
+      mergedResult.jsBundles[bundleName] ??= new Set();
+      mergedResult.jsBundles[bundleName].add(componentJS.jsBundles[bundleName]);
     }
     for (const dependency of componentJS.jsDependencies) {
-      jsDependencies.add(dependency);
+      mergedResult.jsDependencies.add(dependency);
     }
   }
 
-  return {
-    cssBundles,
-    cssDependencies,
-    jsBundles,
-    jsDependencies,
-    ...restRenderRestults,
-  };
+  return mergedResult;
 }

@@ -27,14 +27,21 @@ export function js(strings, ...values) {
 
     let currentBundleName = DEFAULT_BUNDLE_NAME;
 
+    let currentBundleChunk = "";
+
     for (let i = 0; i < strings.length; i++) {
       const str = strings[i];
+      currentBundleChunk += str;
       const currentBundleArray = (rawJSBundles[currentBundleName] ??= []);
-      currentBundleArray.push(str);
 
       const value = values[i];
 
       if (isBundleImportObject(value)) {
+        if (currentBundleChunk) {
+          currentBundleArray.push(currentBundleChunk.trim());
+          currentBundleChunk = "";
+        }
+
         const importFilePath = getBundleImportFilePath(value);
         jsBundleDependencies.add(importFilePath);
         let importBundleName = currentBundleName;
@@ -45,21 +52,33 @@ export function js(strings, ...values) {
         try {
           const fileContents = getBundleImportFileContents(value);
           const importBundleArray = (rawJSBundles[importBundleName] ??= []);
-          importBundleArray.push(fileContents);
+          importBundleArray.push(fileContents.trim());
         } catch (err) {
           throw new Error(`bundle.import failed to import file at path "${importFilePath}"`, {
             cause: err,
           });
         }
       } else if (isBundleObject(value)) {
+        if (currentBundleChunk) {
+          currentBundleArray.push(currentBundleChunk.trim());
+          currentBundleChunk = "";
+        }
+
         const bundleName = getBundleName(value);
         if (bundleName !== undefined) {
           currentBundleName = bundleName;
         }
       } else if (value !== undefined && value !== null) {
-        // If the value is not a bundle object, append it to the current bundle as a string
-        currentBundleArray.push(String(value));
+        // If the value is not a bundle object, append it to the current chunk as a string
+        currentBundleChunk += String(value);
       }
+    }
+
+    if (currentBundleChunk) {
+      // If we have a remaining chunk which hasn't been committed to the bundle yet,
+      // commit it now.
+      const currentBundleArray = (rawJSBundles[currentBundleName] ??= []);
+      currentBundleArray.push(currentBundleChunk.trim());
     }
 
     /**
@@ -68,7 +87,7 @@ export function js(strings, ...values) {
     const jsBundles = {};
 
     for (const bundleName in rawJSBundles) {
-      const combinedBundleString = rawJSBundles[bundleName].join("").trim();
+      const combinedBundleString = rawJSBundles[bundleName].join("\n").trim();
       if (!combinedBundleString) {
         // Skip empty bundles
         continue;

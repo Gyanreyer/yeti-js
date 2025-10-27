@@ -103,6 +103,16 @@ export const isBundleImportObject = (maybeBundleImportObj) =>
   typeof maybeBundleImportObj[importFilePathSymbol] === "string";
 
 /**
+ * @overload
+ * @param {BundleObject} bundleObj
+ * @returns {string}
+ */
+/**
+ * @overload
+ * @param {BundleImportObject} bundleImportObj
+ * @returns {string | undefined}
+ */
+/**
  * @param {BundleObject | BundleImportObject} bundleObj
  * @returns {string | undefined}
  */
@@ -123,7 +133,7 @@ export const getBundleImportFileContents = (bundleImportObj) => {
   return readFileSync(filePath, "utf8");
 }
 
-export const bundleSrcPrefix = "__bundle__";
+export const bundleSrcPrefix = "@bundle/";
 export const bundleSrcPrefixLength = bundleSrcPrefix.length;
 
 /**
