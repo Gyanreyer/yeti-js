@@ -17,12 +17,12 @@ export const isDocumentNode = (node) => node.nodeName === "#document";
  * @returns {Parse5Types.Element | null}
  */
 export const queryElement = (node, callback) => {
-  if (!isDocumentNode(node) && callback(node)) {
-    return node;
-  }
-
   for (const childNode of node.childNodes) {
     if (defaultTreeAdapter.isElementNode(childNode)) {
+      if (callback(childNode)) {
+        return childNode;
+      }
+
       const result = queryElement(childNode, callback);
       if (result) {
         return result;

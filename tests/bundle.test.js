@@ -1,17 +1,17 @@
 import { describe, test } from 'node:test';
-
-import { getConfig, updateConfig } from '../../src/config.js';
-import { bundle, bundleNameSymbol, importFilePathSymbol } from '../../src/bundle.js';
 import { fileURLToPath } from 'node:url';
 
+import { getConfig, updateConfig } from '../src/config.js';
+import { bundle, bundleNameSymbol, importFilePathSymbol } from '../src/bundle.js';
+
 describe('bundle module', () => {
-  test('bundle() throws on wildcard', async ({
+  test('bundle() throws on wildcard', ({
     assert,
   }) => {
     assert.throws(() => bundle("*"), new Error('bundle() called with reserved wildcard bundle name "*"'));
   });
 
-  test("bundle() returns correctly formed bundle descriptor object", async ({ assert }) => {
+  test("bundle() returns correctly formed bundle descriptor object", ({ assert }) => {
     assert.deepEqual(
       bundle("my-bundle"),
       {
@@ -21,7 +21,7 @@ describe('bundle module', () => {
     );
   });
 
-  test("bundle() uses default bundle name when none provided", async ({ assert }) => {
+  test("bundle() uses default bundle name when none provided", ({ assert }) => {
     assert.deepEqual(
       bundle(),
       {
@@ -31,11 +31,11 @@ describe('bundle module', () => {
     );
   });
 
-  test('bundle.import() throws on wildcard', async ({ assert }) => {
+  test('bundle.import() throws on wildcard', ({ assert }) => {
     assert.throws(() => bundle.import("some/path", "*"), new Error('bundle.import() called with reserved wildcard bundle name "*"'));
   });
 
-  test("bundle.import() resolves file URL paths as expected", async ({ assert }) => {
+  test("bundle.import() resolves file URL paths as expected", ({ assert }) => {
     assert.deepEqual(
       bundle.import("file:///some/path.js"),
       {
@@ -46,7 +46,7 @@ describe('bundle module', () => {
     );
   });
 
-  test("bundle.import() resolves absolute paths relative to config's input dir", async ({ assert, after }) => {
+  test("bundle.import() resolves absolute paths relative to config's input dir", ({ assert, after }) => {
     // Hang onto the current config to restore after the test
     const prevConfig = structuredClone(getConfig());
     const inputDir = fileURLToPath(import.meta.resolve("../../src"));
@@ -67,7 +67,7 @@ describe('bundle module', () => {
     updateConfig(prevConfig);
   });
 
-  test("bundle.import() resolves relative paths as expected", async ({ assert }) => {
+  test("bundle.import() resolves relative paths as expected", ({ assert }) => {
     assert.deepEqual(
       bundle.import("./path.js", "my-bundle"),
       {
@@ -78,7 +78,7 @@ describe('bundle module', () => {
     );
   });
 
-  test("bundle.src() creates a placeholder src string as expected", async ({ assert }) => {
+  test("bundle.src() creates a placeholder src string as expected", ({ assert }) => {
     const result = bundle.src("my-bundle");
     assert.equal(
       result,
@@ -87,7 +87,7 @@ describe('bundle module', () => {
     );
   });
 
-  test("bundle.inline() creates a comment placeholder for inlining bundles as expected", async ({ assert }) => {
+  test("bundle.inline() creates a comment placeholder for inlining bundles as expected", ({ assert }) => {
     const result = bundle.inline("my-bundle");
     assert.equal(
       result,
