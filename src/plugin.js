@@ -42,9 +42,14 @@ const lazyPreloadOnloadRegex = /\bthis\.rel\s*=\s*['"`]stylesheet['"`]/;
 
 /**
  * @param {EleventyUserConfig} eleventyConfig
- * @param {Omit<YetiConfig, "inputDir" | "outputDir">} userConfig
+ * @param {Omit<Partial<YetiConfig>, "inputDir" | "outputDir">} userConfig
  */
 export default function yetiPlugin(eleventyConfig, userConfig = {}) {
+  const {
+    pageTemplateFileExtension,
+    minify,
+  } = updateConfig(userConfig)
+
   eleventyConfig.on("eleventy.before",
     /**
      * @param {{
@@ -64,7 +69,7 @@ export default function yetiPlugin(eleventyConfig, userConfig = {}) {
       })
     });
 
-  eleventyConfig.addTemplateFormats("page.js");
+  eleventyConfig.addTemplateFormats(pageTemplateFileExtension);
 
   /**
    * @type {{
@@ -93,20 +98,26 @@ export default function yetiPlugin(eleventyConfig, userConfig = {}) {
   const encoder = new TextEncoder();
   const decoder = new TextDecoder();
 
-  eleventyConfig.addExtension(["page.js"], {
-    key: "page.js",
+  eleventyConfig.addExtension([pageTemplateFileExtension], {
+    key: pageTemplateFileExtension,
     useJavaScriptImport: true,
     /**
      * @param {string} inputPath
      */
     async getInstanceFromInputPath(inputPath) {
-      const mod = await import(inputPath);
+      const mod = await import(
+        // 11ty makes input paths relative to the cwd, so we need to resolve from there
+        resolve(process.cwd(), inputPath)
+      );
       return {
         pageComponent: mod.default,
         config: mod.config || {},
       };
     },
     getData: ["config"],
+    compileOptions: {
+      spiderJavaScriptDependencies: true,
+    },
     /**
      * @param {Object} compileContext 
      * @param {Component} compileContext.pageComponent
@@ -270,9 +281,6 @@ export default function yetiPlugin(eleventyConfig, userConfig = {}) {
           rootHTMLTag.childNodes.unshift(newHeadTag);
           newHeadTag.parentNode = rootHTMLTag;
         }
-
-        // Clear head nodes object for garbage collection
-        deduplicatedHeadNodes = {};
 
         /**
          * @type {Set<Parse5Types.Element>}
@@ -663,7 +671,7 @@ export default function yetiPlugin(eleventyConfig, userConfig = {}) {
               const { code } = transformCSS({
                 filename: `${encodeURIComponent(data.page.url)}__<style>(${styleTagIndex}).css`,
                 code: encoder.encode(styleTagText),
-                minify: true,
+                minify,
                 include: Features.Nesting,
               });
               styleTagText = processedInlineBundleCache[styleTagContentHash] = decoder.decode(code);
@@ -696,7 +704,7 @@ export default function yetiPlugin(eleventyConfig, userConfig = {}) {
               scriptTagText = processedInlineBundleCache[scriptTagContentHash];
             } else {
               const { code: transformedCode } = await transformJS(scriptTagText, {
-                minify: true,
+                minify,
                 target: ["es2020"],
                 format: "esm",
                 sourcefile: `${encodeURIComponent(data.page.url)}__<script>(${scriptTagIndex}).js`,
@@ -731,9 +739,8 @@ export default function yetiPlugin(eleventyConfig, userConfig = {}) {
      * }} params
      */
     async (
-      { directories: {
-        output
-      },
+      {
+        directories: { output },
       }
     ) => {
       /**
@@ -750,53 +757,61 @@ export default function yetiPlugin(eleventyConfig, userConfig = {}) {
       }
 
       const cssOutputDir = resolve(join(output, "css"));
-      try {
-        await access(cssOutputDir);
-      } catch (err) {
-        await mkdir(cssOutputDir, { recursive: true });
+      /**
+       * @type {Promise<unknown>}
+       */
+      let processCSSBundlesPromise = Promise.resolve();
+
+      const combinedBundleKeyValuePairs = Object.entries(combinedCssBundles);
+      if (combinedBundleKeyValuePairs.length > 0) {
+        try {
+          await access(cssOutputDir);
+        } catch (err) {
+          await mkdir(cssOutputDir, { recursive: true });
+        }
+
+        processCSSBundlesPromise = Promise.allSettled(
+          combinedBundleKeyValuePairs.map(async ([bundleName, cssChunkSet]) => {
+            const cssContent = Array.from(cssChunkSet.values()).join("");
+            if (cssContent.length === 0) {
+              return;
+            }
+
+            const outputFilePath = join(cssOutputDir, `${bundleName}.css`);
+
+            const hash = createHash("md5").update(cssContent).digest("hex");
+            if (bundleHashes[outputFilePath] === hash) {
+              // Skip re-bundling if the content hash matches the cached hash
+              return;
+            }
+            bundleHashes[outputFilePath] = hash;
+
+            /**
+             * @type {Uint8Array}
+             */
+            let code;
+
+            try {
+              ({ code } = await transformCSS({
+                filename: `${bundleName}.css`,
+                code: encoder.encode(cssContent),
+                minify,
+                include: Features.Nesting,
+              }));
+            } catch (err) {
+              console.error(`Error processing CSS bundle ${bundleName}:`, err);
+              throw new Error(`Error processing CSS bundle ${bundleName}`, {
+                cause: err,
+              });
+            }
+
+
+            console.log("Writing CSS bundle", bundleName, "to", outputFilePath);
+
+            await writeFile(outputFilePath, code, "utf8");
+          })
+        );
       }
-
-      await Promise.allSettled(
-        Object.entries(combinedCssBundles).map(async ([bundleName, cssChunkSet]) => {
-          const cssContent = Array.from(cssChunkSet.values()).join("");
-          if (cssContent.length === 0) {
-            return;
-          }
-
-          const outputFilePath = join(cssOutputDir, `${bundleName}.css`);
-
-          const hash = createHash("md5").update(cssContent).digest("hex");
-          if (bundleHashes[outputFilePath] === hash) {
-            // Skip re-bundling if the content hash matches the cached hash
-            return;
-          }
-          bundleHashes[outputFilePath] = hash;
-
-          /**
-           * @type {Uint8Array}
-           */
-          let code;
-
-          try {
-            ({ code } = await transformCSS({
-              filename: `${bundleName}.css`,
-              code: encoder.encode(cssContent),
-              minify: true,
-              include: Features.Nesting,
-            }));
-          } catch (err) {
-            console.error(`Error processing CSS bundle ${bundleName}:`, err);
-            throw new Error(`Error processing CSS bundle ${bundleName}`, {
-              cause: err,
-            });
-          }
-
-
-          console.log("Writing CSS bundle", bundleName, "to", outputFilePath);
-
-          await writeFile(outputFilePath, code, "utf8");
-        })
-      );
 
       /**
        * @type {Record<string, Set<string>>}
@@ -812,89 +827,99 @@ export default function yetiPlugin(eleventyConfig, userConfig = {}) {
       }
 
       const jsOutputDir = resolve(join(output, "js"));
-      try {
-        await access(jsOutputDir);
-      } catch (err) {
-        await mkdir(jsOutputDir, { recursive: true });
+      /**
+       * @type {Promise<unknown>}
+       */
+      let processJSBundlesPromise = Promise.resolve();
+
+      const combinedJSBundleKeyValuePairs = Object.entries(combinedJsBundles);
+      if (combinedJSBundleKeyValuePairs.length > 0) {
+        try {
+          await access(jsOutputDir);
+        } catch (err) {
+          await mkdir(jsOutputDir, { recursive: true });
+        }
+
+        processJSBundlesPromise = Promise.allSettled(
+          Object.entries(combinedJsBundles).map(async ([bundleName, jsChunkSet]) => {
+            const jsContent = Array.from(jsChunkSet.values()).join("");
+            if (jsContent.length === 0) {
+              return;
+            }
+
+            const outputFilePath = join(jsOutputDir, `${bundleName}.js`);
+
+            const hash = createHash("md5").update(jsContent).digest("hex");
+            if (bundleHashes[outputFilePath] === hash) {
+              // Skip re-bundling if the content hash matches the cached hash
+              return;
+            }
+            bundleHashes[outputFilePath] = hash;
+
+            /**
+             * @type {string}
+             */
+            let code;
+            /**
+             * @type {string}
+             */
+            let sourceMap;
+
+            try {
+              const result = await transformJS(jsContent, {
+                minify,
+                target: ["es2020"],
+                format: "esm",
+                sourcemap: "external",
+                sourcefile: `${bundleName}.js`,
+              });
+              code = `${result.code}//# sourceMappingURL=${bundleName}.js.map`;
+              sourceMap = result.map;
+            } catch (err) {
+              if (err instanceof Error && err.stack) {
+                console.error(`${styleText("red", `Error processing JS bundle "${bundleName}"`)}:\n${styleText("yellow", err.message.replace(/^/gm, "  "))}`);
+                // Parse line number and column from esbuild error stack and log lines above and below for context,
+                // highlighting the specified column.
+                const stackLines = err.stack.split("\n").slice(0, 2);
+                const lineColMatch = stackLines[1].match(/:(\d+):(\d+)/);
+                if (lineColMatch) {
+                  const lineNum = parseInt(lineColMatch[1], 10);
+                  const colNum = parseInt(lineColMatch[2], 10);
+                  const jsContentLines = jsContent.split("\n");
+                  const contextRadius = 2;
+                  const startLine = Math.max(0, lineNum - contextRadius - 1);
+                  const endLine = Math.min(jsContentLines.length, lineNum + contextRadius);
+                  for (let i = startLine; i < endLine; ++i) {
+                    const isErrorLine = (i + 1 === lineNum);
+                    const lineIndicator = isErrorLine ? ">" : " ";
+                    const lineContent = jsContentLines[i];
+                    console.error(styleText(isErrorLine ? "white" : "dim", `${lineIndicator} ${i + 1} | ${lineContent}`));
+                    if (i + 1 === lineNum) {
+                      console.error(styleText("white", " ".repeat(colNum + (`${i + 1} | `).length + 1) + "^"));
+                    }
+                  }
+                  // Log an extra line after the code frame for spacing
+                  console.log("");
+                }
+              } else {
+                console.error(`Unknown error processing JS bundle ${bundleName}:`, err);
+              }
+              throw new Error(`Error processing JS bundle ${bundleName}`, {
+                cause: err,
+              });
+            }
+
+            const outputSourceMapPath = join(jsOutputDir, `${bundleName}.js.map`);
+
+            console.log("Writing JS bundle", bundleName, "to", outputFilePath);
+
+            await writeFile(outputFilePath, code, "utf8");
+            await writeFile(outputSourceMapPath, sourceMap, "utf8");
+          })
+        );
       }
 
-      await Promise.allSettled(
-        Object.entries(combinedJsBundles).map(async ([bundleName, jsChunkSet]) => {
-          const jsContent = Array.from(jsChunkSet.values()).join("");
-          if (jsContent.length === 0) {
-            return;
-          }
-
-          const outputFilePath = join(jsOutputDir, `${bundleName}.js`);
-
-          const hash = createHash("md5").update(jsContent).digest("hex");
-          if (bundleHashes[outputFilePath] === hash) {
-            // Skip re-bundling if the content hash matches the cached hash
-            return;
-          }
-          bundleHashes[outputFilePath] = hash;
-
-          /**
-           * @type {string}
-           */
-          let code;
-          /**
-           * @type {string}
-           */
-          let sourceMap;
-
-          try {
-            const result = await transformJS(jsContent, {
-              minify: true,
-              target: ["es2020"],
-              format: "esm",
-              sourcemap: "external",
-              sourcefile: `${bundleName}.js`,
-            });
-            code = `${result.code}//# sourceMappingURL=${bundleName}.js.map`;
-            sourceMap = result.map;
-          } catch (err) {
-            if (err instanceof Error && err.stack) {
-              console.error(`${styleText("red", `Error processing JS bundle "${bundleName}"`)}:\n${styleText("yellow", err.message.replace(/^/gm, "  "))}`);
-              // Parse line number and column from esbuild error stack and log lines above and below for context,
-              // highlighting the specified column.
-              const stackLines = err.stack.split("\n").slice(0, 2);
-              const lineColMatch = stackLines[1].match(/:(\d+):(\d+)/);
-              if (lineColMatch) {
-                const lineNum = parseInt(lineColMatch[1], 10);
-                const colNum = parseInt(lineColMatch[2], 10);
-                const jsContentLines = jsContent.split("\n");
-                const contextRadius = 2;
-                const startLine = Math.max(0, lineNum - contextRadius - 1);
-                const endLine = Math.min(jsContentLines.length, lineNum + contextRadius);
-                for (let i = startLine; i < endLine; ++i) {
-                  const isErrorLine = (i + 1 === lineNum);
-                  const lineIndicator = isErrorLine ? ">" : " ";
-                  const lineContent = jsContentLines[i];
-                  console.error(styleText(isErrorLine ? "white" : "dim", `${lineIndicator} ${i + 1} | ${lineContent}`));
-                  if (i + 1 === lineNum) {
-                    console.error(styleText("white", " ".repeat(colNum + (`${i + 1} | `).length + 1) + "^"));
-                  }
-                }
-                // Log an extra line after the code frame for spacing
-                console.log("");
-              }
-            } else {
-              console.error(`Unknown error processing JS bundle ${bundleName}:`, err);
-            }
-            throw new Error(`Error processing JS bundle ${bundleName}`, {
-              cause: err,
-            });
-          }
-
-          const outputSourceMapPath = join(jsOutputDir, `${bundleName}.js.map`);
-
-          console.log("Writing JS bundle", bundleName, "to", outputFilePath);
-
-          await writeFile(outputFilePath, code, "utf8");
-          await writeFile(outputSourceMapPath, sourceMap, "utf8");
-        })
-      );
+      await Promise.allSettled([processCSSBundlesPromise, processJSBundlesPromise]);
     });
 
   return {
