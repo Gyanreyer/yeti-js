@@ -16,7 +16,7 @@ import { fileURLToPath } from "node:url";
 
 /**
  * @import UserConfig from '@11ty/eleventy/src/UserConfig.js';
- * @import { YetiConfig } from '../../src/config.js';
+ * @import { YetiConfig } from '../../src/types.js';
  */
 
 /**
@@ -84,5 +84,9 @@ describe("Yeti Plugin", () => {
 
   test("Page with Bundle Imports", async () => {
     await testInputDir(fileURLToPath(import.meta.resolve("./pageWithBundleImports")));
+  });
+
+  test("Pages with Components", async () => {
+    await testInputDir(fileURLToPath(import.meta.resolve("./pagesWithComponents")));
   });
 });

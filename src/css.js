@@ -1,12 +1,7 @@
 import { DEFAULT_BUNDLE_NAME, getBundleImportFileContents, getBundleImportFilePath, getBundleName, isBundleImportObject, isBundleObject } from "./bundle.js";
 
 /**
- * @typedef {{
- *  cssBundles: {
- *    [bundleName: string]: string;
- *  };
- *  cssDependencies: string[];
- * }} CSSResult
+ * @import { CSSResult } from './types';
  */
 
 /**
@@ -99,7 +94,7 @@ export function css(strings, ...values) {
 
     return {
       cssBundles,
-      cssDependencies: Array.from(cssBundleDependencies),
+      cssDependencies: cssBundleDependencies,
     };
   };
 }

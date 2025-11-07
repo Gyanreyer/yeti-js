@@ -4,6 +4,7 @@
   "type": "module",
   "author": "Ryan Geyer",
   "license": "MIT",
+  "types": "./src/types.ts",
   "scripts": {
     "test": "node --test"
   },

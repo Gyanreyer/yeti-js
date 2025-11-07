@@ -5,8 +5,7 @@ import { getBundleImportFileContents, getBundleImportFilePath, isBundleImportObj
 import { escapeHTML } from "./utils/escapeHTML.js";
 
 /**
- * @import { JSResult } from "./js.js"
- * @import { CSSResult } from "./css.js"
+ * @import { JSResult, CSSResult } from "./types"
  * @import { BundleObject } from "./bundle.js"
  */
 

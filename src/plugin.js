@@ -13,19 +13,18 @@ import {
 import { createHash, randomUUID } from 'node:crypto';
 import { styleText } from 'node:util';
 
-import { getConfig, updateConfig } from './config.js';
+import { updateConfig } from './config.js';
 
 import { bundleSrcPrefix, bundleSrcPrefixLength, inlinedBundleRegex, inlinedWildcardBundle as inlinedWildCardBundle, WILDCARD_BUNDLE_NAME } from './bundle.js';
-import { renderComponent } from './renderComponent.js';
+import { renderPageComponent } from './renderComponent.js';
 import { queryElement, transformDocumentNodes, TRANSFORM_ACTIONS } from './utils/document.js';
 import { ensureHTMLHasDoctype } from './utils/ensureHTMLHasDoctype.js';
 
 /**
  * @import EleventyUserConfig from '@11ty/eleventy/src/UserConfig.js';
  * @import { DefaultTreeAdapterTypes as Parse5Types } from 'parse5';
- * @import { Component } from './renderComponent.js';
  * @import { TransformResult } from './utils/document.js';
- * @import { YetiConfig } from './config.js';
+ * @import { YetiConfig, EleventyPageData, YetiPageComponent } from './types';
  */
 
 
@@ -47,7 +46,16 @@ const lazyPreloadOnloadRegex = /\bthis\.rel\s*=\s*['"`]stylesheet['"`]/;
 export default function yetiPlugin(eleventyConfig, userConfig = {}) {
   const {
     pageTemplateFileExtension,
-    minify,
+    css: {
+      minify: shouldMinifyCSS,
+      sourceMaps: shouldGenerateCSSSourceMaps,
+      outputDir: cssOutputDir,
+    },
+    js: {
+      minify: shouldMinifyJS,
+      sourceMaps: shouldGenerateJSSourceMaps,
+      outputDir: jsOutputDir,
+    },
   } = updateConfig(userConfig)
 
   eleventyConfig.on("eleventy.before",
@@ -119,8 +127,8 @@ export default function yetiPlugin(eleventyConfig, userConfig = {}) {
       spiderJavaScriptDependencies: true,
     },
     /**
-     * @param {Object} compileContext 
-     * @param {Component} compileContext.pageComponent
+     * @param {Object} compileContext
+     * @param {YetiPageComponent} compileContext.pageComponent
      * @param {string} inputPath
      *
      * @returns {(data: any) => Promise<string>}
@@ -139,12 +147,7 @@ export default function yetiPlugin(eleventyConfig, userConfig = {}) {
       const processedInlineBundleCache = {};
 
       /**
-       * @param {{
-       *  page: {
-       *   url: string;
-       *   outputPath: string;
-       *  };
-       * } & {
+       * @param {EleventyPageData & {
        *  [key: string]: any;
        * }} data
        */
@@ -156,7 +159,7 @@ export default function yetiPlugin(eleventyConfig, userConfig = {}) {
           cssDependencies: renderedCSSDeps,
           jsDependencies: renderedJSDeps,
           htmlDependencies: renderedHTMLDeps,
-        } = await renderComponent(pageComponent, data);
+        } = await renderPageComponent(pageComponent, data);
 
         /** @type {any} */(this).addDependencies(inputPath, [...renderedCSSDeps, ...renderedJSDeps, ...renderedHTMLDeps]);
 
@@ -671,7 +674,7 @@ export default function yetiPlugin(eleventyConfig, userConfig = {}) {
               const { code } = transformCSS({
                 filename: `${encodeURIComponent(data.page.url)}__<style>(${styleTagIndex}).css`,
                 code: encoder.encode(styleTagText),
-                minify,
+                minify: shouldMinifyCSS,
                 include: Features.Nesting,
               });
               styleTagText = processedInlineBundleCache[styleTagContentHash] = decoder.decode(code);
@@ -704,7 +707,7 @@ export default function yetiPlugin(eleventyConfig, userConfig = {}) {
               scriptTagText = processedInlineBundleCache[scriptTagContentHash];
             } else {
               const { code: transformedCode } = await transformJS(scriptTagText, {
-                minify,
+                minify: shouldMinifyJS,
                 target: ["es2020"],
                 format: "esm",
                 sourcefile: `${encodeURIComponent(data.page.url)}__<script>(${scriptTagIndex}).js`,
@@ -756,7 +759,7 @@ export default function yetiPlugin(eleventyConfig, userConfig = {}) {
         }
       }
 
-      const cssOutputDir = resolve(join(output, "css"));
+      const resolvedCSSOutputDir = resolve(join(output, cssOutputDir));
       /**
        * @type {Promise<unknown>}
        */
@@ -765,9 +768,9 @@ export default function yetiPlugin(eleventyConfig, userConfig = {}) {
       const combinedBundleKeyValuePairs = Object.entries(combinedCssBundles);
       if (combinedBundleKeyValuePairs.length > 0) {
         try {
-          await access(cssOutputDir);
+          await access(resolvedCSSOutputDir);
         } catch (err) {
-          await mkdir(cssOutputDir, { recursive: true });
+          await mkdir(resolvedCSSOutputDir, { recursive: true });
         }
 
         processCSSBundlesPromise = Promise.allSettled(
@@ -777,7 +780,10 @@ export default function yetiPlugin(eleventyConfig, userConfig = {}) {
               return;
             }
 
-            const outputFilePath = join(cssOutputDir, `${bundleName}.css`);
+            const outputFileName = `${bundleName}.css`;
+            const outputFilePath = join(resolvedCSSOutputDir, outputFileName);
+            const outputMapFileName = `${outputFileName}.map`;
+            const outputMapFilePath = join(resolvedCSSOutputDir, outputMapFileName);
 
             const hash = createHash("md5").update(cssContent).digest("hex");
             if (bundleHashes[outputFilePath] === hash) {
@@ -789,15 +795,29 @@ export default function yetiPlugin(eleventyConfig, userConfig = {}) {
             /**
              * @type {Uint8Array}
              */
-            let code;
+            let codeBytes;
+            /**
+             * @type {Uint8Array | null}
+             */
+            let sourceMapBytes = null;
 
             try {
-              ({ code } = await transformCSS({
+              const result = await transformCSS({
                 filename: `${bundleName}.css`,
                 code: encoder.encode(cssContent),
-                minify,
+                minify: shouldMinifyCSS,
+                sourceMap: shouldGenerateCSSSourceMaps,
                 include: Features.Nesting,
-              }));
+              });
+              codeBytes = result.code;
+              if (shouldGenerateCSSSourceMaps && result.map) {
+                sourceMapBytes = result.map;
+                const sourceMapCommentBytes = encoder.encode(`/*# sourceMappingURL=./${outputMapFileName} */`);
+                const combinedCode = new Uint8Array(codeBytes.length + sourceMapCommentBytes.length);
+                combinedCode.set(codeBytes, 0);
+                combinedCode.set(sourceMapCommentBytes, codeBytes.length);
+                codeBytes = combinedCode;
+              }
             } catch (err) {
               console.error(`Error processing CSS bundle ${bundleName}:`, err);
               throw new Error(`Error processing CSS bundle ${bundleName}`, {
@@ -805,10 +825,12 @@ export default function yetiPlugin(eleventyConfig, userConfig = {}) {
               });
             }
 
-
             console.log("Writing CSS bundle", bundleName, "to", outputFilePath);
 
-            await writeFile(outputFilePath, code, "utf8");
+            await writeFile(outputFilePath, codeBytes, "utf8");
+            if (shouldGenerateCSSSourceMaps && sourceMapBytes !== null) {
+              await writeFile(outputMapFilePath, sourceMapBytes, "utf8");
+            }
           })
         );
       }
@@ -847,7 +869,10 @@ export default function yetiPlugin(eleventyConfig, userConfig = {}) {
               return;
             }
 
+            const outputFileName = `${bundleName}.js`;
             const outputFilePath = join(jsOutputDir, `${bundleName}.js`);
+            const outputMapFileName = `${outputFileName}.map`;
+            const outputMapFilePath = join(jsOutputDir, outputMapFileName);
 
             const hash = createHash("md5").update(jsContent).digest("hex");
             if (bundleHashes[outputFilePath] === hash) {
@@ -865,18 +890,16 @@ export default function yetiPlugin(eleventyConfig, userConfig = {}) {
              */
             let sourceMap = null;
 
-            const { sourcemaps: shouldGenerateSourceMap } = getConfig();
-
             try {
               const result = await transformJS(jsContent, {
-                minify,
+                minify: shouldMinifyJS,
                 target: ["es2020"],
                 format: "esm",
-                sourcemap: shouldGenerateSourceMap ? "external" : undefined,
+                sourcemap: shouldGenerateJSSourceMaps ? "external" : undefined,
                 sourcefile: `${bundleName}.js`,
               });
               code = result.code;
-              if (shouldGenerateSourceMap) {
+              if (shouldGenerateCSSSourceMaps && result.map) {
                 code = `${result.code}//# sourceMappingURL=${bundleName}.js.map`;
                 sourceMap = result.map;
               }
@@ -917,9 +940,8 @@ export default function yetiPlugin(eleventyConfig, userConfig = {}) {
             console.log("Writing JS bundle", bundleName, "to", outputFilePath);
 
             await writeFile(outputFilePath, code, "utf8");
-            if (sourceMap !== null) {
-              const outputSourceMapPath = join(jsOutputDir, `${bundleName}.js.map`);
-              await writeFile(outputSourceMapPath, sourceMap, "utf8");
+            if (shouldGenerateJSSourceMaps && sourceMap !== null) {
+              await writeFile(outputMapFilePath, sourceMap, "utf8");
             }
           })
         );

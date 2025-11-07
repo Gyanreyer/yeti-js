@@ -4,7 +4,7 @@ import { bundle } from '../../src/bundle.js';
 import { js } from '../../src/js.js';
 
 /**
- * @import { JSResult } from '../../src/js.js';
+ * @import { JSResult } from '../../src/types.js';
  */
 
 describe('js tagged template function', () => {
@@ -21,7 +21,7 @@ describe('js tagged template function', () => {
 console.log("Hello, world!");
 }`,
       },
-      jsDependencies: [],
+      jsDependencies: new Set(),
     }));
   });
 
@@ -48,7 +48,7 @@ console.log("This is my-bundle");
 console.log("This is another-bundle");
 }`,
       },
-      jsDependencies: [],
+      jsDependencies: new Set(),
     }));
   });
 
@@ -68,10 +68,10 @@ window.alert("This is js-file-1.js");
 window.alert("This is js-file-2.js");
 }`,
       },
-      jsDependencies: [
+      jsDependencies: new Set([
         `${import.meta.dirname}/js-file-1.js`,
         `${import.meta.dirname}/js-file-2.js`,
-      ],
+      ]),
     }));
   });
 
@@ -102,10 +102,10 @@ console.log("In another-bundle");
 window.alert("This is js-file-2.js");
 }`,
       },
-      jsDependencies: [
+      jsDependencies: new Set([
         `${import.meta.dirname}/js-file-1.js`,
         `${import.meta.dirname}/js-file-2.js`,
-      ],
+      ]),
     }));
   });
 

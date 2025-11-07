@@ -1,10 +1,5 @@
 /**
- * @typedef {Object} YetiConfig
- * @property {string} inputDir - The directory where the source files are located. Defaults to "./src".
- * @property {string} outputDir - The directory where the built files will be output. Defaults to "./_site".
- * @property {boolean} minify - Whether to minify the output CSS and JS. Defaults to true.
- * @property {boolean} sourcemaps - Whether to generate sourcemaps for the output CSS and JS. Defaults to false.
- * @property {string} pageTemplateFileExtension - The file extension used for page templates. Defaults to "page.js".
+ * @import { YetiConfig } from './types';
  */
 
 /**
@@ -13,16 +8,55 @@
 const config = {
   inputDir: "",
   outputDir: "",
-  minify: true,
-  sourcemaps: false,
+  js: {
+    minify: true,
+    sourceMaps: false,
+    outputDir: "js",
+  },
+  css: {
+    minify: true,
+    sourceMaps: false,
+    outputDir: "css",
+  },
   pageTemplateFileExtension: "page.js",
+};
+
+/**
+ * @param {unknown} value
+ * @returns {value is Record<string, any>}
+ */
+const isObject = (value) => {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/**
+ * @template {Record<string, any>} T
+ * @param {T} baseConfig
+ * @param {Partial<T>} newConfig
+ * @returns {T}
+ */
+const mergeConfigs = (baseConfig, newConfig) => {
+  const mergedConfig = { ...baseConfig };
+  for (const key in newConfig) {
+    /**
+     * @type {any}
+     */
+    const newValue = newConfig[key];
+    const baseValue = baseConfig[key];
+    if (isObject(newValue) && isObject(baseValue)) {
+      mergedConfig[key] = mergeConfigs(baseValue, /** @type {any} */(newValue));
+    } else {
+      mergedConfig[key] = newValue;
+    }
+  }
+  return mergedConfig;
 };
 
 /**
  * @param {Partial<YetiConfig>} newConfig
  */
 export const updateConfig = (newConfig) => {
-  return Object.assign(config, newConfig);
+  return mergeConfigs(config, newConfig);
 };
 
 export const getConfig = () => config;

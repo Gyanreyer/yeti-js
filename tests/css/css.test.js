@@ -4,7 +4,7 @@ import { bundle } from '../../src/bundle.js';
 import { css } from '../../src/css.js';
 
 /**
- * @import { CSSResult } from '../../src/css.js';
+ * @import { CSSResult } from '../../src/types';
  */
 
 describe('css tagged template function', () => {
@@ -23,7 +23,7 @@ describe('css tagged template function', () => {
         margin: 1000px;
       }`,
       },
-      cssDependencies: [],
+      cssDependencies: new Set([]),
     }));
   });
 
@@ -49,7 +49,7 @@ describe('css tagged template function', () => {
         margin: 0;
       }`,
       },
-      cssDependencies: [],
+      cssDependencies: new Set([]),
     }));
   });
 
@@ -68,10 +68,10 @@ describe('css tagged template function', () => {
   font-family: "Comic Sans";
 }`,
       },
-      cssDependencies: [
+      cssDependencies: new Set([
         `${import.meta.dirname}/reset.css`,
         `${import.meta.dirname}/css-file.css`,
-      ],
+      ]),
     }));
   });
 
@@ -110,11 +110,11 @@ h1 {
   box-sizing: border-box;
 }`,
       },
-      cssDependencies: [
+      cssDependencies: new Set([
         `${import.meta.dirname}/reset.css`,
         `${import.meta.dirname}/css-file.css`,
         `${import.meta.dirname}/css-file-2.css`,
-      ],
+      ]),
     }),
     );
   });
