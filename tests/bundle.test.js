@@ -2,7 +2,7 @@ import { describe, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 
 import { getConfig, updateConfig } from '../src/config.js';
-import { bundle, bundleNameSymbol, importFilePathSymbol } from '../src/bundle.js';
+import { bundle, bundleNameSymbol, importFilePathSymbol, shouldEscapeHTMLSymbol } from '../src/bundle.js';
 
 describe('bundle module', () => {
   test('bundle() throws on wildcard', ({
@@ -75,6 +75,26 @@ describe('bundle module', () => {
         [importFilePathSymbol]: `${import.meta.dirname}/path.js`,
       },
       "bundle.import() should return bundle import object with the relative path resolved relative to the file it was called from",
+    );
+  });
+
+  test("bundle.importHTML() resolves relative paths as expected", ({ assert }) => {
+    assert.deepEqual(
+      bundle.importHTML("./path.html"),
+      {
+        [importFilePathSymbol]: `${import.meta.dirname}/path.html`,
+        [shouldEscapeHTMLSymbol]: false,
+      },
+      "bundle.importHTML() should return bundle HTML import object with the relative path resolved relative to the file it was called from",
+    );
+
+    assert.deepEqual(
+      bundle.importHTML("./other-path.html", true),
+      {
+        [importFilePathSymbol]: `${import.meta.dirname}/other-path.html`,
+        [shouldEscapeHTMLSymbol]: true,
+      },
+      "bundle.importHTML() should return bundle HTML import object with the relative path resolved relative to the file it was called from",
     );
   });
 

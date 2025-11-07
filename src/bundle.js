@@ -38,8 +38,48 @@ export const importFilePathSymbol = Symbol("import-file-path");
  * }} BundleImportObject
  */
 
+export const shouldEscapeHTMLSymbol = Symbol("should-escape-html");
+
+/**
+ * @typedef {{
+ *  [importFilePathSymbol]: string;
+ *  [shouldEscapeHTMLSymbol]: boolean;
+ * }} BundleHTMLImportObject
+ */
+
 const FILE_URL_PREFIX = "file://";
 const FILE_URL_PREFIX_LENGTH = FILE_URL_PREFIX.length;
+
+/**
+ * @param {string} importPath
+ */
+const resolveImportPath = (importPath) => {
+  /**
+ * @type {string}
+ */
+  let resolvedFilePath;
+
+  if (importPath.startsWith(FILE_URL_PREFIX)) {
+    resolvedFilePath = importPath.slice(FILE_URL_PREFIX_LENGTH);
+  } else if (importPath.startsWith("/")) {
+    const { inputDir } = getConfig();
+    // Absolute path; resolve relative to the Eleventy input directory
+    resolvedFilePath = resolve(inputDir, `.${importPath}`);
+  } else if (importPath.startsWith("./") || importPath.startsWith("../")) {
+    // Relative path; resolve relative to the caller file's directory
+    const callSites = getCallSites();
+    const callerDirname = dirname(
+      // Need to go up two levels; first is this resolveImportPath function,
+      // second is the bundle.import()/bundle.importHTML() method calling this,
+      // third is the file which called bundle.import() which we're interested in.
+      callSites[2].scriptName).slice(FILE_URL_PREFIX_LENGTH);
+    resolvedFilePath = resolve(callerDirname, importPath);
+  } else {
+    resolvedFilePath = import.meta.resolve(importPath).slice(FILE_URL_PREFIX_LENGTH);
+  }
+
+  return resolvedFilePath;
+}
 
 /**
  * @param {string} importPath
@@ -52,33 +92,36 @@ bundle.import = (importPath, bundleName) => {
     throw new Error(`bundle.import() called with reserved wildcard bundle name "${WILDCARD_BUNDLE_NAME}"`);
   }
 
-  /**
-   * @type {string}
-   */
-  let resolvedFilePath;
-
-  if (importPath.startsWith(FILE_URL_PREFIX)) {
-    resolvedFilePath = importPath.slice(FILE_URL_PREFIX_LENGTH);
-  } else if (importPath.startsWith("/")) {
-    const { inputDir } = getConfig();
-    // Absolute path; resolve relative to the Eleventy input directory
-    resolvedFilePath = resolve(inputDir, `.${importPath}`);
-  } else if (importPath.startsWith("./") || importPath.startsWith("../")) {
-    // Relative path; resolve relative to the caller file's directory
-    const callSites = getCallSites();
-    const callerDirname = dirname(callSites[1].scriptName).slice(FILE_URL_PREFIX_LENGTH);
-    resolvedFilePath = resolve(callerDirname, importPath);
-  } else {
-    resolvedFilePath = import.meta.resolve(importPath).slice(FILE_URL_PREFIX_LENGTH);
-  }
-
   try {
+    const resolvedFilePath = resolveImportPath(importPath);
     return ({
       [importFilePathSymbol]: resolvedFilePath,
       [bundleNameSymbol]: bundleName,
     })
   } catch (err) {
-    throw new Error(`bundle.import failed to import file at path "${importPath}"`, {
+    throw new Error(`bundle.import failed to resolve path to file at "${importPath}"`, {
+      cause: err,
+    });
+  }
+};
+
+/**
+ * Imports an external file as an HTML fragment.
+ *
+ * @param {string} importPath
+ * @param {boolean} [escape=false] Whether the imported content should be escaped. This will convert characters like `<` and `>` to their HTML entity equivalents,
+ *                                 so only use this for text/attribute content, not HTML fragments.
+ * @returns {BundleHTMLImportObject}
+ */
+bundle.importHTML = (importPath, escape = false) => {
+  try {
+    const resolvedFilePath = resolveImportPath(importPath);
+    return {
+      [importFilePathSymbol]: resolvedFilePath,
+      [shouldEscapeHTMLSymbol]: escape,
+    };
+  } catch (err) {
+    throw new Error(`bundle.importHTML failed to resolve path to file at "${importPath}"`, {
       cause: err,
     });
   }
@@ -95,7 +138,7 @@ export const isBundleObject = (maybeBundleObj) =>
 
 /**
  * @param {unknown} maybeBundleImportObj
- * @returns {maybeBundleImportObj is BundleImportObject}
+ * @returns {maybeBundleImportObj is BundleImportObject | BundleHTMLImportObject}
  */
 export const isBundleImportObject = (maybeBundleImportObj) =>
   typeof maybeBundleImportObj === "object" && maybeBundleImportObj !== null &&
@@ -119,13 +162,13 @@ export const isBundleImportObject = (maybeBundleImportObj) =>
 export const getBundleName = (bundleObj) => bundleObj[bundleNameSymbol];
 
 /**
- * @param {BundleImportObject} bundleImportObj
+ * @param {BundleImportObject | BundleHTMLImportObject} bundleImportObj
  * @returns {string}
  */
 export const getBundleImportFilePath = (bundleImportObj) => bundleImportObj[importFilePathSymbol];
 
 /**
- * @param {BundleImportObject} bundleImportObj
+ * @param {BundleImportObject | BundleHTMLImportObject} bundleImportObj
  * @returns {string}
  */
 export const getBundleImportFileContents = (bundleImportObj) => {

@@ -1,10 +1,13 @@
 import htm from "htm";
 import { fileURLToPath } from "node:url";
 import { getCallSites } from "node:util";
+import { getBundleImportFileContents, getBundleImportFilePath, isBundleImportObject, shouldEscapeHTMLSymbol } from "./bundle.js";
+import { escapeHTML } from "./utils/escapeHTML.js";
 
 /**
  * @import { JSResult } from "./js.js"
  * @import { CSSResult } from "./css.js"
+ * @import { BundleObject } from "./bundle.js"
  */
 
 const voidTagNames = {
@@ -26,23 +29,6 @@ const voidTagNames = {
   'wbr': true,
 }
 
-/**
- * @type {{[char: string]: string}}
- */
-const escapedCharacterMap = {
-  '&': '&amp;',
-  '<': '&lt;',
-  '>': '&gt;',
-  '"': '&quot;',
-  "'": '&apos;'
-};
-
-const escapeCharactersRegex = new RegExp(`[${Object.keys(escapedCharacterMap).join('')}]`, 'g');
-
-/**
- * @param {string} str
- */
-const escape = (str) => String(str).replace(escapeCharactersRegex, (s) => s in escapedCharacterMap ? escapedCharacterMap[s] : s);
 
 const setInnerHTMLAttr = 'dangerouslySetInnerHTML';
 /**
@@ -69,7 +55,7 @@ const DOMAttributeNames = {
  */
 
 /**
- * @typedef {Array<string | RenderResult>} Children
+ * @typedef {Array<string | RenderResult | BundleObject | unknown>} Children
  */
 
 /**
@@ -211,7 +197,7 @@ function h(tagNameOrComponent, attrs, ...children) {
     if (attrs) {
       for (const attrName in attrs) {
         if (attrs[attrName] !== false && attrs[attrName] != null && attrName !== setInnerHTMLAttr) {
-          serializedHTMLStr += ` ${attrName in DOMAttributeNames ? DOMAttributeNames[attrName] : escape(attrName)}="${escape(attrs[attrName])}"`;
+          serializedHTMLStr += ` ${attrName in DOMAttributeNames ? DOMAttributeNames[attrName] : escapeHTML(attrName)}="${escapeHTML(attrs[attrName])}"`;
         }
       }
     }
@@ -223,15 +209,13 @@ function h(tagNameOrComponent, attrs, ...children) {
       serializedHTMLStr += attrs[setInnerHTMLAttr].__html;
     } else {
       /**
-       * @param {Children | Children[number]} children 
+       * @param {Children | Children[number]} children
        */
       const addChildrenToSerializedStr = (children) => {
         if (Array.isArray(children)) {
           for (const child of children) {
             addChildrenToSerializedStr(child);
           }
-        } else if (typeof children === "string") {
-          serializedHTMLStr += escape(children);
         } else if (isRenderResultChild(children)) {
           serializedHTMLStr += children.html;
           if (children.cssBundles) {
@@ -265,6 +249,24 @@ function h(tagNameOrComponent, attrs, ...children) {
               htmlDependencies.add(dependency);
             }
           }
+        } else if (isBundleImportObject(children)) {
+          try {
+            const importFilePath = getBundleImportFilePath(children);
+            htmlDependencies.add(importFilePath);
+            const importFileContents = getBundleImportFileContents(children);
+            if (shouldEscapeHTMLSymbol in children && children[shouldEscapeHTMLSymbol]) {
+              serializedHTMLStr += escapeHTML(importFileContents);
+            } else {
+              serializedHTMLStr += importFileContents;
+            }
+          } catch (err) {
+            const importFilePath = getBundleImportFilePath(children);
+            throw new Error(`bundle.importHTML failed to import file at path "${importFilePath}"`, {
+              cause: err,
+            });
+          }
+        } else {
+          serializedHTMLStr += escapeHTML(String(children));
         }
       };
 
