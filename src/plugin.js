@@ -13,7 +13,7 @@ import {
 import { createHash, randomUUID } from 'node:crypto';
 import { styleText } from 'node:util';
 
-import { updateConfig } from './config.js';
+import { getConfig, updateConfig } from './config.js';
 
 import { bundleSrcPrefix, bundleSrcPrefixLength, inlinedBundleRegex, inlinedWildcardBundle as inlinedWildCardBundle, WILDCARD_BUNDLE_NAME } from './bundle.js';
 import { renderComponent } from './renderComponent.js';
@@ -861,20 +861,25 @@ export default function yetiPlugin(eleventyConfig, userConfig = {}) {
              */
             let code;
             /**
-             * @type {string}
+             * @type {string | null}
              */
-            let sourceMap;
+            let sourceMap = null;
+
+            const { sourcemaps: shouldGenerateSourceMap } = getConfig();
 
             try {
               const result = await transformJS(jsContent, {
                 minify,
                 target: ["es2020"],
                 format: "esm",
-                sourcemap: "external",
+                sourcemap: shouldGenerateSourceMap ? "external" : undefined,
                 sourcefile: `${bundleName}.js`,
               });
-              code = `${result.code}//# sourceMappingURL=${bundleName}.js.map`;
-              sourceMap = result.map;
+              code = result.code;
+              if (shouldGenerateSourceMap) {
+                code = `${result.code}//# sourceMappingURL=${bundleName}.js.map`;
+                sourceMap = result.map;
+              }
             } catch (err) {
               if (err instanceof Error && err.stack) {
                 console.error(`${styleText("red", `Error processing JS bundle "${bundleName}"`)}:\n${styleText("yellow", err.message.replace(/^/gm, "  "))}`);
@@ -909,12 +914,13 @@ export default function yetiPlugin(eleventyConfig, userConfig = {}) {
               });
             }
 
-            const outputSourceMapPath = join(jsOutputDir, `${bundleName}.js.map`);
-
             console.log("Writing JS bundle", bundleName, "to", outputFilePath);
 
             await writeFile(outputFilePath, code, "utf8");
-            await writeFile(outputSourceMapPath, sourceMap, "utf8");
+            if (sourceMap !== null) {
+              const outputSourceMapPath = join(jsOutputDir, `${bundleName}.js.map`);
+              await writeFile(outputSourceMapPath, sourceMap, "utf8");
+            }
           })
         );
       }

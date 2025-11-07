@@ -1,0 +1,1 @@
+I'm some <strong>escaped text</strong> in a text file.

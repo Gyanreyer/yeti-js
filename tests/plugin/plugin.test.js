@@ -4,7 +4,7 @@ import {
   test,
 } from "node:test";
 import assert from "node:assert/strict";
-import { readdir, readFile, rm } from "node:fs/promises";
+import { glob, readdir, readFile, rm } from "node:fs/promises";
 
 import {
   Eleventy
@@ -31,6 +31,7 @@ const getEleventyInstance = (inputDir, outputDir, config = {}) => {
      */
     config(eleventyConfig) {
       eleventyConfig.ignores.add("**/_expected/**");
+      eleventyConfig.ignores.add("**/*.html");
       eleventyConfig.addPlugin(yetiPlugin, config);
     },
   });
@@ -54,12 +55,12 @@ const testInputDir = async (inputDir) => {
 
   const eleventy = getEleventyInstance(inputDir, siteOutputDir);
   await eleventy.write();
-  const actualSiteFiles = await readdir(siteOutputDir, {
-    recursive: true,
-  });
-  const expectedSiteFiles = await readdir(expectedOutputDir, {
-    recursive: true,
-  });
+  const actualSiteFiles = (await Array.fromAsync(glob(`${siteOutputDir}/**/*.*`))).map((filePath) =>
+    filePath.slice(siteOutputDir.length + 1),
+  );
+  const expectedSiteFiles = await (await Array.fromAsync(glob(`${expectedOutputDir}/**/*.*`))).map((filePath) =>
+    filePath.slice(expectedOutputDir.length + 1),
+  );
 
   assert.deepStrictEqual(actualSiteFiles.sort(), expectedSiteFiles.sort());
 
@@ -79,5 +80,9 @@ const testInputDir = async (inputDir) => {
 describe("Yeti Plugin", () => {
   test("Simple Page", async () => {
     await testInputDir(fileURLToPath(import.meta.resolve("./simplePage")));
+  });
+
+  test("Page with Bundle Imports", async () => {
+    await testInputDir(fileURLToPath(import.meta.resolve("./pageWithBundleImports")));
   });
 });
