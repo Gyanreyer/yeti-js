@@ -3,9 +3,10 @@ import { fileURLToPath } from "node:url";
 import { getCallSites } from "node:util";
 import { getBundleImportFileContents, getBundleImportFilePath, isBundleImportObject, shouldEscapeHTMLSymbol } from "./bundle.js";
 import { escapeHTML } from "./utils/escapeHTML.js";
+import { flattenRenderResults } from "./utils/flattenRenderResults.js";
 
 /**
- * @import { JSResult, CSSResult } from "./types"
+ * @import { JSResult, CSSResult, YetiComponent, RenderResult } from "./types"
  * @import { BundleObject } from "./bundle.js"
  */
 
@@ -39,27 +40,12 @@ const DOMAttributeNames = {
 };
 
 /**
- * @typedef {{
- *  html: string;
- *  cssBundles: {
- *    [bundleName: string]: Set<string>;
- *  };
- *  cssDependencies: Set<string>;
- *  jsBundles:{
- *    [bundleName: string]: Set<string>;
- *  };
- *  jsDependencies: Set<string>;
- *  htmlDependencies: Set<string>;
- * }} RenderResult
- */
-
-/**
  * @typedef {Array<string | RenderResult | BundleObject | unknown>} Children
  */
 
 /**
  * @param {unknown} tagNameOrComponent
- * @returns {tagNameOrComponent is ((...args: any[]) => RenderResult) & { css?: ()=>CSSResult; js?: ()=>JSResult }}
+ * @returns {tagNameOrComponent is YetiComponent<any>}
  */
 const isNestedComponent = (tagNameOrComponent) => typeof tagNameOrComponent === 'function';
 
@@ -74,7 +60,7 @@ const isRenderResultChild = (child) => typeof child === 'object' && child !== nu
  * This is forked from the vhtml library's implementation.
  * https://github.com/developit/vhtml
  *
- * @param {string | ((...args: any[]) => RenderResult) & { css?: ()=>CSSResult; js?: ()=>JSResult }} tagNameOrComponent
+ * @param {string | YetiComponent<any>} tagNameOrComponent
  * @param {{
  *  [key: string]: any;
  * }} [attrs]
@@ -94,8 +80,10 @@ function h(tagNameOrComponent, attrs, ...children) {
    */
   const htmlDependencies = new Set();
   for (const callSite of getCallSites()) {
-    const path = fileURLToPath(callSite.scriptName);
-    htmlDependencies.add(path);
+    if (callSite.scriptName.startsWith("file://")) {
+      const path = fileURLToPath(callSite.scriptName);
+      htmlDependencies.add(path);
+    }
   }
 
   /**
@@ -144,51 +132,19 @@ function h(tagNameOrComponent, attrs, ...children) {
       }
     }
 
-    const {
-      html: componentHTML,
-      cssBundles: componentCSSBundles,
-      jsBundles: componentJSBundles,
-      cssDependencies: componentCSSDependencies,
-      jsDependencies: componentJSDependencies,
-      htmlDependencies: componentHTMLDependencies,
-    } = tagNameOrComponent({
+    const componentRenderResults = tagNameOrComponent({
       ...attrs,
       children,
     });
 
-    for (const dependency of componentCSSDependencies) {
-      cssDependencies.add(dependency);
-    }
-    for (const dependency of componentJSDependencies) {
-      jsDependencies.add(dependency);
-    }
-
-    for (const bucketName in componentCSSBundles) {
-      cssBundles[bucketName] ??= new Set();
-      for (const chunk of componentCSSBundles[bucketName]) {
-        cssBundles[bucketName].add(chunk);
-      }
-    }
-
-    for (const bucketName in componentJSBundles) {
-      jsBundles[bucketName] ??= new Set();
-      for (const chunk of componentJSBundles[bucketName]) {
-        jsBundles[bucketName].add(chunk);
-      }
-    }
-
-    for (const dependency of componentHTMLDependencies) {
-      htmlDependencies.add(dependency);
-    }
-
-    return {
-      html: componentHTML,
+    return flattenRenderResults([{
+      html: "",
       cssBundles,
       cssDependencies,
       jsBundles,
       jsDependencies,
       htmlDependencies,
-    };
+    }].concat(componentRenderResults));
   }
 
   if (tagNameOrComponent) {

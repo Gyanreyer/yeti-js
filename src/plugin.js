@@ -16,7 +16,7 @@ import { styleText } from 'node:util';
 import { updateConfig } from './config.js';
 
 import { bundleSrcPrefix, bundleSrcPrefixLength, inlinedBundleRegex, inlinedWildcardBundle as inlinedWildCardBundle, WILDCARD_BUNDLE_NAME } from './bundle.js';
-import { renderPageComponent } from './renderComponent.js';
+import { renderPageComponent } from './renderPageComponent.js';
 import { queryElement, transformDocumentNodes, TRANSFORM_ACTIONS } from './utils/document.js';
 import { ensureHTMLHasDoctype } from './utils/ensureHTMLHasDoctype.js';
 
@@ -159,7 +159,7 @@ export default function yetiPlugin(eleventyConfig, userConfig = {}) {
           cssDependencies: renderedCSSDeps,
           jsDependencies: renderedJSDeps,
           htmlDependencies: renderedHTMLDeps,
-        } = await renderPageComponent(pageComponent, data);
+        } = renderPageComponent(pageComponent, data);
 
         /** @type {any} */(this).addDependencies(inputPath, [...renderedCSSDeps, ...renderedJSDeps, ...renderedHTMLDeps]);
 

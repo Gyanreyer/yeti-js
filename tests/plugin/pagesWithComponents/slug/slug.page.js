@@ -1,4 +1,4 @@
-import { bundle, css, Head, html } from "../../../../src/index.js";
+import { bundle, css, Head, html, js } from "../../../../src/index.js";
 import { SayHi } from "../_components/SayHi.component.js";
 import BaseLayout from "../_layouts/base.layout.js"
 
@@ -42,6 +42,10 @@ SlugPage.css = css`
   h1 {
     color: teal;
   }
+`;
+
+SlugPage.js = js`
+  ${bundle.import("./script.js")}
 `;
 
 export default SlugPage;

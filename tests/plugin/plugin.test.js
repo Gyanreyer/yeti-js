@@ -1,10 +1,9 @@
 import {
-  beforeEach,
   describe,
   test,
 } from "node:test";
 import assert from "node:assert/strict";
-import { glob, readdir, readFile, rm } from "node:fs/promises";
+import { glob, readFile, rm } from "node:fs/promises";
 
 import {
   Eleventy
