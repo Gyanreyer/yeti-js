@@ -1,4 +1,4 @@
-import { html, css, js, bundle } from "../../../src/index.js";
+import { html, css, js } from "../../../src/index.js";
 
 export default function IndexPage() {
   return html`
@@ -7,32 +7,32 @@ export default function IndexPage() {
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Page With Bundle Imports Plugin Test</title>
-    <link rel="preload" as="style" href="${bundle.src("default")}" />
-    <link rel="stylesheet" href="${bundle.src("*")}" />
+    <link rel="preload" as="style" href="${css.src("default")}" />
+    <link rel="stylesheet" href="${css.src("*")}" />
     <script type="module">
-      ${bundle.inline("index")}
+      ${js.inline("index")}
     </script>
     <style>
-      ${bundle.inline("index")}
+      ${css.inline("index")}
     </style>
-    <script src="${bundle.src("other")}"></script>
-    <link rel="stylesheet" href="${bundle.src("other")}" />
+    <script src="${js.src("other")}"></script>
+    <link rel="stylesheet" href="${css.src("other")}" />
   </head>
   <body>
     <h1>Hello, Yeti!</h1>
-   ${bundle.importHTML("./partials/frag.html")}
-    <p>${bundle.importHTML("./partials/some-text.txt", true)}</p>
-    <script type="module" src="${bundle.src("*")}"></script>
+   ${html.import("./partials/frag.html")}
+    <p>${html.import("./partials/some-text.txt", true)}</p>
+    <script type="module" src="${js.src("*")}"></script>
   </body>
 </html>
   `;
 }
 
 IndexPage.css = css`
-  ${bundle.import("./css/reset.css", "default")}
-  ${bundle.import("./css/other.css", "other")}
+  ${css.import("./css/reset.css", "default")}
+  ${css.import("./css/other.css", "other")}
 
-  ${bundle("index")}
+  ${css.bundle("index")}
   h1 {
     margin: 0;
     font-size: 2rem;
@@ -40,10 +40,10 @@ IndexPage.css = css`
 `;
 
 IndexPage.js = js`
-  ${bundle.import("./scripts/global.js", "default")}
-  ${bundle.import("./scripts/other.js", "other")}
+  ${js.import("./scripts/global.js", "default")}
+  ${js.import("./scripts/other.js", "other")}
 
-  ${bundle("index")}
+  ${js.bundle("index")}
   console.log("Hello, Yeti from JavaScript!");
-  ${bundle.import("./scripts/index.js")}
+  ${js.import("./scripts/index.js")}
 `;

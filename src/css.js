@@ -1,4 +1,4 @@
-import { DEFAULT_BUNDLE_NAME, getBundleImportFileContents, getBundleImportFilePath, getBundleName, isBundleImportObject, isBundleObject } from "./bundle.js";
+import { bundleNameSymbol, bundleSrcPrefix, bundleTypeSymbol, DEFAULT_BUNDLE_NAME, doesBundleMatchType, getBundleImportFileContents, getBundleImportFilePath, getBundleName, getBundleType, importFilePathSymbol, isBundleImportObject, isBundleObject, resolveImportPath, WILDCARD_BUNDLE_NAME } from "./bundle.js";
 
 /**
  * @import { CSSResult } from './types';
@@ -31,6 +31,10 @@ export function css(strings, ...values) {
 
       const value = values[i];
       if (isBundleImportObject(value)) {
+        if (!doesBundleMatchType(value, "css")) {
+          throw new Error(`css template received an import value of incompatible type "${getBundleType(value)}". Only CSS imports via css.import() are allowed.`);
+        }
+
         if (currentBundleChunk) {
           currentBundleArray.push(currentBundleChunk.trim());
           currentBundleChunk = "";
@@ -48,7 +52,7 @@ export function css(strings, ...values) {
           const importBundleArray = (rawCSSBundles[importBundleName] ??= []);
           importBundleArray.push(fileContents.trim());
         } catch (err) {
-          throw new Error(`bundle.import failed to import file at path "${importFilePath}"`, {
+          throw new Error(`css.import() failed to import file at path "${importFilePath}"`, {
             cause: err,
           });
         }
@@ -97,4 +101,60 @@ export function css(strings, ...values) {
       cssDependencies: cssBundleDependencies,
     };
   };
+}
+
+/**
+ * @import {CssOrJSBundleObject, CssOrJSBundleImportObject} from "./bundle.js"
+ */
+
+/**
+ * @param {string} bundleName
+ * @returns {CssOrJSBundleObject}
+ */
+css.bundle = (bundleName = DEFAULT_BUNDLE_NAME) => {
+  if (bundleName === WILDCARD_BUNDLE_NAME) {
+    throw new Error(`bundle() called with reserved wildcard bundle name "${WILDCARD_BUNDLE_NAME}"`);
+  }
+
+  return ({
+    [bundleNameSymbol]: bundleName,
+    [bundleTypeSymbol]: "css",
+  })
+};
+
+/**
+ * @param {string} importPath
+ * @param {string} [bundleName]
+ *
+ * @returns {CssOrJSBundleImportObject}
+ */
+css.import = (importPath, bundleName) => {
+  if (bundleName === WILDCARD_BUNDLE_NAME) {
+    throw new Error(`css.import() called with reserved wildcard bundle name "${WILDCARD_BUNDLE_NAME}"`);
+  }
+
+  try {
+    const resolvedFilePath = resolveImportPath(importPath);
+    return ({
+      [importFilePathSymbol]: resolvedFilePath,
+      [bundleNameSymbol]: bundleName,
+      [bundleTypeSymbol]: "css",
+    })
+  } catch (err) {
+    throw new Error(`css.import() failed to resolve path to file at "${importPath}"`, {
+      cause: err,
+    });
+  }
+};
+
+/**
+ * @param {string} bundleName
+ */
+css.src = (bundleName) => `${bundleSrcPrefix}${bundleName}`;
+
+/**
+ * @param {string} bundleName
+ */
+css.inline = (bundleName) => {
+  return `/*@--BUNDLE--${bundleName}--@*/`;
 }

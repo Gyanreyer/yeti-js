@@ -1,4 +1,4 @@
-import { html, css, bundle } from '../../../../src/index.js';
+import { html, css, js } from '../../../../src/index.js';
 
 /**
  * @import {YetiComponent} from '../../../../src/types';
@@ -23,8 +23,8 @@ const BaseLayout = ({ title = "Yeti", description = "A helpful tool for building
       <meta name="description" content="${description}" />
 
       <meta name="generator" content="${generator}" />
-      <script src="${bundle.src("*")}" type="module" async></script>
-      <link rel="stylesheet" href="${bundle.src("*")}" />
+      <script src="${js.src("*")}" type="module" async></script>
+      <link rel="stylesheet" href="${css.src("*")}" />
     </head>
     <body>
       ${children}

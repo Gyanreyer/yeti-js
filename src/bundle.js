@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { getCallSites } from 'node:util';
+import { fileURLToPath } from "node:url";
 
 import { getConfig } from "./config.js";
 
@@ -8,26 +9,14 @@ export const DEFAULT_BUNDLE_NAME = "default";
 export const WILDCARD_BUNDLE_NAME = "*";
 
 export const bundleNameSymbol = Symbol("bundle-name");
+export const bundleTypeSymbol = Symbol("bundle-type");
 
 /**
  * @typedef {{
- *  [bundleNameSymbol]: string
- * }} BundleObject
+ *  [bundleNameSymbol]: string;
+ *  [bundleTypeSymbol]: "js" | "css";
+ * }} CssOrJSBundleObject
  */
-
-/**
- * @param {string} bundleName
- * @returns {BundleObject}
- */
-export const bundle = (bundleName = DEFAULT_BUNDLE_NAME) => {
-  if (bundleName === WILDCARD_BUNDLE_NAME) {
-    throw new Error(`bundle() called with reserved wildcard bundle name "${WILDCARD_BUNDLE_NAME}"`);
-  }
-
-  return ({
-    [bundleNameSymbol]: bundleName,
-  })
-};
 
 export const importFilePathSymbol = Symbol("import-file-path");
 
@@ -35,7 +24,8 @@ export const importFilePathSymbol = Symbol("import-file-path");
  * @typedef {{
  *  [importFilePathSymbol]: string;
  *  [bundleNameSymbol]?: string;
- * }} BundleImportObject
+ *  [bundleTypeSymbol]: "js" | "css";
+ * }} CssOrJSBundleImportObject
  */
 
 export const shouldEscapeHTMLSymbol = Symbol("should-escape-html");
@@ -44,23 +34,23 @@ export const shouldEscapeHTMLSymbol = Symbol("should-escape-html");
  * @typedef {{
  *  [importFilePathSymbol]: string;
  *  [shouldEscapeHTMLSymbol]: boolean;
- * }} BundleHTMLImportObject
+ *  [bundleTypeSymbol]: "html";
+ * }} HTMLImportObject
  */
 
 const FILE_URL_PREFIX = "file://";
-const FILE_URL_PREFIX_LENGTH = FILE_URL_PREFIX.length;
 
 /**
  * @param {string} importPath
  */
-const resolveImportPath = (importPath) => {
+export const resolveImportPath = (importPath) => {
   /**
  * @type {string}
  */
   let resolvedFilePath;
 
   if (importPath.startsWith(FILE_URL_PREFIX)) {
-    resolvedFilePath = importPath.slice(FILE_URL_PREFIX_LENGTH);
+    resolvedFilePath = fileURLToPath(importPath);
   } else if (importPath.startsWith("/")) {
     const { inputDir } = getConfig();
     // Absolute path; resolve relative to the Eleventy input directory
@@ -70,66 +60,21 @@ const resolveImportPath = (importPath) => {
     const callSites = getCallSites();
     const callerDirname = dirname(
       // Need to go up two levels; first is this resolveImportPath function,
-      // second is the bundle.import()/bundle.importHTML() method calling this,
-      // third is the file which called bundle.import() which we're interested in.
-      callSites[2].scriptName).slice(FILE_URL_PREFIX_LENGTH);
+      // second is the import() method calling this,
+      // third is the file which called import() which we're interested in.
+      fileURLToPath(callSites[2].scriptName)
+    );
     resolvedFilePath = resolve(callerDirname, importPath);
   } else {
-    resolvedFilePath = import.meta.resolve(importPath).slice(FILE_URL_PREFIX_LENGTH);
+    resolvedFilePath = fileURLToPath(import.meta.resolve(importPath));
   }
 
   return resolvedFilePath;
 }
 
 /**
- * @param {string} importPath
- * @param {string} [bundleName]
- *
- * @returns {BundleImportObject}
- */
-bundle.import = (importPath, bundleName) => {
-  if (bundleName === WILDCARD_BUNDLE_NAME) {
-    throw new Error(`bundle.import() called with reserved wildcard bundle name "${WILDCARD_BUNDLE_NAME}"`);
-  }
-
-  try {
-    const resolvedFilePath = resolveImportPath(importPath);
-    return ({
-      [importFilePathSymbol]: resolvedFilePath,
-      [bundleNameSymbol]: bundleName,
-    })
-  } catch (err) {
-    throw new Error(`bundle.import failed to resolve path to file at "${importPath}"`, {
-      cause: err,
-    });
-  }
-};
-
-/**
- * Imports an external file as an HTML fragment.
- *
- * @param {string} importPath
- * @param {boolean} [escape=false] Whether the imported content should be escaped. This will convert characters like `<` and `>` to their HTML entity equivalents,
- *                                 so only use this for text/attribute content, not HTML fragments.
- * @returns {BundleHTMLImportObject}
- */
-bundle.importHTML = (importPath, escape = false) => {
-  try {
-    const resolvedFilePath = resolveImportPath(importPath);
-    return {
-      [importFilePathSymbol]: resolvedFilePath,
-      [shouldEscapeHTMLSymbol]: escape,
-    };
-  } catch (err) {
-    throw new Error(`bundle.importHTML failed to resolve path to file at "${importPath}"`, {
-      cause: err,
-    });
-  }
-};
-
-/**
  * @param {unknown} maybeBundleObj
- * @returns {maybeBundleObj is BundleObject}
+ * @returns {maybeBundleObj is CssOrJSBundleObject}
  */
 export const isBundleObject = (maybeBundleObj) =>
   typeof maybeBundleObj === "object" && maybeBundleObj !== null &&
@@ -138,7 +83,7 @@ export const isBundleObject = (maybeBundleObj) =>
 
 /**
  * @param {unknown} maybeBundleImportObj
- * @returns {maybeBundleImportObj is BundleImportObject | BundleHTMLImportObject}
+ * @returns {maybeBundleImportObj is CssOrJSBundleImportObject | HTMLImportObject}
  */
 export const isBundleImportObject = (maybeBundleImportObj) =>
   typeof maybeBundleImportObj === "object" && maybeBundleImportObj !== null &&
@@ -147,28 +92,53 @@ export const isBundleImportObject = (maybeBundleImportObj) =>
 
 /**
  * @overload
- * @param {BundleObject} bundleObj
+ * @param {CssOrJSBundleObject} bundleObj
  * @returns {string}
  */
 /**
  * @overload
- * @param {BundleImportObject} bundleImportObj
+ * @param {CssOrJSBundleImportObject} bundleImportObj
  * @returns {string | undefined}
  */
 /**
- * @param {BundleObject | BundleImportObject} bundleObj
+ * @param {CssOrJSBundleObject | CssOrJSBundleImportObject} bundleObj
  * @returns {string | undefined}
  */
 export const getBundleName = (bundleObj) => bundleObj[bundleNameSymbol];
 
 /**
- * @param {BundleImportObject | BundleHTMLImportObject} bundleImportObj
+ * @param {CssOrJSBundleObject | CssOrJSBundleImportObject | HTMLImportObject} bundleObj
+ * @returns {"js" | "css" | "html"}
+ */
+export const getBundleType = (bundleObj) => bundleObj[bundleTypeSymbol];
+
+/**
+ * @template {"css" | "js" | "html"} TExpectedType
+ * @param {CssOrJSBundleObject | CssOrJSBundleImportObject | HTMLImportObject} bundleObj 
+ * @param {TExpectedType} expectedType
+ * @returns {bundleObj is (TExpectedType extends "html" ? HTMLImportObject : (CssOrJSBundleObject | CssOrJSBundleImportObject) & {
+ *  [bundleTypeSymbol]: TExpectedType;
+ * })}
+*/
+export const doesBundleMatchType = (bundleObj, expectedType) => {
+  return getBundleType(bundleObj) === expectedType;
+};
+
+/**
+ * @param {CssOrJSBundleImportObject | HTMLImportObject} obj 
+ * @returns {obj is (CssOrJSBundleImportObject) & { [bundleTypeSymbol]: "css" }}
+ */
+export const isCSSBundleObject = (obj) =>
+  isBundleObject(obj) && getBundleType(obj) === "css";
+
+/**
+ * @param {CssOrJSBundleImportObject | HTMLImportObject} bundleImportObj
  * @returns {string}
  */
 export const getBundleImportFilePath = (bundleImportObj) => bundleImportObj[importFilePathSymbol];
 
 /**
- * @param {BundleImportObject | BundleHTMLImportObject} bundleImportObj
+ * @param {CssOrJSBundleImportObject | HTMLImportObject} bundleImportObj
  * @returns {string}
  */
 export const getBundleImportFileContents = (bundleImportObj) => {
@@ -178,18 +148,6 @@ export const getBundleImportFileContents = (bundleImportObj) => {
 
 export const bundleSrcPrefix = "@bundle/";
 export const bundleSrcPrefixLength = bundleSrcPrefix.length;
-
-/**
- * @param {string} bundleName
- */
-bundle.src = (bundleName) => `${bundleSrcPrefix}${bundleName}`;
-
-/**
- * @param {string} bundleName
- */
-bundle.inline = (bundleName) => {
-  return `/*@--BUNDLE--${bundleName}--@*/`;
-}
 
 export const inlinedBundleRegex = /\/\*@--BUNDLE--(.*?)--@\*\//g;
 

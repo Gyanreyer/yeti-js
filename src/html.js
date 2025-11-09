@@ -1,13 +1,13 @@
 import htm from "htm";
 import { fileURLToPath } from "node:url";
 import { getCallSites } from "node:util";
-import { getBundleImportFileContents, getBundleImportFilePath, isBundleImportObject, shouldEscapeHTMLSymbol } from "./bundle.js";
+import { bundleTypeSymbol, doesBundleMatchType, getBundleImportFileContents, getBundleImportFilePath, getBundleType, importFilePathSymbol, isBundleImportObject, resolveImportPath, shouldEscapeHTMLSymbol } from "./bundle.js";
 import { escapeHTML } from "./utils/escapeHTML.js";
 import { flattenRenderResults } from "./utils/flattenRenderResults.js";
 
 /**
  * @import { JSResult, CSSResult, YetiComponent, RenderResult } from "./types"
- * @import { BundleObject } from "./bundle.js"
+ * @import { CssOrJSBundleObject } from "./bundle.js"
  */
 
 const voidTagNames = {
@@ -40,7 +40,7 @@ const DOMAttributeNames = {
 };
 
 /**
- * @typedef {Array<string | RenderResult | BundleObject | unknown>} Children
+ * @typedef {Array<string | RenderResult | CssOrJSBundleObject | unknown>} Children
  */
 
 /**
@@ -67,7 +67,7 @@ const isRenderResultChild = (child) => typeof child === 'object' && child !== nu
  * @param {Children} children
  * @returns {RenderResult}
  */
-function h(tagNameOrComponent, attrs, ...children) {
+const h = (tagNameOrComponent, attrs, ...children) => {
   let serializedHTMLStr = "";
 
   attrs = attrs || {};
@@ -205,6 +205,10 @@ function h(tagNameOrComponent, attrs, ...children) {
             }
           }
         } else if (isBundleImportObject(children)) {
+          if (!doesBundleMatchType(children, "html")) {
+            throw new Error(`html template received an import value of incompatible type "${getBundleType(children)}". Only HTML imports via html.import() are allowed.`);
+          }
+
           try {
             const importFilePath = getBundleImportFilePath(children);
             htmlDependencies.add(importFilePath);
@@ -216,7 +220,7 @@ function h(tagNameOrComponent, attrs, ...children) {
             }
           } catch (err) {
             const importFilePath = getBundleImportFilePath(children);
-            throw new Error(`bundle.importHTML failed to import file at path "${importFilePath}"`, {
+            throw new Error(`html.import() failed to import file at path "${importFilePath}"`, {
               cause: err,
             });
           }
@@ -241,4 +245,34 @@ function h(tagNameOrComponent, attrs, ...children) {
   };
 }
 
-export const html = htm.bind(h);
+const boundHTMLFunction = htm.bind(h);
+
+/**
+ * @import { HTMLImportObject } from "./bundle.js"
+ *
+ * Imports an external file as an HTML fragment.
+ *
+ * @param {string} importPath
+ * @param {boolean} [escape=false] Whether the imported content should be escaped.
+ *                                 This will convert characters like `<` and `>` to their HTML entity equivalents,
+ *                                 so only use this for text/attribute content, not HTML fragments.
+ * @returns {HTMLImportObject}
+ */
+const importHTML = (importPath, escape = false) => {
+  try {
+    const resolvedFilePath = resolveImportPath(importPath);
+    return {
+      [importFilePathSymbol]: resolvedFilePath,
+      [shouldEscapeHTMLSymbol]: escape,
+      [bundleTypeSymbol]: "html",
+    };
+  } catch (err) {
+    throw new Error(`html.import() failed to resolve path to file at "${importPath}"`, {
+      cause: err,
+    });
+  }
+};
+
+export const html = /** @type {(typeof boundHTMLFunction) & { import: typeof importHTML }} */(Object.defineProperty(boundHTMLFunction, "import", {
+  value: importHTML,
+}));

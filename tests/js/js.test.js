@@ -1,14 +1,13 @@
 import { describe, test } from "node:test";
 
-import { bundle } from '../../src/bundle.js';
-import { js } from '../../src/js.js';
+import { js, css } from '../../src/index.js';
 
 /**
  * @import { JSResult } from '../../src/types.js';
  */
 
 describe('js tagged template function', () => {
-  test('A simple string-only js template is processed as expected', async ({
+  test('A simple string-only js template is processed as expected', ({
     assert,
   }) => {
     const result = js`
@@ -25,14 +24,14 @@ console.log("Hello, world!");
     }));
   });
 
-  test("A js template with bundles specified is procesed as expected", async ({ assert }) => {
+  test("A js template with bundles specified is procesed as expected", ({ assert }) => {
     const result = js`
       console.log("This is in the default bundle");
 
-      ${bundle("my-bundle")}
+      ${js.bundle("my-bundle")}
       console.log("This is my-bundle");
 
-      ${bundle("another-bundle")}
+      ${js.bundle("another-bundle")}
       console.log("This is another-bundle");
     `();
 
@@ -52,10 +51,10 @@ console.log("This is another-bundle");
     }));
   });
 
-  test("A js template with imports specified is processed as expected", async ({ assert }) => {
+  test("A js template with imports specified is processed as expected", ({ assert }) => {
     const result = js`
-      ${bundle.import("./js-file-1.js")}
-      ${bundle.import("./js-file-2.js")}
+      ${js.import("./js-file-1.js")}
+      ${js.import("./js-file-2.js")}
     `();
 
     assert.deepEqual(result, /** @type {JSResult} */({
@@ -75,16 +74,16 @@ window.alert("This is js-file-2.js");
     }));
   });
 
-  test("A js template with mixed bundle targets is processed as expected", async ({ assert }) => {
+  test("A js template with mixed bundle targets is processed as expected", ({ assert }) => {
     const result = js`
       console.log("In default bundle");
 
-      ${bundle.import("./js-file-1.js", "my-bundle")}
+      ${js.import("./js-file-1.js", "my-bundle")}
 
-      ${bundle("another-bundle")}
+      ${js.bundle("another-bundle")}
       console.log("In another-bundle");
 
-      ${bundle.import("./js-file-2.js")}
+      ${js.import("./js-file-2.js")}
     `();
 
     assert.deepEqual(result, /** @type {JSResult} */({
@@ -109,10 +108,35 @@ window.alert("This is js-file-2.js");
     }));
   });
 
-  test("A js template with imports for files that don't exist throws an error when processed", async ({ assert }) => {
+  test("A js template with imports for files that don't exist throws an error when processed", ({ assert }) => {
     assert.throws(
-      js`${bundle.import("./non-existent-file.js")}`,
-      new Error(`bundle.import failed to import file at path "${import.meta.dirname}/non-existent-file.js"`),
+      js`${js.import("./non-existent-file.js")}`,
+      new Error(`js.import() failed to import file at path "${import.meta.dirname}/non-existent-file.js"`),
     )
+  });
+
+  test("A js template with imports for incompatible types throws an error when processed", ({ assert }) => {
+    assert.throws(
+      js`${css.import("../css/css-file.css")}`,
+      new Error('js template received an import value of incompatible type "css". Only JS imports via js.import() are allowed.'),
+    );
+  });
+
+  test("js.src() creates a placeholder src string as expected", ({ assert }) => {
+    const result = js.src("my-bundle");
+    assert.equal(
+      result,
+      "@bundle/my-bundle",
+      "js.src() should return the correctly prefixed bundle src placeholder",
+    );
+  });
+
+  test("js.inline() creates a comment placeholder for inlining bundles as expected", ({ assert }) => {
+    const result = js.inline("my-bundle");
+    assert.equal(
+      result,
+      "/*@--BUNDLE--my-bundle--@*/",
+      "js.inline() should return the correctly formatted inline js bundle placeholder",
+    );
   });
 });

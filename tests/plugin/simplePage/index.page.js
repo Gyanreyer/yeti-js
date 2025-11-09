@@ -1,4 +1,4 @@
-import { html, css, js, bundle } from "../../../src/index.js";
+import { html, css, js } from "../../../src/index.js";
 
 export default function IndexPage() {
   return html`
@@ -7,12 +7,12 @@ export default function IndexPage() {
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Simple Page Plugin Test</title>
-    <style>${bundle.inline("default")}</style>
+    <style>${css.inline("default")}</style>
   </head>
   <body>
     <h1>Hello, Yeti!</h1>
     <script type="module">
-      ${bundle.inline("default")}
+      ${js.inline("default")}
     </script>
   </body>
 </html>`;
