@@ -9,14 +9,19 @@ export default function IndexPage() {
     <title>Page With Bundle Imports Plugin Test</title>
     <link rel="preload" as="style" href="${bundle.src("default")}" />
     <link rel="stylesheet" href="${bundle.src("*")}" />
+    <script type="module">
+      ${bundle.inline("index")}
+    </script>
+    <style>
+      ${bundle.inline("index")}
+    </style>
+    <script src="${bundle.src("other")}"></script>
+    <link rel="stylesheet" href="${bundle.src("other")}" />
   </head>
   <body>
     <h1>Hello, Yeti!</h1>
    ${bundle.importHTML("./partials/frag.html")}
     <p>${bundle.importHTML("./partials/some-text.txt", true)}</p>
-    <script type="module">
-      ${bundle.inline("index")}
-    </script>
     <script type="module" src="${bundle.src("*")}"></script>
   </body>
 </html>
@@ -25,6 +30,7 @@ export default function IndexPage() {
 
 IndexPage.css = css`
   ${bundle.import("./css/reset.css", "default")}
+  ${bundle.import("./css/other.css", "other")}
 
   ${bundle("index")}
   h1 {
@@ -35,6 +41,7 @@ IndexPage.css = css`
 
 IndexPage.js = js`
   ${bundle.import("./scripts/global.js", "default")}
+  ${bundle.import("./scripts/other.js", "other")}
 
   ${bundle("index")}
   console.log("Hello, Yeti from JavaScript!");
