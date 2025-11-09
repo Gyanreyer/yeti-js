@@ -4,7 +4,11 @@
   "type": "module",
   "author": "Ryan Geyer",
   "license": "MIT",
-  "types": "./src/types.ts",
+  "main": "./src/index.js",
+  "types": "./src/types.d.s",
+  "engines": {
+    "node": ">=24.0.0"
+  },
   "scripts": {
     "test": "node --test"
   },
