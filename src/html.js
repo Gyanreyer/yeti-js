@@ -162,6 +162,10 @@ const h = (tagNameOrComponent, attrs, ...children) => {
        * @param {unknown | unknown[]} children
        */
       const addChildrenToSerializedStr = (children) => {
+        if (children === null || children === undefined) {
+          return;
+        }
+
         if (Array.isArray(children)) {
           for (const child of children) {
             addChildrenToSerializedStr(child);

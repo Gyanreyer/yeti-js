@@ -1,4 +1,16 @@
-import { bundleNameSymbol, bundleTypeSymbol, assetTypeSymbol, importFilePathSymbol, shouldEscapeHTMLSymbol, bundleSrcPrefix } from './bundle';
+import type { bundleNameSymbol, bundleTypeSymbol, assetTypeSymbol, importFilePathSymbol, shouldEscapeHTMLSymbol, bundleSrcPrefix } from './bundle';
+
+import type {
+  yetiPlugin as TYetiPlugin,
+  Head as THead,
+  getConfig as TGetConfig,
+  updateConfig as TUpdateConfig,
+} from './index';
+
+export declare var yetiPlugin: typeof TYetiPlugin;
+export declare var getConfig: typeof TGetConfig;
+export declare var updateConfig: typeof TUpdateConfig;
+export declare var Head: typeof THead;
 
 export type YetiConfig = {
   /**
@@ -173,7 +185,7 @@ type html__import = (importPath: string, escape?: boolean) => HTMLImportObject;
  * const myComponent = () => html`<div>Hello, world!</div>`;
  * ```
  */
-export type html = ((strings: TemplateStringsArray, ...values: any[]) => RenderResult | RenderResult[]) & {
+export declare var html: ((strings: TemplateStringsArray, ...values: any[]) => RenderResult | RenderResult[]) & {
   import: html__import;
 };
 
@@ -367,7 +379,7 @@ export type css__inline = <TBundleName extends string>(bundleName: TBundleName) 
  * `;
  * ```
  */
-export type css = ((strings: TemplateStringsArray, ...values: any[]) => () => CSSResult) & {
+export declare var css: ((strings: TemplateStringsArray, ...values: any[]) => () => CSSResult) & {
   bundle: css__bundle;
   import: css__import;
   src: css__src;
@@ -504,7 +516,7 @@ export type js__inline = <TBundleName extends string>(bundleName: TBundleName) =
  * `;
  * ```
  */
-export type js = ((strings: TemplateStringsArray, ...values: any[]) => () => JSResult) & {
+export declare var js: ((strings: TemplateStringsArray, ...values: any[]) => () => JSResult) & {
   bundle: js__bundle;
   import: js__import;
   src: js__src;
