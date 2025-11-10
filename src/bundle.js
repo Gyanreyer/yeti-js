@@ -6,13 +6,20 @@ import { fileURLToPath } from "node:url";
 import { getConfig } from "./config.js";
 
 /**
- * @import { HTMLImportObject, CSSOrJSBundleStartObject, CSSOrJSBundleImportObject } from "./types";
+ * @import { HTMLImportObject, CSSBundleStartObject, JSBundleStartObject, CSSBundleImportObject, JSBundleImportObject } from "./types";
  */
 
 /**
- * @typedef {CSSOrJSBundleStartObject | CSSOrJSBundleImportObject | HTMLImportObject} AnyBundleObject
- * @typedef {CSSOrJSBundleImportObject | HTMLImportObject} AnyBundleImportObject
- * @typedef {CSSOrJSBundleStartObject | CSSOrJSBundleImportObject} AnyCSSOrJSBundleObject
+ * @typedef {CSSBundleStartObject | CSSBundleImportObject} AnyCSSBundleObject
+ * @typedef {JSBundleStartObject | JSBundleImportObject} AnyJSBundleObject
+ *
+ * @typedef {AnyCSSBundleObject | AnyJSBundleObject} AnyCSSOrJSBundleObject
+ *
+ * @typedef {CSSBundleStartObject | JSBundleStartObject} AnyStartObject
+ *
+ * @typedef {CSSBundleImportObject | JSBundleImportObject | HTMLImportObject} AnyBundleImportObject
+ *
+ * @typedef {AnyCSSOrJSBundleObject | HTMLImportObject} AnyBundleObject
  */
 
 export const DEFAULT_BUNDLE_NAME = "default";
@@ -60,7 +67,7 @@ export const resolveImportPath = (importPath) => {
 
 /**
  * @param {unknown} maybeBundleObj
- * @returns {maybeBundleObj is CSSOrJSBundleStartObject}
+ * @returns {maybeBundleObj is AnyStartObject}
  */
 export const isBundleStartObject = (maybeBundleObj) =>
   typeof maybeBundleObj === "object" && maybeBundleObj !== null &&
@@ -79,7 +86,7 @@ export const isBundleImportObject = (maybeBundleImportObj) =>
 /**
  * @template {AnyCSSOrJSBundleObject} TBundleObj
  * @param {TBundleObj} bundleObj
- * @returns {TBundleObj[bundleNameSymbol]}
+ * @returns {string | undefined}
  */
 export const getBundleName = (bundleObj) => bundleObj[bundleNameSymbol];
 
@@ -103,7 +110,7 @@ export const doesBundleMatchAssetType = (bundleObj, expectedType) => {
 /**
  * @template {AnyBundleImportObject} TBundleImportObj
  * @param {TBundleImportObj} bundleImportObj
- * @returns {TBundleImportObj[importFilePathSymbol]}
+ * @returns {string}
  */
 export const getBundleImportFilePath = (bundleImportObj) => bundleImportObj[importFilePathSymbol];
 
