@@ -1,15 +1,9 @@
-import { bundleNameSymbol, bundleSrcPrefix, bundleTypeSymbol, DEFAULT_BUNDLE_NAME, doesBundleMatchType, getBundleImportFileContents, getBundleImportFilePath, getBundleName, getBundleType, importFilePathSymbol, isBundleImportObject, isBundleObject, resolveImportPath, WILDCARD_BUNDLE_NAME } from "./bundle.js";
+import { bundleNameSymbol, bundleSrcPrefix, bundleTypeSymbol, DEFAULT_BUNDLE_NAME, doesBundleMatchAssetType, getBundleImportFileContents, getBundleImportFilePath, getBundleName, getBundleAssetType, importFilePathSymbol, isBundleImportObject, isBundleStartObject, resolveImportPath, WILDCARD_BUNDLE_NAME, assetTypeSymbol } from "./bundle.js";
 
 /**
- * @import { JSResult } from './types';
+ * @type {import("./types").js}
  */
-
-/**
- * @param {TemplateStringsArray} strings
- * @param  {...any} values
- * @returns {() => JSResult}
- */
-export function js(strings, ...values) {
+export const js = (strings, ...values) => {
   return () => {
     /**
      * @type {Record<string, string[]>}
@@ -32,8 +26,8 @@ export function js(strings, ...values) {
       const value = values[i];
 
       if (isBundleImportObject(value)) {
-        if (!doesBundleMatchType(value, "js")) {
-          throw new Error(`js template received an import value of incompatible type "${getBundleType(value)}". Only JS imports via js.import() are allowed.`);
+        if (!doesBundleMatchAssetType(value, "js")) {
+          throw new Error(`js template received an import value of incompatible type "${getBundleAssetType(value)}". Only JS imports via js.import() are allowed.`);
         }
 
         if (currentBundleChunk) {
@@ -57,7 +51,7 @@ export function js(strings, ...values) {
             cause: err,
           });
         }
-      } else if (isBundleObject(value)) {
+      } else if (isBundleStartObject(value)) {
         if (currentBundleChunk) {
           currentBundleArray.push(currentBundleChunk.trim());
           currentBundleChunk = "";
@@ -103,14 +97,7 @@ export function js(strings, ...values) {
   };
 }
 
-/**
- * @import {CssOrJSBundleObject, CssOrJSBundleImportObject} from "./bundle.js"
- */
 
-/**
- * @param {string} bundleName
- * @returns {CssOrJSBundleObject}
- */
 js.bundle = (bundleName = DEFAULT_BUNDLE_NAME) => {
   if (bundleName === WILDCARD_BUNDLE_NAME) {
     throw new Error(`bundle() called with reserved wildcard bundle name "${WILDCARD_BUNDLE_NAME}"`);
@@ -118,16 +105,11 @@ js.bundle = (bundleName = DEFAULT_BUNDLE_NAME) => {
 
   return ({
     [bundleNameSymbol]: bundleName,
-    [bundleTypeSymbol]: "js",
+    [assetTypeSymbol]: "js",
+    [bundleTypeSymbol]: "start",
   })
 };
 
-/**
- * @param {string} importPath
- * @param {string} [bundleName]
- *
- * @returns {CssOrJSBundleImportObject}
- */
 js.import = (importPath, bundleName) => {
   if (bundleName === WILDCARD_BUNDLE_NAME) {
     throw new Error(`js.import() called with reserved wildcard bundle name "${WILDCARD_BUNDLE_NAME}"`);
@@ -138,7 +120,8 @@ js.import = (importPath, bundleName) => {
     return ({
       [importFilePathSymbol]: resolvedFilePath,
       [bundleNameSymbol]: bundleName,
-      [bundleTypeSymbol]: "js",
+      [assetTypeSymbol]: "js",
+      [bundleTypeSymbol]: "import",
     })
   } catch (err) {
     throw new Error(`js.import() failed to resolve path to file at "${importPath}"`, {
@@ -147,14 +130,6 @@ js.import = (importPath, bundleName) => {
   }
 };
 
-/**
- * @param {string} bundleName
- */
 js.src = (bundleName) => `${bundleSrcPrefix}${bundleName}`;
 
-/**
- * @param {string} bundleName
- */
-js.inline = (bundleName) => {
-  return `/*@--BUNDLE--${bundleName}--@*/`;
-}
+js.inline = (bundleName) => `/*@--BUNDLE--${bundleName}--@*/`;

@@ -1,15 +1,9 @@
-import { bundleNameSymbol, bundleSrcPrefix, bundleTypeSymbol, DEFAULT_BUNDLE_NAME, doesBundleMatchType, getBundleImportFileContents, getBundleImportFilePath, getBundleName, getBundleType, importFilePathSymbol, isBundleImportObject, isBundleObject, resolveImportPath, WILDCARD_BUNDLE_NAME } from "./bundle.js";
+import { bundleNameSymbol, bundleSrcPrefix, bundleTypeSymbol, DEFAULT_BUNDLE_NAME, doesBundleMatchAssetType, getBundleImportFileContents, getBundleImportFilePath, getBundleName, getBundleAssetType, importFilePathSymbol, isBundleImportObject, isBundleStartObject, resolveImportPath, WILDCARD_BUNDLE_NAME, assetTypeSymbol } from "./bundle.js";
 
 /**
- * @import { CSSResult } from './types';
+ * @type {import("./types").css}
  */
-
-/**
- * @param {TemplateStringsArray} strings
- * @param  {...any} values
- * @returns {() => CSSResult}
- */
-export function css(strings, ...values) {
+export const css = (strings, ...values) => {
   return () => {
     /**
      * @type {Record<string, string[]>}
@@ -31,8 +25,8 @@ export function css(strings, ...values) {
 
       const value = values[i];
       if (isBundleImportObject(value)) {
-        if (!doesBundleMatchType(value, "css")) {
-          throw new Error(`css template received an import value of incompatible type "${getBundleType(value)}". Only CSS imports via css.import() are allowed.`);
+        if (!doesBundleMatchAssetType(value, "css")) {
+          throw new Error(`css template received an import value of incompatible type "${getBundleAssetType(value)}". Only CSS imports via css.import() are allowed.`);
         }
 
         if (currentBundleChunk) {
@@ -56,7 +50,7 @@ export function css(strings, ...values) {
             cause: err,
           });
         }
-      } else if (isBundleObject(value)) {
+      } else if (isBundleStartObject(value)) {
         // A new bundle is being started.
         if (currentBundleChunk) {
           // Store the current chunk before switching bundles
@@ -103,14 +97,6 @@ export function css(strings, ...values) {
   };
 }
 
-/**
- * @import {CssOrJSBundleObject, CssOrJSBundleImportObject} from "./bundle.js"
- */
-
-/**
- * @param {string} bundleName
- * @returns {CssOrJSBundleObject}
- */
 css.bundle = (bundleName = DEFAULT_BUNDLE_NAME) => {
   if (bundleName === WILDCARD_BUNDLE_NAME) {
     throw new Error(`bundle() called with reserved wildcard bundle name "${WILDCARD_BUNDLE_NAME}"`);
@@ -118,16 +104,11 @@ css.bundle = (bundleName = DEFAULT_BUNDLE_NAME) => {
 
   return ({
     [bundleNameSymbol]: bundleName,
-    [bundleTypeSymbol]: "css",
+    [assetTypeSymbol]: "css",
+    [bundleTypeSymbol]: "start",
   })
 };
 
-/**
- * @param {string} importPath
- * @param {string} [bundleName]
- *
- * @returns {CssOrJSBundleImportObject}
- */
 css.import = (importPath, bundleName) => {
   if (bundleName === WILDCARD_BUNDLE_NAME) {
     throw new Error(`css.import() called with reserved wildcard bundle name "${WILDCARD_BUNDLE_NAME}"`);
@@ -138,7 +119,8 @@ css.import = (importPath, bundleName) => {
     return ({
       [importFilePathSymbol]: resolvedFilePath,
       [bundleNameSymbol]: bundleName,
-      [bundleTypeSymbol]: "css",
+      [assetTypeSymbol]: "css",
+      [bundleTypeSymbol]: "import",
     })
   } catch (err) {
     throw new Error(`css.import() failed to resolve path to file at "${importPath}"`, {
@@ -147,14 +129,6 @@ css.import = (importPath, bundleName) => {
   }
 };
 
-/**
- * @param {string} bundleName
- */
 css.src = (bundleName) => `${bundleSrcPrefix}${bundleName}`;
 
-/**
- * @param {string} bundleName
- */
-css.inline = (bundleName) => {
-  return `/*@--BUNDLE--${bundleName}--@*/`;
-}
+css.inline = (bundleName) => `/*@--BUNDLE--${bundleName}--@*/`;

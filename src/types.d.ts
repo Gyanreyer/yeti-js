@@ -1,3 +1,5 @@
+import { bundleNameSymbol, bundleTypeSymbol, assetTypeSymbol, importFilePathSymbol, shouldEscapeHTMLSymbol, bundleSrcPrefix } from './bundle';
+
 export type YetiConfig = {
   /**
    * The directory where the site's source files are located.
@@ -132,3 +134,379 @@ export type EleventyPageData = {
 type YetiPageComponentFunction<TData extends Record<string, any>> = (data: TData & EleventyPageData) => RenderResult | RenderResult[];
 
 export type YetiPageComponent<TData extends Record<string, any> = {}> = YetiPageComponentFunction<TData & EleventyPageData> & YetiComponentMetadata;
+
+export type HTMLImportObject = {
+  /**
+   * The resolved absolute path to the imported file.
+   */
+  [importFilePathSymbol]: string;
+  /**
+   * Whether the imported HTML content should be escaped.
+   */
+  [shouldEscapeHTMLSymbol]: boolean;
+  /**
+   * The type of asset this import represents. Used internally to distinguish between HTML, JS, and CSS imports.
+   */
+  [assetTypeSymbol]: 'html';
+  /**
+   * The type of this bundle object, indicating that it is importing an external HTML file.
+   */
+  [bundleTypeSymbol]: "import";
+};
+
+/**
+ * Imports an external file as an HTML fragment.
+ *
+ * @param {string} importPath
+ * @param {boolean} [escape=false] Whether the imported content should be escaped.
+ *                                 This will convert characters like `<` and `>` to their HTML entity equivalents,
+ *                                 so only use this for text/attribute content, not HTML fragments.
+ * @returns {HTMLImportObject}
+ */
+type html__import = (importPath: string, escape?: boolean) => HTMLImportObject;
+
+/**
+ * A template literal tag function for defining HTML content within Yeti components.
+ * @example
+ * ```ts
+ * import { html } from 'yeti-js';
+ * const myComponent = () => html`<div>Hello, world!</div>`;
+ * ```
+ */
+export type html = ((strings: TemplateStringsArray, ...values: any[]) => RenderResult | RenderResult[]) & {
+  import: html__import;
+};
+
+/**
+ * Indicates the start of a new CSS or JS bundle in a `css`/`js` template string.
+ * This object will act as a marker that all following CSS or JS content will be appended to the specified bundle,
+ * until another bundle start object is encountered or the template string ends.
+ */
+export type CSSOrJSBundleStartObject<TAssetType extends 'css' | 'js' = "css" | "js"> = {
+  /**
+   * The name of the bundle that all following JavaScript or CSS content will be appended to.
+   */
+  [bundleNameSymbol]: string;
+  /**
+   * The type of asset for this bundle. Used internally to distinguish between HTML, JS, and CSS assets.
+   */
+  [assetTypeSymbol]: 'css' | 'js';
+  /**
+   * The type of this bundle object, indicating that it represents the start of a new bundle.
+   */
+  [bundleTypeSymbol]: "start";
+};
+
+/**
+ * Object representing an imported CSS or JS file within a `css`/`js` template string.
+ * This object contains metadata about the import, including the resolved file path and the target bundle name.
+ * The contents of the imported file will be appended to the specified bundle during processing.
+ */
+export type CSSOrJSBundleImportObject<TAssetType extends 'css' | 'js' = "css" | "js"> = {
+  /**
+   * The resolved absolute path to the imported file.
+   */
+  [importFilePathSymbol]: string;
+  /**
+   * The name of the bundle that this imported file's contents will be appended to.
+   * If not specified, the contents will be added to the default bundle.
+   */
+  [bundleNameSymbol]?: string;
+  /**
+   * The type of asset this import represents. Used internally to distinguish between CSS and JS imports.
+   */
+  [assetTypeSymbol]: TAssetType;
+  /**
+   * The type of this bundle object, indicating that it is importing an external file into the bundle.
+   */
+  [bundleTypeSymbol]: "import";
+}
+
+/**
+ * Marks the start of a new bundle for CSS content within a `css` template string.
+ *
+ * @param {string} [bundleName] The name of the CSS bundle that all following CSS content will be appended to.
+ *
+ * @example
+ * ```ts
+ * import { css } from 'yeti-js';
+ * const MyComponent = () => html`<div>Hello, world!</div>`;
+ *
+ * MyComponent.css = css`
+ *   ${css.bundle('main')} // All following CSS content will be added to the "main" CSS bundle
+ *   body {
+ *     background-color: lightblue;
+ *   }
+ *
+ *   ${css.bundle('other')} // All following CSS content will now be added to the "other" CSS bundle
+ *   h1 {
+ *     color: red;
+ *   }
+ * `;
+ * ```
+ */
+export type css__bundle = (bundleName?: string) => CSSOrJSBundleStartObject<"css">;
+
+/**
+ * Imports an external CSS file into a CSS bundle within a `css` template string.
+ *
+ * @param {string} importPath The path to the CSS file to import.
+ * @param {string} [bundleName] The name of the CSS bundle that the imported file's contents will be appended to.
+ *                              If not specified, the contents will be added to the default bundle.
+ *
+ * @example
+ * ```ts
+ * import { css } from 'yeti-js';
+ * const MyComponent = () => html`<div>Hello, world!</div>`;
+ *
+ * MyComponent.css = css`
+ *   ${css.import('./path/to/external-file.css', 'main')} // Imports external-file.css into the "main" CSS bundle
+ * `;
+ * ```
+ */
+export type css__import = (importPath: string, bundleName?: string) => CSSOrJSBundleImportObject<"css">;
+
+/**
+ * Generates a string to pass to a `<link rel="stylesheet">` tag's `href` attribute
+ * to load a specified CSS bundle.
+ * This string will be replaced with the actual URL to the CSS bundle during processing.
+ *
+ * @param {string} bundleName The name of the CSS bundle to load. Passing "*" will make this a wildcard bundle reference
+ *                            which will duplicate the tag that uses it for all CSS bundles used on the page which are not
+ *                            explicitly referenced elsewhere.
+ *
+ * @example Named bundle reference
+ * ```ts
+ * import { html, css } from 'yeti-js';
+ * const MyComponent = () => {
+ *   return html`
+ *     <head>
+ *       <link rel="stylesheet" href="${css.src('main')}" />
+ *     </head>
+ *  `;
+ * // Expected output:
+ * // <head>
+ * //   <link rel="stylesheet" href="/css/main.css" />
+ * // </head>
+ * ```
+ *
+ * @example Wildcard bundle reference
+ * ```ts
+ * import { html, css } from 'yeti-js';
+ * const MyComponent = () => {
+ *   return html`
+ *     <head>
+ *       <link rel="stylesheet" href="${css.src('*')}" />
+ *     </head>
+ *  `;
+ * // Expected output if the page uses "index" and "reset" CSS bundles:
+ * // <head>
+ * //   <link rel="stylesheet" href="/css/index.css" />
+ * //   <link rel="stylesheet" href="/css/reset.css" />
+ * // </head>
+ * ```
+ */
+export type css__src = <TBundleName extends string>(bundleName: TBundleName) => `${typeof bundleSrcPrefix}${TBundleName}`;
+
+/**
+ * Generates a placeholder comment string to inline a specified CSS bundle's contents directly into an HTML `<style>` tag.
+ * This placeholder will be replaced with the actual CSS content of the specified bundle during processing.
+ *
+ * @param {string} bundleName The name of the CSS bundle to inline. Passing "*" will inline all CSS bundles used on the page which are not
+ *                            explicitly referenced elsewhere.
+ *
+ * @example Named bundle inline
+ * ```ts
+ * import { html, css } from 'yeti-js';
+ * const myComponent = () => {
+ *   return html`
+ *     <style>
+ *       ${css.inline('main')}
+ *     </style>
+ *   `;
+ * // Expected output:
+ * // <style>
+ * //   /* Contents of the "main" CSS bundle *\/
+ * // </style>
+ * ```
+ *
+ * @example Wildcard bundle inline
+ * ```ts
+ * import { html, css } from 'yeti-js';
+ * const myComponent = () => {
+ *   return html`
+ *     <style>
+ *       ${css.inline('*')}
+ *     </style>
+ *   `;
+ * // Expected output if the page uses "index" and "reset" CSS bundles:
+ * // <style>
+ * //   /* Contents of the "index" CSS bundle *\/
+ * //   /* Contents of the "reset" CSS bundle *\/
+ * // </style>
+ * ```
+ */
+export type css__inline = <TBundleName extends string>(bundleName: TBundleName) => `/*@--BUNDLE--${TBundleName}--@*/`;
+
+/**
+ * A template literal tag function for attaching CSS content to Yeti components.
+ *
+ * @example
+ * ```ts
+ * import { html, css } from 'yeti-js';
+ *
+ * export const MyComponent = () => {
+ *  return html`
+ *    <h1>Hello, world!</h1>
+ *  `;
+ * }
+ * myComponent.css = css`
+ *  h1 {
+ *    color: red;
+ *  }
+ * `;
+ * ```
+ */
+export type css = ((strings: TemplateStringsArray, ...values: any[]) => () => CSSResult) & {
+  bundle: css__bundle;
+  import: css__import;
+  src: css__src;
+  inline: css__inline;
+};
+
+/**
+ * Marks the start of a new bundle for JavaScript content within a `js` template string.
+ *
+ * @param {string} [bundleName] The name of the JavaScript bundle that all following JS content will be appended to.
+ *
+ * @example
+ * ```ts
+ * import { js } from 'yeti-js';
+ * const MyComponent = () => html`<div>Hello, world!</div>`;
+ *
+ * MyComponent.js = js`
+ *   ${js.bundle('main')} // All following JS content will be added to the "main" JS bundle
+ *   console.log('This will be part of the "main" bundle');
+ *
+ *   ${js.bundle('other')} // All following JS content will now be added to the "other" JS bundle
+ *   console.log('This will be part of the "other" bundle, not "main"');
+ * `;
+ * ```
+ */
+export type js__bundle = (bundleName?: string) => CSSOrJSBundleStartObject<"js">;
+
+/**
+ * Imports an external JavaScript file into a JavaScript bundle within a `js` template string.
+ *
+ * @param {string} importPath The path to the JavaScript file to import.
+ * @param {string} [bundleName] The name of the JavaScript bundle that the imported file's contents will be appended to.
+ *                              If not specified, the contents will be added to the default bundle.
+ *
+ * @example
+ * ```ts
+ * import { js } from 'yeti-js';
+ * const MyComponent = () => html`<div>Hello, world!</div>`;
+ *
+ * MyComponent.js = js`
+ *   ${js.import('./path/to/external-file.js', 'main')} // Imports external-file.js into the "main" JS bundle
+ * `;
+ * ```
+ */
+export type js__import = (importPath: string, bundleName?: string) => CSSOrJSBundleImportObject<"js">;
+
+/**
+ * Generates a string to pass to a `<script>` tag's `src` attribute to load a specified JavaScript bundle.
+ * This string will be replaced with the actual URL to the JavaScript bundle during processing.
+ *
+ * @param {string} bundleName The name of the JavaScript bundle to load. Passing "*" will make this a wildcard bundle reference
+ *                            which will duplicate the tag that uses it for all JS bundles used on the page which are not
+ *                            explicitly referenced elsewhere.
+ *
+ * @example Named bundle reference
+ * ```ts
+ * import { html, js } from 'yeti-js';
+ * const MyComponent = () => {
+ *   return html`
+ *     <script src="${js.src('main')}"></script>
+ *   `;
+ * // Expected output:
+ * // <script src="/js/main.js"></script>
+ * ```
+ *
+ * @example Wildcard bundle reference
+ * ```ts
+ * import { html, js } from 'yeti-js';
+ * const MyComponent = () => {
+ *   return html`
+ *     <script src="${js.src('*')}"></script>
+ *   `;
+ * // Expected output if the page uses "index" and "vendor" JS bundles:
+ * // <script src="/js/index.js"></script>
+ * // <script src="/js/vendor.js"></script>
+ * ```
+ */
+export type js__src = <TBundleName extends string>(bundleName: TBundleName) => `${typeof bundleSrcPrefix}${TBundleName}`;
+
+/**
+ * Generates a placeholder comment string to inline a specified JavaScript bundle's contents directly into an HTML `<script>` tag.
+ * This placeholder will be replaced with the actual JavaScript content of the specified bundle during processing.
+ *
+ * @param {string} bundleName The name of the JavaScript bundle to inline. Passing "*" will inline all JS bundles used on the page which are not
+ *                            explicitly referenced elsewhere.
+ *
+ * @example Named bundle inline
+ * ```ts
+ * import { html, js } from 'yeti-js';
+ * const MyComponent = () => {
+ *   return html`
+ *     <script>
+ *       ${js.inline('main')}
+ *     </script>
+ *   `;
+ * // Expected output:
+ * // <script>
+ * //   /* Contents of the "main" JS bundle *\/
+ * // </script>
+ * ```
+ *
+ * @example Wildcard bundle inline
+ * ```ts
+ * import { html, js } from 'yeti-js';
+ * const MyComponent = () => {
+ *   return html`
+ *     <script>
+ *       ${js.inline('*')}
+ *     </script>
+ *   `;
+ * // Expected output if the page uses "index" and "vendor" JS bundles:
+ * // <script>
+ * //   /* Contents of the "index" JS bundle *\/
+ * //   /* Contents of the "vendor" JS bundle *\/
+ * // </script>
+ * ```
+ */
+export type js__inline = <TBundleName extends string>(bundleName: TBundleName) => `/*@--BUNDLE--${TBundleName}--@*/`;
+
+/**
+ * A template literal tag function for attaching JavaScript content to Yeti components.
+ *
+ * @example
+ * ```ts
+ * import { html, js } from 'yeti-js';
+ *
+ * export const MyComponent = () => {
+ *  return html`
+ *    <h1>Hello, world!</h1>
+ *  `;
+ * }
+ * MyComponent.js = js`
+ *  console.log('Hello from MyComponent!');
+ * `;
+ * ```
+ */
+export type js = ((strings: TemplateStringsArray, ...values: any[]) => () => JSResult) & {
+  bundle: js__bundle;
+  import: js__import;
+  src: js__src;
+  inline: js__inline;
+};

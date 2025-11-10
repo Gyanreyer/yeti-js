@@ -5,38 +5,24 @@ import { fileURLToPath } from "node:url";
 
 import { getConfig } from "./config.js";
 
+/**
+ * @import { HTMLImportObject, CSSOrJSBundleStartObject, CSSOrJSBundleImportObject } from "./types";
+ */
+
+/**
+ * @typedef {CSSOrJSBundleStartObject | CSSOrJSBundleImportObject | HTMLImportObject} AnyBundleObject
+ * @typedef {CSSOrJSBundleImportObject | HTMLImportObject} AnyBundleImportObject
+ * @typedef {CSSOrJSBundleStartObject | CSSOrJSBundleImportObject} AnyCSSOrJSBundleObject
+ */
+
 export const DEFAULT_BUNDLE_NAME = "default";
 export const WILDCARD_BUNDLE_NAME = "*";
 
 export const bundleNameSymbol = Symbol("bundle-name");
 export const bundleTypeSymbol = Symbol("bundle-type");
-
-/**
- * @typedef {{
- *  [bundleNameSymbol]: string;
- *  [bundleTypeSymbol]: "js" | "css";
- * }} CssOrJSBundleObject
- */
-
+export const assetTypeSymbol = Symbol("asset-type");
 export const importFilePathSymbol = Symbol("import-file-path");
-
-/**
- * @typedef {{
- *  [importFilePathSymbol]: string;
- *  [bundleNameSymbol]?: string;
- *  [bundleTypeSymbol]: "js" | "css";
- * }} CssOrJSBundleImportObject
- */
-
 export const shouldEscapeHTMLSymbol = Symbol("should-escape-html");
-
-/**
- * @typedef {{
- *  [importFilePathSymbol]: string;
- *  [shouldEscapeHTMLSymbol]: boolean;
- *  [bundleTypeSymbol]: "html";
- * }} HTMLImportObject
- */
 
 const FILE_URL_PREFIX = "file://";
 
@@ -74,71 +60,55 @@ export const resolveImportPath = (importPath) => {
 
 /**
  * @param {unknown} maybeBundleObj
- * @returns {maybeBundleObj is CssOrJSBundleObject}
+ * @returns {maybeBundleObj is CSSOrJSBundleStartObject}
  */
-export const isBundleObject = (maybeBundleObj) =>
+export const isBundleStartObject = (maybeBundleObj) =>
   typeof maybeBundleObj === "object" && maybeBundleObj !== null &&
-  bundleNameSymbol in maybeBundleObj &&
-  typeof maybeBundleObj[bundleNameSymbol] === "string";
+  bundleTypeSymbol in maybeBundleObj &&
+  maybeBundleObj[bundleTypeSymbol] === "start";
 
 /**
  * @param {unknown} maybeBundleImportObj
- * @returns {maybeBundleImportObj is CssOrJSBundleImportObject | HTMLImportObject}
+ * @returns {maybeBundleImportObj is AnyBundleImportObject}
  */
 export const isBundleImportObject = (maybeBundleImportObj) =>
   typeof maybeBundleImportObj === "object" && maybeBundleImportObj !== null &&
-  importFilePathSymbol in maybeBundleImportObj &&
-  typeof maybeBundleImportObj[importFilePathSymbol] === "string";
+  bundleTypeSymbol in maybeBundleImportObj &&
+  maybeBundleImportObj[bundleTypeSymbol] === "import";
 
 /**
- * @overload
- * @param {CssOrJSBundleObject} bundleObj
- * @returns {string}
- */
-/**
- * @overload
- * @param {CssOrJSBundleImportObject} bundleImportObj
- * @returns {string | undefined}
- */
-/**
- * @param {CssOrJSBundleObject | CssOrJSBundleImportObject} bundleObj
- * @returns {string | undefined}
+ * @template {AnyCSSOrJSBundleObject} TBundleObj
+ * @param {TBundleObj} bundleObj
+ * @returns {TBundleObj[bundleNameSymbol]}
  */
 export const getBundleName = (bundleObj) => bundleObj[bundleNameSymbol];
 
 /**
- * @param {CssOrJSBundleObject | CssOrJSBundleImportObject | HTMLImportObject} bundleObj
- * @returns {"js" | "css" | "html"}
+ * @param {AnyBundleObject} bundleObj
+ * @returns {AnyBundleObject[assetTypeSymbol]}
  */
-export const getBundleType = (bundleObj) => bundleObj[bundleTypeSymbol];
+export const getBundleAssetType = (bundleObj) => bundleObj[assetTypeSymbol];
 
 /**
- * @template {"css" | "js" | "html"} TExpectedType
- * @param {CssOrJSBundleObject | CssOrJSBundleImportObject | HTMLImportObject} bundleObj 
+ * @template {AnyBundleObject[assetTypeSymbol]} TExpectedType
+ * @template {AnyBundleObject} TBundleObj
+ * @param {AnyBundleObject} bundleObj
  * @param {TExpectedType} expectedType
- * @returns {bundleObj is (TExpectedType extends "html" ? HTMLImportObject : (CssOrJSBundleObject | CssOrJSBundleImportObject) & {
- *  [bundleTypeSymbol]: TExpectedType;
- * })}
+ * @returns {bundleObj is Extract<TBundleObj, { [assetTypeSymbol]: TExpectedType }>}
 */
-export const doesBundleMatchType = (bundleObj, expectedType) => {
-  return getBundleType(bundleObj) === expectedType;
+export const doesBundleMatchAssetType = (bundleObj, expectedType) => {
+  return getBundleAssetType(bundleObj) === expectedType;
 };
 
 /**
- * @param {CssOrJSBundleImportObject | HTMLImportObject} obj 
- * @returns {obj is (CssOrJSBundleImportObject) & { [bundleTypeSymbol]: "css" }}
- */
-export const isCSSBundleObject = (obj) =>
-  isBundleObject(obj) && getBundleType(obj) === "css";
-
-/**
- * @param {CssOrJSBundleImportObject | HTMLImportObject} bundleImportObj
- * @returns {string}
+ * @template {AnyBundleImportObject} TBundleImportObj
+ * @param {TBundleImportObj} bundleImportObj
+ * @returns {TBundleImportObj[importFilePathSymbol]}
  */
 export const getBundleImportFilePath = (bundleImportObj) => bundleImportObj[importFilePathSymbol];
 
 /**
- * @param {CssOrJSBundleImportObject | HTMLImportObject} bundleImportObj
+ * @param {AnyBundleImportObject} bundleImportObj
  * @returns {string}
  */
 export const getBundleImportFileContents = (bundleImportObj) => {
