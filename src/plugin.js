@@ -21,29 +21,17 @@ import { queryElement, transformDocumentNodes, TRANSFORM_ACTIONS } from './utils
 import { ensureHTMLHasDoctype } from './utils/ensureHTMLHasDoctype.js';
 
 /**
- * @import EleventyUserConfig from '@11ty/eleventy/src/UserConfig.js';
  * @import { DefaultTreeAdapterTypes as Parse5Types } from 'parse5';
  * @import { TransformResult } from './utils/document.js';
- * @import { YetiConfig, EleventyPageData, YetiPageComponent } from './types';
+ * @import { EleventyPageData, YetiPageComponent } from './types';
  */
-
-
-/**
- * @param {string} bundleName
- */
-const getCSSBundleHref = (bundleName) => `/css/${bundleName}.css`;
-/**
- * @param {string} bundleName
- */
-const getJSBundleSrc = (bundleName) => `/js/${bundleName}.js`;
 
 const lazyPreloadOnloadRegex = /\bthis\.rel\s*=\s*['"`]stylesheet['"`]/;
 
 /**
- * @param {EleventyUserConfig} eleventyConfig
- * @param {Omit<Partial<YetiConfig>, "inputDir" | "outputDir">} userConfig
+ * @type {import("./types.js").yetiPlugin}
  */
-export default function yetiPlugin(eleventyConfig, userConfig = {}) {
+export const yetiPlugin = (eleventyConfig, userConfig = {}) => {
   const {
     pageTemplateFileExtension,
     css: {
@@ -57,6 +45,15 @@ export default function yetiPlugin(eleventyConfig, userConfig = {}) {
       outputDir: jsOutputDir,
     },
   } = updateConfig(userConfig)
+
+  /**
+   * @param {string} bundleName
+   */
+  const getCSSBundleHref = (bundleName) => resolve(cssOutputDir, `${bundleName}.css`);
+  /**
+   * @param {string} bundleName
+   */
+  const getJSBundleSrc = (bundleName) => resolve(jsOutputDir, `${bundleName}.js`);
 
   eleventyConfig.on("eleventy.before",
     /**
@@ -179,7 +176,7 @@ export default function yetiPlugin(eleventyConfig, userConfig = {}) {
         );
 
         /**
-         * @type {Record<string, Parse5Types.ChildNode>}>}
+         * @type {Record<string, Parse5Types.ChildNode>}
          */
         let deduplicatedHeadNodes = {};
 
@@ -732,7 +729,6 @@ export default function yetiPlugin(eleventyConfig, userConfig = {}) {
     },
   });
 
-
   eleventyConfig.on("eleventy.after",
     /**
      * @param {{
@@ -956,12 +952,4 @@ export default function yetiPlugin(eleventyConfig, userConfig = {}) {
 
       await Promise.allSettled([processCSSBundlesPromise, processJSBundlesPromise]);
     });
-
-  return {
-    dir: {
-      input: "site",
-      layouts: "_layouts",
-      output: "_site_dist",
-    },
-  };
 }

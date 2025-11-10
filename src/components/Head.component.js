@@ -1,7 +1,7 @@
 import { html } from '../html.js';
 
 /**
- * @type {import('../types').YetiComponent<{}>}
+ * @type {import("../types.js").Head}
  */
 export const Head = ({
   children,

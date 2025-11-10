@@ -4,14 +4,14 @@ import {
 } from "node:test";
 import assert from "node:assert/strict";
 import { glob, readFile, rm } from "node:fs/promises";
+import { resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import {
   Eleventy
 } from "@11ty/eleventy";
-import yetiPlugin from "../../src/plugin.js";
-import { resolve } from "node:path";
-import { fileURLToPath } from "node:url";
 
+import { yetiPlugin } from "../../src/index.js";
 
 /**
  * @import UserConfig from '@11ty/eleventy/src/UserConfig.js';

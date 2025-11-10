@@ -1,16 +1,5 @@
+import type EleventyUserConfig from '@11ty/eleventy/src/UserConfig';
 import type { bundleNameSymbol, bundleTypeSymbol, assetTypeSymbol, importFilePathSymbol, shouldEscapeHTMLSymbol, bundleSrcPrefix } from './bundle';
-
-import type {
-  yetiPlugin as TYetiPlugin,
-  Head as THead,
-  getConfig as TGetConfig,
-  updateConfig as TUpdateConfig,
-} from './index';
-
-export declare const yetiPlugin: typeof TYetiPlugin;
-export declare const getConfig: typeof TGetConfig;
-export declare const updateConfig: typeof TUpdateConfig;
-export declare const Head: typeof THead;
 
 export type YetiConfig = {
   /**
@@ -111,7 +100,7 @@ type YetiComponentFunction<TProps extends YetiComponentMetadata> = (data: TProps
   children: Children | undefined;
 }) => RenderResult | RenderResult[];
 
-export type YetiComponent<TProps extends YetiComponentProps> = YetiComponentFunction<TProps> & YetiComponentMetadata;
+export type YetiComponent<TProps extends YetiComponentProps = {}> = YetiComponentFunction<TProps> & YetiComponentMetadata;
 
 export type EleventyPageData = {
   eleventy: {
@@ -521,3 +510,37 @@ export declare const js: ((strings: TemplateStringsArray, ...values: any[]) => (
    */
   inline: <TBundleName extends string>(bundleName: TBundleName) => `/*@--BUNDLE--${TBundleName}--@*/`;
 };
+
+/**
+ * Eleventy plugin function to integrate Yeti into an Eleventy project.
+ *
+ * @example
+ * ```ts
+ * // 11ty.config.js
+ * import { yetiPlugin } from 'yeti-js';
+ *
+ * export default function(eleventyConfig) {
+ *   eleventyConfig.addPlugin(yetiPlugin);
+ * }
+ * ```
+ */
+export declare function yetiPlugin(eleventyConfig: EleventyUserConfig, userConfig: Omit<Partial<YetiConfig>, "inputDir" | "outputDir">): void;
+
+/**
+ * Component to inject content into the HTML document's `<head>` section.
+ *
+ * @example
+ * ```ts
+ * import { html, Head } from 'yeti-js';
+ *
+ * export const MyComponent = () => {
+ *   return html`
+ *     <${Head}>
+ *       <title>My Page Title<//>
+ *     </>
+ *     <div>Hello, world!</div>
+ *   `;
+ * }
+ * ```
+ */
+export declare const Head: YetiComponent;
