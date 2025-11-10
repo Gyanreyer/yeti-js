@@ -48,12 +48,12 @@ export default function yetiPlugin(eleventyConfig, userConfig = {}) {
     pageTemplateFileExtension,
     css: {
       minify: shouldMinifyCSS,
-      sourceMaps: shouldGenerateCSSSourceMaps,
+      sourceMaps: shouldGenerateCSSSourceMapsIfMinified,
       outputDir: cssOutputDir,
     },
     js: {
       minify: shouldMinifyJS,
-      sourceMaps: shouldGenerateJSSourceMaps,
+      sourceMaps: shouldGenerateJSSourceMapsIfMinified,
       outputDir: jsOutputDir,
     },
   } = updateConfig(userConfig)
@@ -773,6 +773,9 @@ export default function yetiPlugin(eleventyConfig, userConfig = {}) {
           await mkdir(resolvedCSSOutputDir, { recursive: true });
         }
 
+        // Only generate source maps if we're minifying
+        const shouldGenerateCSSSourceMaps = shouldGenerateCSSSourceMapsIfMinified && shouldMinifyCSS;
+
         processCSSBundlesPromise = Promise.allSettled(
           combinedBundleKeyValuePairs.map(async ([bundleName, cssChunkSet]) => {
             const cssContent = Array.from(cssChunkSet.values()).join("");
@@ -800,6 +803,7 @@ export default function yetiPlugin(eleventyConfig, userConfig = {}) {
              * @type {Uint8Array | null}
              */
             let sourceMapBytes = null;
+
 
             try {
               const result = await transformCSS({
@@ -848,7 +852,7 @@ export default function yetiPlugin(eleventyConfig, userConfig = {}) {
         }
       }
 
-      const jsOutputDir = resolve(join(output, "js"));
+      const resolvedJSOutputDir = resolve(join(output, jsOutputDir));
       /**
        * @type {Promise<unknown>}
        */
@@ -857,10 +861,13 @@ export default function yetiPlugin(eleventyConfig, userConfig = {}) {
       const combinedJSBundleKeyValuePairs = Object.entries(combinedJsBundles);
       if (combinedJSBundleKeyValuePairs.length > 0) {
         try {
-          await access(jsOutputDir);
+          await access(resolvedJSOutputDir);
         } catch (err) {
-          await mkdir(jsOutputDir, { recursive: true });
+          await mkdir(resolvedJSOutputDir, { recursive: true });
         }
+
+        // Only generate source maps if we're minifying
+        const shouldGenerateJSSourceMaps = shouldGenerateJSSourceMapsIfMinified && shouldMinifyJS;
 
         processJSBundlesPromise = Promise.allSettled(
           Object.entries(combinedJsBundles).map(async ([bundleName, jsChunkSet]) => {
@@ -870,9 +877,9 @@ export default function yetiPlugin(eleventyConfig, userConfig = {}) {
             }
 
             const outputFileName = `${bundleName}.js`;
-            const outputFilePath = join(jsOutputDir, `${bundleName}.js`);
+            const outputFilePath = join(resolvedJSOutputDir, `${bundleName}.js`);
             const outputMapFileName = `${outputFileName}.map`;
-            const outputMapFilePath = join(jsOutputDir, outputMapFileName);
+            const outputMapFilePath = join(resolvedJSOutputDir, outputMapFileName);
 
             const hash = createHash("md5").update(jsContent).digest("hex");
             if (bundleHashes[outputFilePath] === hash) {
@@ -899,7 +906,7 @@ export default function yetiPlugin(eleventyConfig, userConfig = {}) {
                 sourcefile: `${bundleName}.js`,
               });
               code = result.code;
-              if (shouldGenerateCSSSourceMaps && result.map) {
+              if (shouldGenerateJSSourceMaps && result.map) {
                 code = `${result.code}//# sourceMappingURL=${bundleName}.js.map`;
                 sourceMap = result.map;
               }

@@ -1,11 +1,12 @@
 {
   "name": "yeti-js",
-  "version": "0.0.0",
+  "version": "0.0.1",
   "type": "module",
   "author": "Ryan Geyer",
   "license": "MIT",
+  "homepage": "https://github.com/Gyanreyer/yeti-js",
   "main": "./src/index.js",
-  "types": "./src/types.d.s",
+  "types": "./src/types.d.ts",
   "engines": {
     "node": ">=24.0.0"
   },
