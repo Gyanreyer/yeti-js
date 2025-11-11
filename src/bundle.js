@@ -22,7 +22,6 @@ import { getConfig } from "./config.js";
  * @typedef {AnyCSSOrJSBundleObject | HTMLImportObject} AnyBundleObject
  */
 
-export const DEFAULT_BUNDLE_NAME = "default";
 export const WILDCARD_BUNDLE_NAME = "*";
 
 export const bundleNameSymbol = Symbol("bundle-name");
@@ -86,13 +85,13 @@ export const isBundleImportObject = (maybeBundleImportObj) =>
 /**
  * @template {AnyCSSOrJSBundleObject} TBundleObj
  * @param {TBundleObj} bundleObj
- * @returns {string | undefined}
+ * @returns {TBundleObj[typeof bundleNameSymbol]}
  */
 export const getBundleName = (bundleObj) => bundleObj[bundleNameSymbol];
 
 /**
  * @param {AnyBundleObject} bundleObj
- * @returns {AnyBundleObject[assetTypeSymbol]}
+ * @returns {AnyBundleObject[typeof assetTypeSymbol]}
  */
 export const getBundleAssetType = (bundleObj) => bundleObj[assetTypeSymbol];
 
@@ -110,7 +109,7 @@ export const doesBundleMatchAssetType = (bundleObj, expectedType) => {
 /**
  * @template {AnyBundleImportObject} TBundleImportObj
  * @param {TBundleImportObj} bundleImportObj
- * @returns {string}
+ * @returns {TBundleImportObj[typeof importFilePathSymbol]}
  */
 export const getBundleImportFilePath = (bundleImportObj) => bundleImportObj[importFilePathSymbol];
 

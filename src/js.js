@@ -1,4 +1,7 @@
-import { bundleNameSymbol, bundleSrcPrefix, bundleTypeSymbol, DEFAULT_BUNDLE_NAME, doesBundleMatchAssetType, getBundleImportFileContents, getBundleImportFilePath, getBundleName, getBundleAssetType, importFilePathSymbol, isBundleImportObject, isBundleStartObject, resolveImportPath, WILDCARD_BUNDLE_NAME, assetTypeSymbol } from "./bundle.js";
+import { bundleNameSymbol, bundleSrcPrefix, bundleTypeSymbol, doesBundleMatchAssetType, getBundleImportFileContents, getBundleImportFilePath, getBundleName, getBundleAssetType, importFilePathSymbol, isBundleImportObject, isBundleStartObject, resolveImportPath, WILDCARD_BUNDLE_NAME, assetTypeSymbol } from "./bundle.js";
+import { getConfig } from "./config.js";
+
+const getDefaultBundleName = () => getConfig().js.defaultBundleName;
 
 /**
  * @type {import("./types").js}
@@ -14,7 +17,7 @@ export const js = (strings, ...values) => {
      */
     const jsBundleDependencies = new Set();
 
-    let currentBundleName = DEFAULT_BUNDLE_NAME;
+    let currentBundleName = getDefaultBundleName();
 
     let currentBundleChunk = "";
 
@@ -58,9 +61,7 @@ export const js = (strings, ...values) => {
         }
 
         const bundleName = getBundleName(value);
-        if (bundleName !== undefined) {
-          currentBundleName = bundleName;
-        }
+        currentBundleName = bundleName;
       } else if (value !== undefined && value !== null) {
         // If the value is not a bundle object, append it to the current chunk as a string
         currentBundleChunk += String(value);
@@ -98,7 +99,7 @@ export const js = (strings, ...values) => {
 }
 
 
-js.bundle = (bundleName = DEFAULT_BUNDLE_NAME) => {
+js.bundle = (bundleName) => {
   if (bundleName === WILDCARD_BUNDLE_NAME) {
     throw new Error(`bundle() called with reserved wildcard bundle name "${WILDCARD_BUNDLE_NAME}"`);
   }

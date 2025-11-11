@@ -32,6 +32,11 @@ export type YetiConfig = {
      * @default "js"
      */
     outputDir: string;
+    /**
+     * The default JS bundle name to use when no bundle name is specified.
+     * @default "scripts"
+     */
+    defaultBundleName: string;
   };
   css: {
     /**
@@ -50,6 +55,11 @@ export type YetiConfig = {
      * @default "css"
      */
     outputDir: string;
+    /**
+     * The default CSS bundle name to use when no bundle name is specified.
+     * @default "styles"
+     */
+    defaultBundleName: string;
   }
   /**
    * The file extension used for Yeti page template files.
@@ -261,7 +271,7 @@ export declare const css: ((strings: TemplateStringsArray, ...values: any[]) => 
   /**
    * Marks the start of a new bundle for CSS content within a `css` template string.
    *
-   * @param {string} [bundleName] The name of the CSS bundle that all following CSS content will be appended to.
+   * @param {string} bundleName The name of the CSS bundle that all following CSS content will be appended to.
    *
    * @example
    * ```ts
@@ -281,7 +291,7 @@ export declare const css: ((strings: TemplateStringsArray, ...values: any[]) => 
    * `;
    * ```
    */
-  bundle: (bundleName?: string) => CSSOrJSBundleStartObject<"css">;
+  bundle: (bundleName: string) => CSSOrJSBundleStartObject<"css">;
   /**
    * Imports an external CSS file into a CSS bundle within a `css` template string.
    *
@@ -403,7 +413,7 @@ export declare const js: ((strings: TemplateStringsArray, ...values: any[]) => (
   /**
    * Marks the start of a new bundle for JavaScript content within a `js` template string.
    *
-   * @param {string} [bundleName] The name of the JavaScript bundle that all following JS content will be appended to.
+   * @param {string} bundleName The name of the JavaScript bundle that all following JS content will be appended to.
    *
    * @example
    * ```ts
@@ -419,7 +429,7 @@ export declare const js: ((strings: TemplateStringsArray, ...values: any[]) => (
    * `;
    * ```
    */
-  bundle: (bundleName?: string) => CSSOrJSBundleStartObject<"js">;
+  bundle: (bundleName: string) => CSSOrJSBundleStartObject<"js">;
   /**
    * Imports an external JavaScript file into a JavaScript bundle within a `js` template string.
    *
