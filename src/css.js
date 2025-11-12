@@ -133,3 +133,7 @@ css.import = (importPath, bundleName) => {
 css.src = (bundleName) => `${bundleSrcPrefix}${bundleName}`;
 
 css.inline = (bundleName) => `/*@--BUNDLE--${bundleName}--@*/`;
+
+Object.defineProperty(css, "defaultBundleName", {
+  get: getDefaultBundleName,
+});

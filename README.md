@@ -89,7 +89,7 @@ eleventyConfig.addPlugin(yetiPlugin, {
 String indicating the directory that bundled JavaScript assets should be written to relative to the site's root.
 Defaults to `"/js"`.
 
-For example, setting `"/scripts"` as the JS output directory means that the `default` JavaScript bundle will be served from `https://my-url.com/scripts/default.js`.
+For example, setting `"/scripts"` as the JS output directory means that the `global` JavaScript bundle will be served from `https://my-url.com/scripts/global.js`.
 
 Note that leading and trailing slashes are optional.
 
@@ -103,13 +103,13 @@ eleventyConfig.addPlugin(yetiPlugin, {
 
 #### `js.defaultBundleName`
 
-String indicating the default bundle name to gather JS assets into unless another bundle name is specified.
-Defaults to `"scripts"`.
+String indicating the default global bundle name to gather JS assets into unless another bundle name is specified.
+Defaults to `"global"`.
 
 ```js
 eleventyConfig.addPlugin(yetiPlugin, {
   js: {
-    defaultBundleName: "default",
+    defaultBundleName: "scripts",
   },
 });
 ```
@@ -165,13 +165,13 @@ eleventyConfig.addPlugin(yetiPlugin, {
 
 #### `css.defaultBundleName`
 
-String indicating the default bundle name to gather CSS assets into unless another bundle name is specified.
-Defaults to `"styles"`.
+String indicating the default global bundle name to gather CSS assets into unless another bundle name is specified.
+Defaults to `"global"`.
 
 ```js
 eleventyConfig.addPlugin(yetiPlugin, {
   css: {
-    defaultBundleName: "default",
+    defaultBundleName: "styles",
   },
 });
 ```
@@ -293,7 +293,7 @@ MyComponent.css = css`
     height: 400px;
   }
 
-  ${css.bundle("default")}
+  ${css.bundle("global")}
   .my-component {
     color: red;
   }

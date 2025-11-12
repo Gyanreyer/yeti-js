@@ -12,13 +12,13 @@ const config = {
     minify: true,
     sourceMaps: false,
     outputDir: "/js",
-    defaultBundleName: "scripts",
+    defaultBundleName: "global",
   },
   css: {
     minify: true,
     sourceMaps: false,
     outputDir: "/css",
-    defaultBundleName: "styles",
+    defaultBundleName: "global",
   },
   pageTemplateFileExtension: "page.js",
 };

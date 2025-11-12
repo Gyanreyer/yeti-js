@@ -15,8 +15,9 @@ export const flattenRenderResults = (results) => {
     cssDependencies: new Set(),
     jsBundles: {},
     jsDependencies: new Set(),
-    html: "",
+    htmlBundles: {},
     htmlDependencies: new Set(),
+    html: "",
   };
 
   for (const result of results) {
@@ -30,6 +31,12 @@ export const flattenRenderResults = (results) => {
       flattenedResult.jsBundles[bundleName] ??= new Set();
       for (const bundleChunk of result.jsBundles[bundleName]) {
         flattenedResult.jsBundles[bundleName].add(bundleChunk);
+      }
+    }
+    for (const bundleName in result.htmlBundles) {
+      flattenedResult.htmlBundles[bundleName] ??= new Set();
+      for (const bundleChunk of result.htmlBundles[bundleName]) {
+        flattenedResult.htmlBundles[bundleName].add(bundleChunk);
       }
     }
 

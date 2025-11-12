@@ -6,5 +6,5 @@ import { html } from '../html.js';
 export const Head = ({
   children,
 }) => {
-  return html`<head-->${children}</head-->`;
+  return html`<yeti-head-->${children}</yeti-head-->`;
 }

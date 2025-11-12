@@ -28,8 +28,9 @@ export function renderPageComponent(pageComponent, props) {
     cssDependencies: componentCSS?.cssDependencies ?? new Set(),
     jsBundles: {},
     jsDependencies: componentJS?.jsDependencies ?? new Set(),
-    html: "",
+    htmlBundles: {},
     htmlDependencies: new Set(),
+    html: "",
   }
 
   if (componentCSS) {

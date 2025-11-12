@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import { getConfig } from "./config.js";
 
 /**
- * @import { HTMLImportObject, CSSBundleStartObject, JSBundleStartObject, CSSBundleImportObject, JSBundleImportObject } from "./types";
+ * @import { HTMLImportObject, CSSBundleStartObject, JSBundleStartObject, CSSBundleImportObject, JSBundleImportObject, InlinedHTMLBundleContentObject } from "./types";
  */
 
 /**
@@ -29,6 +29,7 @@ export const bundleTypeSymbol = Symbol("bundle-type");
 export const assetTypeSymbol = Symbol("asset-type");
 export const importFilePathSymbol = Symbol("import-file-path");
 export const shouldEscapeHTMLSymbol = Symbol("should-escape-html");
+export const inlinedBundleContentTypeSymbol = Symbol("inlined-bundle-content-type");
 
 const FILE_URL_PREFIX = "file://";
 
@@ -83,7 +84,19 @@ export const isBundleImportObject = (maybeBundleImportObj) =>
   maybeBundleImportObj[bundleTypeSymbol] === "import";
 
 /**
- * @template {AnyCSSOrJSBundleObject} TBundleObj
+ * 
+ * @param {unknown} maybeInlinedBundleObj
+ * @returns {maybeInlinedBundleObj is InlinedHTMLBundleContentObject<string>}
+ */
+export const isInlinedHTMLBundleContentObject = (maybeInlinedBundleObj) =>
+  typeof maybeInlinedBundleObj === "object" && maybeInlinedBundleObj !== null &&
+  inlinedBundleContentTypeSymbol in maybeInlinedBundleObj &&
+  maybeInlinedBundleObj[inlinedBundleContentTypeSymbol] === "html";
+
+/**
+ * @template {{
+ *  [bundleNameSymbol]?: any;
+ * }} TBundleObj
  * @param {TBundleObj} bundleObj
  * @returns {TBundleObj[typeof bundleNameSymbol]}
  */
@@ -128,3 +141,5 @@ export const bundleSrcPrefixLength = bundleSrcPrefix.length;
 export const inlinedBundleRegex = /\/\*@--BUNDLE--(.*?)--@\*\//g;
 
 export const inlinedWildcardBundle = "/*@--BUNDLE--*--@*/";
+
+export const inlinedHTMLBundleTagName = "yeti-bundle--";

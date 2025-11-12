@@ -1,5 +1,5 @@
 import type EleventyUserConfig from '@11ty/eleventy/src/UserConfig';
-import type { bundleNameSymbol, bundleTypeSymbol, assetTypeSymbol, importFilePathSymbol, shouldEscapeHTMLSymbol, bundleSrcPrefix } from './bundle';
+import type { bundleNameSymbol, bundleTypeSymbol, assetTypeSymbol, importFilePathSymbol, shouldEscapeHTMLSymbol, bundleSrcPrefix, inlinedHTMLBundleTagName, inlinedBundleContentTypeSymbol } from './bundle';
 
 export type YetiConfig = {
   /**
@@ -33,8 +33,8 @@ export type YetiConfig = {
      */
     outputDir: string;
     /**
-     * The default JS bundle name to use when no bundle name is specified.
-     * @default "scripts"
+     * The default globa JS bundle name to use when no bundle name is specified.
+     * @default "global"
      */
     defaultBundleName: string;
   };
@@ -56,8 +56,8 @@ export type YetiConfig = {
      */
     outputDir: string;
     /**
-     * The default CSS bundle name to use when no bundle name is specified.
-     * @default "styles"
+     * The default global CSS bundle name to use when no bundle name is specified.
+     * @default "global"
      */
     defaultBundleName: string;
   }
@@ -78,6 +78,9 @@ export type RenderResult = {
     [bundleName: string]: Set<string>;
   };
   jsDependencies: Set<string>;
+  htmlBundles: {
+    [bundleName: string]: Set<string>;
+  };
   htmlDependencies: Set<string>;
 };
 
@@ -163,6 +166,16 @@ export type HTMLImportObject = {
    * The type of this bundle object, indicating that it is importing an external HTML file.
    */
   [bundleTypeSymbol]: "import";
+  /**
+   * The name of the bundle that this imported file's contents will be appended to.
+   * If not specified, the imported file contents will inlined in the spot where `html.import()` was called.
+   */
+  [bundleNameSymbol]?: string;
+};
+
+export type InlinedHTMLBundleContentObject<TBundleName extends string> = {
+  [inlinedBundleContentTypeSymbol]: "html";
+  [bundleNameSymbol]: TBundleName;
 };
 
 /**
@@ -178,12 +191,106 @@ export declare const html: ((strings: TemplateStringsArray, ...values: any[]) =>
    * Imports an external file as an HTML fragment.
    *
    * @param {string} importPath
-   * @param {boolean} [escape=false] Whether the imported content should be escaped.
-   *                                 This will convert characters like `<` and `>` to their HTML entity equivalents,
-   *                                 so only use this for text/attribute content, not HTML fragments.
+   * @param {Object} [options]
+   * @param {boolean} [options.escape=false] Whether the imported content should be escaped.
+   *                                          This will convert characters like `<` and `>` to their HTML entity equivalents,
+   *                                          so only use this for text/attribute content, not HTML fragments.
+   * @param {string} [options.bundleName] The name of the HTML content bundle that this imported file's contents will be appended to.
+   *                                          Bundled HTML content can be inlined into the final HTML output using the `html.inline(bundleName)` method.
+   *                                          This is mainly useful for things like SVG sprites that you want to include in the final HTML output.
+   *                                          If not specified, the imported file contents will inlined in the spot where `html.import()` was called.
    * @returns {HTMLImportObject}
+   *
+   * @example Importing an HTML fragment directly
+   * ```ts
+   * import { html } from 'yeti-js';
+   * const MyComponent = () => html`
+   *   <div>
+   *     ${html.import('./path/to/fragment.html')}
+   *   </div>
+   * `;
+   * ```
+   * 
+   * @example Importing and escaping text content
+   * ```ts
+   * import { html } from 'yeti-js';
+   * const MyComponent = () => html`
+   *  <div>
+   *   ${html.import('./path/to/text-content.txt', { escape: true })}
+   *  </div>
+   * `;
+   *
+   * @example Importing an HTML fragment into a named bundle
+   * ```ts
+   * import { html } from 'yeti-js';
+   * const MyComponent = () => html`
+   *   ${html.import('./path/to/icon.svg', { bundleName: 'svg-sprites' })}
+   *   <div>
+   *    <svg>
+   *      <use href="#icon-id"></use>
+   *    </svg>
+   *   </div>
+   * `;
+   *
+   * const MyLayout = ({ children }) => html`
+   *  <html>
+   *   <body>
+   *    <svg xmlns="http://www.w3.org/2000/svg">
+   *      <defs>
+   *        ${html.inline('svg-sprites')}
+   *      </defs>
+   *     </svg>
+   *     <header>My Site Header</header>
+   *     ${children}
+   *     <footer>My Site Footer</footer>
+   *   </body>
+   *  </html>
+   * `;
+   * ```
    */
-  import: (importPath: string, escape?: boolean) => HTMLImportObject;
+  import: (importPath: string, options?: {
+    /**
+     * Whether the imported content should be escaped.
+     * This will convert characters like `<` and `>` to their HTML entity equivalents,
+     * so only use this for text/attribute content, not HTML fragments.
+     * @default false
+     */
+    escape?: boolean;
+    /**
+     * The name of the HTML content bundle that this imported file's contents will be appended to.
+     * Bundled HTML content can be inlined into the final HTML output using the `html.inline(bundleName)` method.
+     * This is mainly useful for things like making an inlined SVG spritesheet which only includes SVGs that were used on the page.
+     * If not specified, the imported file contents will inlined in the spot where `html.import()` was called.
+     */
+    bundleName?: string;
+  }) => HTMLImportObject;
+  /**
+   * Generates a placeholder HTML tag in your HTML which will be replaced with the contents of the specified HTML bundle during processing.
+   *
+   * @param {string} bundleName The name of the HTML bundle to inline. Passing "*" will inline all HTML bundles used on the page which are not
+   *                            explicitly referenced elsewhere.
+   *
+   * @example Named bundle inline
+   * ```ts
+   * import { html } from 'yeti-js';
+   * const MyComponent = () => {
+   *   return html`
+   *    <svg xmlns="http://www.w3.org/2000/svg">
+   *      <defs>
+   *        ${html.inline('svg-sprites')}
+   *      </defs>
+   *   </svg>`;
+   * }
+   * // Expected output:
+   * // <svg xmlns="http://www.w3.org/2000/svg">
+   * //   <defs>
+   * //     <symbol id="icon-1-id" viewBox="0 0 24 24">...</symbol>
+   * //     <symbol id="icon-2-id" viewBox="0 0 24 24">...</symbol>
+   * //   </defs>
+   * // </svg>
+   * ```
+   */
+  inline: <TBundleName extends string>(bundleName: TBundleName) => InlinedHTMLBundleContentObject<TBundleName>;
 };
 
 type CSSOrJSBundleStartObject<TAssetType extends 'css' | 'js' = "css" | "js"> = {
@@ -390,6 +497,23 @@ export declare const css: ((strings: TemplateStringsArray, ...values: any[]) => 
    * ```
    */
   inline: <TBundleName extends string>(bundleName: TBundleName) => `/*@--BUNDLE--${TBundleName}--@*/`;
+  /**
+   * The default global CSS bundle name that is used when no bundle name is specified.
+   *
+   * @example
+   * ```ts
+   * import { css } from 'yeti-js';
+   *
+   * MyComponent.css = css`
+   *  ${css.bundle("critical")}
+   *  body { margin: 0; }
+   *
+   *  ${css.bundle(css.defaultBundleName)} // Reset back to the default global CSS bundle
+   *  h1 { color: red; }
+   * `;
+   * ```
+   */
+  get defaultBundleName(): string;
 };
 
 /**
@@ -519,6 +643,23 @@ export declare const js: ((strings: TemplateStringsArray, ...values: any[]) => (
    * ```
    */
   inline: <TBundleName extends string>(bundleName: TBundleName) => `/*@--BUNDLE--${TBundleName}--@*/`;
+  /**
+   * The default global CSS bundle name that is used when no bundle name is specified.
+   *
+   * @example
+   * ```ts
+   * import { js } from 'yeti-js';
+   *
+   * MyComponent.js = js`
+   *  ${js.bundle("other-bundle")}
+   *  console.log('This is part of the "other-bundle"');
+   *
+   *  ${js.bundle(js.defaultBundleName)} // Reset back to the default global JS bundle
+   *  console.log('This is part of the default global JS bundle');
+   * `;
+   * ```
+   */
+  get defaultBundleName(): string;
 };
 
 /**

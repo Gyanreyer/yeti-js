@@ -134,3 +134,7 @@ js.import = (importPath, bundleName) => {
 js.src = (bundleName) => `${bundleSrcPrefix}${bundleName}`;
 
 js.inline = (bundleName) => `/*@--BUNDLE--${bundleName}--@*/`;
+
+Object.defineProperty(js, "defaultBundleName", {
+  get: getDefaultBundleName,
+});

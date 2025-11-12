@@ -38,10 +38,14 @@ const getEleventyInstance = (inputDir, outputDir, config = {}) => {
 }
 
 /**
- * @param {string} inputDir
+ * @param {string} inputDirPath
  */
-const testInputDir = async (inputDir) => {
-  const siteOutputDir = resolve(inputDir, "_site");
+const testInputDir = async (inputDirPath) => {
+  const resolvedInputDir = fileURLToPath(import.meta.resolve(inputDirPath));
+  const siteOutputDir = resolve(
+    resolvedInputDir,
+    "_site",
+  );
   // Clean up the output directory from any previous test runs
   await rm(siteOutputDir, {
     recursive: true,
@@ -50,9 +54,9 @@ const testInputDir = async (inputDir) => {
     // Ignore errors
   });
 
-  const expectedOutputDir = resolve(inputDir, "_expected");
+  const expectedOutputDir = resolve(resolvedInputDir, "_expected");
 
-  const eleventy = getEleventyInstance(inputDir, siteOutputDir);
+  const eleventy = getEleventyInstance(resolvedInputDir, siteOutputDir);
   await eleventy.write();
   const actualSiteFiles = (await Array.fromAsync(glob(`${siteOutputDir}/**/*.*`))).map((filePath) =>
     filePath.slice(siteOutputDir.length + 1),
@@ -78,14 +82,18 @@ const testInputDir = async (inputDir) => {
 
 describe("Yeti Plugin", () => {
   test("Simple Page", async () => {
-    await testInputDir(fileURLToPath(import.meta.resolve("./simplePage")));
+    await testInputDir("./simplePage");
   });
 
   test("Page with Bundle Imports", async () => {
-    await testInputDir(fileURLToPath(import.meta.resolve("./pageWithBundleImports")));
+    await testInputDir("./pageWithBundleImports");
   });
 
   test("Pages with Components", async () => {
-    await testInputDir(fileURLToPath(import.meta.resolve("./pagesWithComponents")));
+    await testInputDir("./pagesWithComponents");
+  });
+
+  test("Page with HTML Bundle Inline", async () => {
+    await testInputDir("./pageWithHTMLBundleInline");
   });
 });

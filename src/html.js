@@ -1,7 +1,7 @@
 import htm from "htm";
 import { fileURLToPath } from "node:url";
 import { getCallSites } from "node:util";
-import { bundleTypeSymbol, doesBundleMatchAssetType, getBundleImportFileContents, getBundleImportFilePath, getBundleAssetType, importFilePathSymbol, isBundleImportObject, resolveImportPath, shouldEscapeHTMLSymbol, assetTypeSymbol } from "./bundle.js";
+import { bundleTypeSymbol, doesBundleMatchAssetType, getBundleImportFileContents, getBundleImportFilePath, getBundleAssetType, importFilePathSymbol, isBundleImportObject, resolveImportPath, shouldEscapeHTMLSymbol, assetTypeSymbol, bundleNameSymbol, getBundleName, inlinedHTMLBundleTagName, WILDCARD_BUNDLE_NAME, inlinedBundleContentTypeSymbol, isInlinedHTMLBundleContentObject } from "./bundle.js";
 import { escapeHTML } from "./utils/escapeHTML.js";
 import { flattenRenderResults } from "./utils/flattenRenderResults.js";
 
@@ -66,6 +66,13 @@ const h = (tagNameOrComponent, attrs, ...children) => {
   let serializedHTMLStr = "";
 
   attrs = attrs || {};
+
+  /**
+   * @type {{
+   *  [bundleName: string]: Set<string>;
+   * }}
+   */
+  const htmlBundles = {};
 
   /**
    * List of file paths that were involved in rendering this HTML
@@ -138,6 +145,7 @@ const h = (tagNameOrComponent, attrs, ...children) => {
       cssDependencies,
       jsBundles,
       jsDependencies,
+      htmlBundles,
       htmlDependencies,
     }].concat(componentRenderResults));
   }
@@ -188,6 +196,14 @@ const h = (tagNameOrComponent, attrs, ...children) => {
               }
             }
           }
+          if (children.htmlBundles) {
+            for (const bucketName in children.htmlBundles) {
+              htmlBundles[bucketName] ??= new Set();
+              for (const chunk of children.htmlBundles[bucketName]) {
+                htmlBundles[bucketName].add(chunk);
+              }
+            }
+          }
           if (children.cssDependencies) {
             for (const dependency of children.cssDependencies) {
               cssDependencies.add(dependency);
@@ -211,11 +227,17 @@ const h = (tagNameOrComponent, attrs, ...children) => {
           try {
             const importFilePath = getBundleImportFilePath(children);
             htmlDependencies.add(importFilePath);
-            const importFileContents = getBundleImportFileContents(children);
+            let importedFileContents = getBundleImportFileContents(children);
             if (shouldEscapeHTMLSymbol in children && children[shouldEscapeHTMLSymbol]) {
-              serializedHTMLStr += escapeHTML(importFileContents);
+              importedFileContents = escapeHTML(importedFileContents);
+            }
+
+            const bundleName = getBundleName(children);
+            if (bundleName && typeof bundleName === "string") {
+              htmlBundles[bundleName] ??= new Set();
+              htmlBundles[bundleName].add(importedFileContents);
             } else {
-              serializedHTMLStr += importFileContents;
+              serializedHTMLStr += importedFileContents;
             }
           } catch (err) {
             const importFilePath = getBundleImportFilePath(children);
@@ -223,6 +245,9 @@ const h = (tagNameOrComponent, attrs, ...children) => {
               cause: err,
             });
           }
+        } else if (isInlinedHTMLBundleContentObject(children)) {
+          const bundleName = getBundleName(children);
+          serializedHTMLStr += `<${inlinedHTMLBundleTagName} data-bundlename="${bundleName}"></${inlinedHTMLBundleTagName}>`;
         } else {
           serializedHTMLStr += escapeHTML(String(children));
         }
@@ -240,6 +265,7 @@ const h = (tagNameOrComponent, attrs, ...children) => {
     cssDependencies,
     jsBundles,
     jsDependencies,
+    htmlBundles,
     htmlDependencies,
   };
 }
@@ -247,9 +273,22 @@ const h = (tagNameOrComponent, attrs, ...children) => {
 const boundHTMLFunction = htm.bind(h);
 
 /**
- * @type {import("./types").html['import']}
+ * @type {import("./types").html}
  */
-const importHTML = (importPath, escape = false) => {
+export const html = (strings, ...values) => boundHTMLFunction(strings, ...values);
+
+html.import = (importPath, options = {}) => {
+  const {
+    escape = false,
+    bundleName
+  } = options;
+
+  if (bundleName !== undefined && typeof bundleName !== "string") {
+    throw new Error(`html.import() expected bundleName option to be a string if provided. Received type "${typeof bundleName}".`);
+  } else if (bundleName === WILDCARD_BUNDLE_NAME) {
+    throw new Error(`html.import() called with reserved wildcard bundle name "${WILDCARD_BUNDLE_NAME}"`);
+  }
+
   try {
     const resolvedFilePath = resolveImportPath(importPath);
     return {
@@ -257,6 +296,7 @@ const importHTML = (importPath, escape = false) => {
       [shouldEscapeHTMLSymbol]: escape,
       [assetTypeSymbol]: "html",
       [bundleTypeSymbol]: "import",
+      [bundleNameSymbol]: bundleName,
     };
   } catch (err) {
     throw new Error(`html.import() failed to resolve path to file at "${importPath}"`, {
@@ -265,6 +305,7 @@ const importHTML = (importPath, escape = false) => {
   }
 };
 
-export const html = /** @type {import("./types").html} */(Object.defineProperty(boundHTMLFunction, "import", {
-  value: importHTML,
-}));
+html.inline = (bundleName) => ({
+  [inlinedBundleContentTypeSymbol]: "html",
+  [bundleNameSymbol]: bundleName,
+});

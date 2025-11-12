@@ -1,4 +1,4 @@
-import { parse as parseHTML, serialize as serializeHTML, html as parse5HTML, defaultTreeAdapter } from 'parse5';
+import { parse as parseHTML, parseFragment as parseHTMLFragment, serialize as serializeHTML, html as parse5HTML, defaultTreeAdapter } from 'parse5';
 import { Features, transform as transformCSS, } from 'lightningcss';
 import { transform as transformJS } from 'esbuild';
 import {
@@ -15,7 +15,7 @@ import { styleText } from 'node:util';
 
 import { updateConfig } from './config.js';
 
-import { bundleSrcPrefix, bundleSrcPrefixLength, inlinedBundleRegex, inlinedWildcardBundle as inlinedWildCardBundle, WILDCARD_BUNDLE_NAME } from './bundle.js';
+import { bundleSrcPrefix, bundleSrcPrefixLength, inlinedBundleRegex, inlinedHTMLBundleTagName, inlinedWildcardBundle as inlinedWildCardBundle, WILDCARD_BUNDLE_NAME } from './bundle.js';
 import { renderPageComponent } from './renderPageComponent.js';
 import { queryElement, transformDocumentNodes, TRANSFORM_ACTIONS } from './utils/document.js';
 import { ensureHTMLHasDoctype } from './utils/ensureHTMLHasDoctype.js';
@@ -153,6 +153,7 @@ export const yetiPlugin = (eleventyConfig, userConfig = {}) => {
           html,
           cssBundles: renderedCSSBundles,
           jsBundles: renderedJSBundles,
+          htmlBundles: renderedHTMLBundles,
           cssDependencies: renderedCSSDeps,
           jsDependencies: renderedJSDeps,
           htmlDependencies: renderedHTMLDeps,
@@ -163,6 +164,7 @@ export const yetiPlugin = (eleventyConfig, userConfig = {}) => {
         // Set of JS bundles which were used on this page but haven't been inserted into script tags yet
         const unimportedJSBundleNameSet = new Set(Object.keys(renderedJSBundles));
         const unimportedCSSBundleNameSet = new Set(Object.keys(renderedCSSBundles));
+        const unimportedHTMLBundleNameSet = new Set(Object.keys(renderedHTMLBundles));
 
         const parsedDocument = parseHTML(
           // Parse5 will fail to parse documents without a doctype, so ensure we have one
@@ -180,9 +182,9 @@ export const yetiPlugin = (eleventyConfig, userConfig = {}) => {
          */
         let deduplicatedHeadNodes = {};
 
-        // Gather all <head> tag children and de-dupe them
+        // Initial HTML transformations: replace any named HTML bundle inline tags with the bundle contents and gather all <head> tag children and de-dupe them
         await transformDocumentNodes(parsedDocument, (node) => {
-          if (!defaultTreeAdapter.isElementNode(node) || (node.tagName !== "head" && node.tagName !== "head--")) {
+          if (!defaultTreeAdapter.isElementNode(node) || (node.tagName !== "head" && node.tagName !== "yeti-head--")) {
             return TRANSFORM_ACTIONS.CONTINUE;
           }
 
@@ -529,7 +531,42 @@ export const yetiPlugin = (eleventyConfig, userConfig = {}) => {
           return TRANSFORM_ACTIONS.CONTINUE;
         };
 
-        // Transform and process all <link> tags which import CSS bundles
+        /**
+         * @type {Set<Parse5Types.Element>}
+         */
+        const wildCardInlinedHTMLBundleTagNodes = new Set();
+
+        /**
+         * @param {Parse5Types.Element} node
+         * @returns {TransformResult}
+         */
+        const handleInlineBundleTag = (node) => {
+          const bundleNameAttr = node.attrs.find((attr) => attr.name === "data-bundlename");
+          if (typeof bundleNameAttr?.value !== "string") {
+            console.error(`Inlined HTML bundle tag is missing required bundle name on page ${data.page.url}. Skipping.`);
+            return TRANSFORM_ACTIONS.REMOVE;
+          } else {
+            const bundleName = bundleNameAttr.value;
+            if (bundleName === WILDCARD_BUNDLE_NAME) {
+              // This is a wildcard; we'll come back for this on a second pass after we've processed all other named bundle inlines
+              wildCardInlinedHTMLBundleTagNodes.add(node);
+              return TRANSFORM_ACTIONS.CONTINUE;
+            }
+            const htmlContent = renderedHTMLBundles[bundleName] ? Array.from(renderedHTMLBundles[bundleName]).join("").trim() : "";
+            unimportedHTMLBundleNameSet.delete(bundleName);
+            if (htmlContent) {
+              const parsedHTMLContent = parseHTMLFragment(htmlContent);
+              return [
+                TRANSFORM_ACTIONS.REPLACE,
+                ...parsedHTMLContent.childNodes
+              ];
+            }
+          }
+
+          return TRANSFORM_ACTIONS.REMOVE;
+        };
+
+        // Transform and process all tags which import bundles
         await transformDocumentNodes(parsedDocument,
           async (node) => {
             if (!defaultTreeAdapter.isElementNode(node)) {
@@ -545,6 +582,9 @@ export const yetiPlugin = (eleventyConfig, userConfig = {}) => {
               }
               case "script": {
                 return handleScriptNode(node);
+              }
+              case inlinedHTMLBundleTagName: {
+                return handleInlineBundleTag(node);
               }
               default: {
                 return TRANSFORM_ACTIONS.CONTINUE;
@@ -722,6 +762,31 @@ export const yetiPlugin = (eleventyConfig, userConfig = {}) => {
             scriptNode.childNodes = [];
             defaultTreeAdapter.insertText(scriptNode, scriptTagText);
           }
+        }
+
+        // Handle wildcard HTML bundle inlines last
+        const wildCardHTMLBundleNames = Array.from(unimportedHTMLBundleNameSet);
+
+        for (const inlineBundleTagNode of wildCardInlinedHTMLBundleTagNodes) {
+          if (!inlineBundleTagNode.parentNode) {
+            // We should expect the node to have a parent node here. If not, it's probably been removed already
+            // and can be ignored.
+            continue;
+          }
+
+          const combinedWildCardBundleContent = wildCardHTMLBundleNames.map((bundleName) => {
+            return renderedHTMLBundles[bundleName] ? Array.from(renderedHTMLBundles[bundleName]).join("").trim() : "";
+          }).join("\n").trim();
+
+          const parsedHTMLContent = parseHTMLFragment(combinedWildCardBundleContent);
+
+          // Replace the inline bundle tag with the parsed content
+          const insertionIndex = inlineBundleTagNode.parentNode.childNodes.indexOf(inlineBundleTagNode);
+          inlineBundleTagNode.parentNode.childNodes.splice(insertionIndex, 1, ...parsedHTMLContent.childNodes);
+          for (const newNode of parsedHTMLContent.childNodes) {
+            newNode.parentNode = inlineBundleTagNode.parentNode;
+          }
+          inlineBundleTagNode.parentNode = null;
         }
 
         return serializeHTML(parsedDocument);

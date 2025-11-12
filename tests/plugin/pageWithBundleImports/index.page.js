@@ -7,7 +7,7 @@ export default function IndexPage() {
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Page With Bundle Imports Plugin Test</title>
-    <link rel="preload" as="style" href="${css.src("default")}" />
+    <link rel="preload" as="style" href="${css.src(css.defaultBundleName)}" />
     <link rel="stylesheet" href="${css.src("*")}" />
     <script type="module">
       ${js.inline("index")}
@@ -21,7 +21,7 @@ export default function IndexPage() {
   <body>
     <h1>Hello, Yeti!</h1>
    ${html.import("./partials/frag.html")}
-    <p>${html.import("./partials/some-text.txt", true)}</p>
+    <p>${html.import("./partials/some-text.txt", { escape: true })}</p>
     <script type="module" src="${js.src("*")}"></script>
   </body>
 </html>
@@ -29,7 +29,7 @@ export default function IndexPage() {
 }
 
 IndexPage.css = css`
-  ${css.import("./css/reset.css", "default")}
+  ${css.import("./css/reset.css")}
   ${css.import("./css/other.css", "other")}
 
   ${css.bundle("index")}
@@ -40,7 +40,7 @@ IndexPage.css = css`
 `;
 
 IndexPage.js = js`
-  ${js.import("./scripts/global.js", "default")}
+  ${js.import("./scripts/global.js")}
   ${js.import("./scripts/other.js", "other")}
 
   ${js.bundle("index")}

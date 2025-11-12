@@ -7,12 +7,12 @@ export default function IndexPage() {
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Simple Page Plugin Test</title>
-    <style>${css.inline("default")}</style>
+    <style>${css.inline(css.defaultBundleName)}</style>
   </head>
   <body>
     <h1>Hello, Yeti!</h1>
     <script type="module">
-      ${js.inline("default")}
+      ${js.inline(js.defaultBundleName)}
     </script>
   </body>
 </html>`;

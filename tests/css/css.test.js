@@ -18,7 +18,7 @@ describe('css tagged template function', () => {
 
     assert.deepEqual(result, /** @type {CSSResult} */({
       cssBundles: {
-        default: `body {
+        global: `body {
         margin: 1000px;
       }`,
       },
@@ -60,7 +60,7 @@ describe('css tagged template function', () => {
 
     assert.deepEqual(result, /** @type {CSSResult} */({
       cssBundles: {
-        default: `body {
+        global: `body {
   margin: 0;
 }`,
         "my-bundle": `:root {
@@ -92,7 +92,7 @@ describe('css tagged template function', () => {
 
     assert.deepEqual(result, /** @type {CSSResult} */({
       cssBundles: {
-        default: `body {
+        global: `body {
   margin: 0;
 }
 

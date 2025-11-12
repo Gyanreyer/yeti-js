@@ -16,7 +16,7 @@ describe('js tagged template function', () => {
 
     assert.deepEqual(result, /** @type {JSResult} */({
       jsBundles: {
-        default: `{
+        global: `{
 console.log("Hello, world!");
 }`,
       },
@@ -37,7 +37,7 @@ console.log("Hello, world!");
 
     assert.deepEqual(result, /** @type {JSResult} */({
       jsBundles: {
-        default: `{
+        global: `{
 console.log("This is in the default bundle");
 }`,
         "my-bundle": `{
@@ -59,7 +59,7 @@ console.log("This is another-bundle");
 
     assert.deepEqual(result, /** @type {JSResult} */({
       jsBundles: {
-        default: `{
+        global: `{
 // Send an alert for js file 1
 window.alert("This is js-file-1.js");
 
@@ -88,7 +88,7 @@ window.alert("This is js-file-2.js");
 
     assert.deepEqual(result, /** @type {JSResult} */({
       jsBundles: {
-        default: `{
+        global: `{
 console.log("In default bundle");
 }`,
         "my-bundle": `{
