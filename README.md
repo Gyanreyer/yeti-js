@@ -179,6 +179,79 @@ const NamePage: YetiPageComponent<{ name: string; }> = ({
 See [11ty's data configuration docs](https://www.11ty.dev/docs/data-configuration/) for more
 details on ways to configure your page's output.
 
+## Core Components
+
+### Head Component
+
+The `Head` component is a special component which allows you to inject content into the HTML document's `<head>` section from anywhere within your component tree. This is particularly useful for components that need to add page-specific meta tags, titles, or other head content without requiring you to pass that data up through component props.
+
+```ts
+import { html, Head } from 'yeti-js';
+
+const ArticlePage = ({ article }) => {
+  return html`<${Layout}>
+    <${Head}>
+      <title>${article.title} - My Blog</title>
+      <meta name="description" content="${article.excerpt}" />
+      <meta property="og:title" content="${article.title}" />
+      <meta property="og:description" content="${article.excerpt}" />
+    </>
+    
+    <article>
+      <h1>${article.title}</h1>
+      <p>${article.content}</p>
+    </article>
+  <//>`;
+};
+```
+
+Any tags included within the `Head` component will be merged into the page's `<head>` section. If there are conflicting tags (like multiple `<title>` tags), the ones from `Head` components will take priority and override any that were defined directly in the page's head.
+
+You can use multiple `Head` components throughout your component tree, and all of their contents will be collected and merged into the final document head:
+
+```ts
+const Layout = ({ children, title }) => {
+  return html`<html>
+    <head>
+      <title>Default Title</title>
+      <meta name="description" content="Default description" />
+      <meta name="viewport" content="width=device-width, initial-scale=1" />
+    </head>
+    <body>
+      ${children}
+    </body>
+  </html>`;
+};
+
+const BlogPost = ({ post }) => {
+  return html`<${Layout}>
+    <${Head}>
+      <title>${post.title} - My Blog</title>
+      <meta name="description" content="${post.excerpt}" />
+    </>
+    
+    <article>
+      <h1>${post.title}</h1>
+      <p>${post.content}</p>
+    </article>
+  </>`;
+};
+
+/**
+ * Expected output:
+ * <html>
+ *  <head>
+ *    <title>Title - My Blog</title>
+ *    <meta name="description" content="My excerpt">
+ *    <meta name="viewport" content="width=device-width, initial-scale=1">
+ *  <body>
+ *    <h1>Title</h1>
+ *    <p>My blog content</p>
+ *  </body>
+ * </html>
+ */
+```
+
 ## Asset Bundling
 
 Yeti provides helpful bundling capabilities which allow you to attach JavaScript and CSS to
@@ -645,3 +718,4 @@ const Layout = ({ children }) => html`
   </html>
 `;
 ```
+

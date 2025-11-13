@@ -679,6 +679,8 @@ export declare function yetiPlugin(eleventyConfig: EleventyUserConfig, userConfi
 
 /**
  * Component to inject content into the HTML document's `<head>` section.
+ * Any tags included within the `Head` component will be merged into the page's `<head>` and override any
+ * conflicting tags defined there (e.g., `<title>`, `<meta>` tags).
  *
  * @example
  * ```ts
