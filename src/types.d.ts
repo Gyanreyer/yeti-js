@@ -13,6 +13,12 @@ export type YetiConfig = {
    */
   outputDir: string;
   /**
+   * Whether to suppress non-error logging output from the Yeti plugin.
+   * You should not need to set this directly as we will infer it from your 11ty project;
+   * set quiet mode with `eleventyConfig.setQuietMode(true)` instead.
+   */
+  quietMode: boolean;
+  /**
    * Config for JavaScript bundling and output.
    */
   js: {
@@ -675,7 +681,7 @@ export declare const js: ((strings: TemplateStringsArray, ...values: any[]) => (
  * }
  * ```
  */
-export declare function yetiPlugin(eleventyConfig: EleventyUserConfig, userConfig: Omit<Partial<YetiConfig>, "inputDir" | "outputDir">): void;
+export declare function yetiPlugin(eleventyConfig: EleventyUserConfig, userConfig: Omit<Partial<YetiConfig>, "inputDir" | "outputDir" | "quietMode">): void;
 
 /**
  * Component to inject content into the HTML document's `<head>` section.

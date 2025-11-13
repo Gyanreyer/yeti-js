@@ -19,6 +19,7 @@ import { bundleSrcPrefix, bundleSrcPrefixLength, inlinedBundleRegex, inlinedHTML
 import { renderPageComponent } from './renderPageComponent.js';
 import { queryElement, transformDocumentNodes, TRANSFORM_ACTIONS } from './utils/document.js';
 import { ensureHTMLHasDoctype } from './utils/ensureHTMLHasDoctype.js';
+import { log } from './log.js';
 
 /**
  * @import { DefaultTreeAdapterTypes as Parse5Types } from 'parse5';
@@ -58,18 +59,26 @@ export const yetiPlugin = (eleventyConfig, userConfig = {}) => {
   eleventyConfig.on("eleventy.before",
     /**
      * @param {{
+     *  inputDir: string;
      *  directories: {
      *   input: string;
+     *   output: string;
      *  };
      * }} params
      */
     async ({
+      // Absolute path to input directory
+      inputDir,
+      // Object with paths relative to input dir
       directories: {
-        input
-      },
+        input: relativeInputDir,
+        output: relativeOutputDir,
+      }
     }) => {
       updateConfig({
-        inputDir: resolve(input),
+        inputDir: resolve(inputDir, relativeInputDir),
+        outputDir: resolve(inputDir, relativeOutputDir),
+        quietMode: eleventyConfig.quietMode,
         ...userConfig,
       })
     });
@@ -753,6 +762,7 @@ export const yetiPlugin = (eleventyConfig, userConfig = {}) => {
             }
           } catch (err) {
             console.error(`Error processing inlined JS on page ${data.page.url}: ${err}`);
+            // TODO: improve error message handling to match when we process external JS bundles
           }
 
           if (scriptTagText.length === 0) {
@@ -890,7 +900,7 @@ export const yetiPlugin = (eleventyConfig, userConfig = {}) => {
               });
             }
 
-            console.log("Writing CSS bundle", bundleName, "to", outputFilePath);
+            log(`Writing CSS bundle "${styleText("yellow", bundleName)}" to ${outputFilePath}`);
 
             await writeFile(outputFilePath, codeBytes, "utf8");
             if (shouldGenerateCSSSourceMaps && sourceMapBytes !== null) {
@@ -973,7 +983,7 @@ export const yetiPlugin = (eleventyConfig, userConfig = {}) => {
               }
             } catch (err) {
               if (err instanceof Error && err.stack) {
-                console.error(`${styleText("red", `Error processing JS bundle "${bundleName}"`)}:\n${styleText("yellow", err.message.replace(/^/gm, "  "))}`);
+                let errorMessageText = styleText("red", `${styleText("gray", "[Yeti]")} Error processing JS bundle ${styleText("underline", `${bundleName}`)}:\n${styleText("yellow", err.message.replace(/^/gm, "  "))}\n`);
                 // Parse line number and column from esbuild error stack and log lines above and below for context,
                 // highlighting the specified column.
                 const stackLines = err.stack.split("\n").slice(0, 2);
@@ -989,23 +999,23 @@ export const yetiPlugin = (eleventyConfig, userConfig = {}) => {
                     const isErrorLine = (i + 1 === lineNum);
                     const lineIndicator = isErrorLine ? ">" : " ";
                     const lineContent = jsContentLines[i];
-                    console.error(styleText(isErrorLine ? "white" : "dim", `${lineIndicator} ${i + 1} | ${lineContent}`));
+                    errorMessageText += `${styleText(isErrorLine ? "white" : "dim", `${lineIndicator} ${i + 1} | ${lineContent}`)}\n`;
                     if (i + 1 === lineNum) {
-                      console.error(styleText("white", " ".repeat(colNum + (`${i + 1} | `).length + 1) + "^"));
+                      errorMessageText += `${styleText("white", " ".repeat(colNum + (`${i + 1} | `).length + 1) + "^")}\n`;
                     }
                   }
-                  // Log an extra line after the code frame for spacing
-                  console.log("");
                 }
+
+                console.error(errorMessageText);
               } else {
-                console.error(`Unknown error processing JS bundle ${bundleName}:`, err);
+                console.error(`${styleText("dim", "[Yeti]")} Unknown error processing JS bundle ${bundleName}:`, err);
               }
               throw new Error(`Error processing JS bundle ${bundleName}`, {
                 cause: err,
               });
             }
 
-            console.log("Writing JS bundle", bundleName, "to", outputFilePath);
+            log(`Writing JS bundle "${styleText("yellow", bundleName)}" to ${outputFilePath}`);
 
             await writeFile(outputFilePath, code, "utf8");
             if (shouldGenerateJSSourceMaps && sourceMap !== null) {

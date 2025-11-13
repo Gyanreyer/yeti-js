@@ -32,6 +32,7 @@ const getEleventyInstance = (inputDir, outputDir, config = {}) => {
       eleventyConfig.ignores.add("**/_expected/**");
       eleventyConfig.ignores.add("**/*.html");
       eleventyConfig.addPlugin(yetiPlugin, config);
+      eleventyConfig.setQuietMode(true);
     },
   });
   return eleventy;

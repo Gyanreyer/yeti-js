@@ -21,6 +21,7 @@ const config = {
     defaultBundleName: "global",
   },
   pageTemplateFileExtension: "page.js",
+  quietMode: false,
 };
 
 /**
@@ -58,7 +59,8 @@ const mergeConfigs = (baseConfig, newConfig) => {
  * @param {Partial<YetiConfig>} newConfig
  */
 export const updateConfig = (newConfig) => {
-  return mergeConfigs(config, newConfig);
+  const merged = mergeConfigs(config, newConfig);
+  return Object.assign(config, merged);
 };
 
 export const getConfig = () => config;
