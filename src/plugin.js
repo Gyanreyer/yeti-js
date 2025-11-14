@@ -19,7 +19,7 @@ import { bundleSrcPrefix, bundleSrcPrefixLength, inlinedBundleRegex, inlinedHTML
 import { renderPageComponent } from './renderPageComponent.js';
 import { queryElement, transformDocumentNodes, TRANSFORM_ACTIONS } from './utils/document.js';
 import { ensureHTMLHasDoctype } from './utils/ensureHTMLHasDoctype.js';
-import { log } from './log.js';
+import { log, logError, logWarning } from './log.js';
 
 /**
  * @import { DefaultTreeAdapterTypes as Parse5Types } from 'parse5';
@@ -180,7 +180,7 @@ export const yetiPlugin = (eleventyConfig, userConfig = {}) => {
           ensureHTMLHasDoctype(html),
           {
             onParseError: (err) => {
-              console.error(`Error parsing HTML on page ${data.page.url}:`, err);
+              logError(`Error parsing HTML on page ${data.page.url}:`, err);
             },
             sourceCodeLocationInfo: false,
           },
@@ -346,7 +346,7 @@ export const yetiPlugin = (eleventyConfig, userConfig = {}) => {
           }
           const cssContent = renderedCSSBundles[globalImportBundleName] ? Array.from(renderedCSSBundles[globalImportBundleName]).join("") : null;
           if (!cssContent) {
-            console.error(`CSS bundle "${globalImportBundleName}" is unused on page ${data.page.url}. Removing link tag.`);
+            logError(`CSS bundle "${globalImportBundleName}" is unused on page ${data.page.url}. Removing link tag.`);
             // Remove the link if the bundle is not used on this page
             return TRANSFORM_ACTIONS.REMOVE;
           }
@@ -396,7 +396,7 @@ export const yetiPlugin = (eleventyConfig, userConfig = {}) => {
 
           styleTagText = styleTagText.trim();
           if (styleTagText.length === 0) {
-            console.warn(`Empty <style> tag found on page ${data.page.url}. Removing.`);
+            logWarning(`Empty <style> tag found on page ${data.page.url}. Removing.`);
             return TRANSFORM_ACTIONS.REMOVE;
           }
 
@@ -411,7 +411,7 @@ export const yetiPlugin = (eleventyConfig, userConfig = {}) => {
               unimportedCSSBundleNameSet.delete(bundleName);
               const cssContent = renderedCSSBundles[bundleName] ? Array.from(renderedCSSBundles[bundleName]).join("") : null;
               if (cssContent === null) {
-                console.error(`No CSS bundle found with name "${bundleName}" to inline on page ${data.page.url}`);
+                logError(`No CSS bundle found with name "${bundleName}" to inline on page ${data.page.url}`);
                 return "";
               }
 
@@ -420,7 +420,7 @@ export const yetiPlugin = (eleventyConfig, userConfig = {}) => {
           ).trim();
 
           if (styleTagText.length === 0) {
-            console.warn(`Empty <style> tag found on page ${data.page.url} after resolving bundles. Removing.`);
+            logWarning(`Empty <style> tag found on page ${data.page.url} after resolving bundles. Removing.`);
             return TRANSFORM_ACTIONS.REMOVE;
           }
 
@@ -468,7 +468,7 @@ export const yetiPlugin = (eleventyConfig, userConfig = {}) => {
                 unimportedJSBundleNameSet.delete(globalImportBundleName);
                 const jsContent = renderedJSBundles && renderedJSBundles[globalImportBundleName] ? Array.from(renderedJSBundles[globalImportBundleName]).join("") : null;
                 if (!jsContent) {
-                  console.error(`JS bundle "${globalImportBundleName}" is unused on page ${data.page.url}. Removing script tag.`);
+                  logError(`JS bundle "${globalImportBundleName}" is unused on page ${data.page.url}. Removing script tag.`);
                   // Remove the script if the bundle is not used on this page
                   return TRANSFORM_ACTIONS.REMOVE;
                 }
@@ -501,7 +501,7 @@ export const yetiPlugin = (eleventyConfig, userConfig = {}) => {
           scriptTagText = scriptTagText.trim();
 
           if (scriptTagText.length === 0) {
-            console.warn(`Empty <script> tag found on page ${data.page.url}. Removing.`);
+            logWarning(`Empty <script> tag found on page ${data.page.url}. Removing.`);
             return TRANSFORM_ACTIONS.REMOVE;
           }
 
@@ -517,7 +517,7 @@ export const yetiPlugin = (eleventyConfig, userConfig = {}) => {
               unimportedJSBundleNameSet.delete(bundleName);
               const jsContent = renderedJSBundles && renderedJSBundles[bundleName] ? Array.from(renderedJSBundles[bundleName]).join("") : null;
               if (jsContent === null) {
-                console.error(`No JS bundle found with name "${bundleName}" to inline on page ${data.page.url}`);
+                logError(`No JS bundle found with name "${bundleName}" to inline on page ${data.page.url}`);
                 return "";
               }
 
@@ -526,7 +526,7 @@ export const yetiPlugin = (eleventyConfig, userConfig = {}) => {
           ).trim();
 
           if (scriptTagText.length === 0) {
-            console.warn(`Empty <script> tag found on page ${data.page.url} after resolving bundles. Removing.`);
+            logWarning(`Empty <script> tag found on page ${data.page.url} after resolving bundles. Removing.`);
             return TRANSFORM_ACTIONS.REMOVE;
           }
 
@@ -552,7 +552,7 @@ export const yetiPlugin = (eleventyConfig, userConfig = {}) => {
         const handleInlineBundleTag = (node) => {
           const bundleNameAttr = node.attrs.find((attr) => attr.name === "data-bundlename");
           if (typeof bundleNameAttr?.value !== "string") {
-            console.error(`Inlined HTML bundle tag is missing required bundle name on page ${data.page.url}. Skipping.`);
+            logError(`Inlined HTML bundle tag is missing required bundle name on page ${data.page.url}. Skipping.`);
             return TRANSFORM_ACTIONS.REMOVE;
           } else {
             const bundleName = bundleNameAttr.value;
@@ -726,11 +726,11 @@ export const yetiPlugin = (eleventyConfig, userConfig = {}) => {
               styleTagText = processedInlineBundleCache[styleTagContentHash] = decoder.decode(code);
             }
           } catch (err) {
-            console.error(`Error processing inlined CSS on page ${data.page.url}: ${err}`);
+            logError(`Error processing inlined CSS on page ${data.page.url}:`, err);
           }
 
           if (styleTagText.length === 0) {
-            console.warn(`Empty <style> tag found on page ${data.page.url} after processing. Removing.`);
+            logWarning(`Empty <style> tag found on page ${data.page.url} after processing. Removing.`);
             defaultTreeAdapter.detachNode(styleNode);
           } else {
             styleNode.childNodes = [];
@@ -761,12 +761,12 @@ export const yetiPlugin = (eleventyConfig, userConfig = {}) => {
               scriptTagText = processedInlineBundleCache[scriptTagContentHash] = transformedCode.trimEnd();
             }
           } catch (err) {
-            console.error(`Error processing inlined JS on page ${data.page.url}: ${err}`);
+            logError(`Error processing inlined JS on page ${data.page.url}:`, err);
             // TODO: improve error message handling to match when we process external JS bundles
           }
 
           if (scriptTagText.length === 0) {
-            console.warn(`Empty <script> tag found on page ${data.page.url} after processing. Removing.`);
+            logWarning(`Empty <script> tag found on page ${data.page.url} after processing. Removing.`);
             defaultTreeAdapter.detachNode(scriptNode);
           } else {
             scriptNode.childNodes = [];
@@ -894,7 +894,7 @@ export const yetiPlugin = (eleventyConfig, userConfig = {}) => {
                 codeBytes = combinedCode;
               }
             } catch (err) {
-              console.error(`Error processing CSS bundle ${bundleName}:`, err);
+              logError(`Error processing CSS bundle ${bundleName}:`, err);
               throw new Error(`Error processing CSS bundle ${bundleName}`, {
                 cause: err,
               });
@@ -983,7 +983,7 @@ export const yetiPlugin = (eleventyConfig, userConfig = {}) => {
               }
             } catch (err) {
               if (err instanceof Error && err.stack) {
-                let errorMessageText = styleText("red", `${styleText("gray", "[Yeti]")} Error processing JS bundle ${styleText("underline", `${bundleName}`)}:\n${styleText("yellow", err.message.replace(/^/gm, "  "))}\n`);
+                let errorMessageText = styleText("red", `Error processing JS bundle ${styleText("underline", `${bundleName}`)}:\n${styleText("yellow", err.message.replace(/^/gm, " ".repeat(2)))}\n`);
                 // Parse line number and column from esbuild error stack and log lines above and below for context,
                 // highlighting the specified column.
                 const stackLines = err.stack.split("\n").slice(0, 2);
@@ -1006,9 +1006,9 @@ export const yetiPlugin = (eleventyConfig, userConfig = {}) => {
                   }
                 }
 
-                console.error(errorMessageText);
+                logError(errorMessageText);
               } else {
-                console.error(`${styleText("dim", "[Yeti]")} Unknown error processing JS bundle ${bundleName}:`, err);
+                logError(`Unknown error processing JS bundle ${bundleName}:`, err);
               }
               throw new Error(`Error processing JS bundle ${bundleName}`, {
                 cause: err,
