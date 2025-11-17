@@ -8,7 +8,7 @@ An HTML templating plugin for [11ty](11ty.dev) which allows flexible authoring o
 const IndexPage: YetiPageComponent = () => {
   return html`<${BaseLayout} title="Home">
     <h1>Hello, world!</h1>
-  </>`;
+  <//>`;
 };
 
 IndexPage.js = js`
@@ -45,7 +45,9 @@ Yeti uses [HTM](https://github.com/developit/htm) and a forked and heavily modif
 // index.page.js
 import { YetiComponent, YetiPageComponent } from 'yeti-js';
 
-const SayHello: YetiComponent<{ name: string; }> = () => {
+const SayHello: YetiComponent<{ name: string; }> = ({
+  name,
+}) => {
   return html`<h1>Hello, ${name}!`;
 }
 
@@ -195,7 +197,7 @@ const ArticlePage = ({ article }) => {
       <meta name="description" content="${article.excerpt}" />
       <meta property="og:title" content="${article.title}" />
       <meta property="og:description" content="${article.excerpt}" />
-    </>
+    <//>
     
     <article>
       <h1>${article.title}</h1>
@@ -228,13 +230,13 @@ const BlogPost = ({ post }) => {
     <${Head}>
       <title>${post.title} - My Blog</title>
       <meta name="description" content="${post.excerpt}" />
-    </>
+    <//>
     
     <article>
       <h1>${post.title}</h1>
       <p>${post.content}</p>
     </article>
-  </>`;
+  <//>`;
 };
 
 /**
@@ -348,7 +350,7 @@ MyComponent.css = css`
 `;
 ```
 
-#### `css.import`
+#### `css.import()`
 
 At any point in a `css` template string, you can import the source from an external file into the
 CSS bundle by calling `css.import()` with a file path and optional bundle name.
@@ -369,7 +371,7 @@ MyComponent.css = css`
 `;
 ```
 
-#### `css.src`
+#### `css.src()`
 
 To output a CSS bundle into an external file that is loaded with a `<link rel="stylesheet">` tag,
 you can create a `<link rel="stylesheet">` tag and pass `css.src(bundleName)` as the `href` attribute.
@@ -421,6 +423,75 @@ const HomePage = () => html`<html>
  */
 ```
 
+#### `css.inline()`
+
+To inline CSS content directly into a `<style>` tag instead of loading it from an external file,
+you can place `css.inline(bundleName)` inside a `<style>` tag.
+
+In the plugin processing step, the `css.inline()` call will be replaced with the actual CSS
+content from the specified bundle.
+
+```js
+import { html, css } from 'yeti-js';
+
+const HomePage = () => html`<html>
+  <head>
+    <style>
+      ${css.inline("critical")}
+    </style>
+  </head>
+  <body>
+    <style>
+      ${css.inline("global")}
+    </style>
+  </body>
+</html>`;
+
+/**
+ * Expected output:
+ * <html>
+ *  <head>
+ *    <style>
+ *      // Inlined CSS from the "critical" bundle
+ *    </style>
+ *  </head>
+ *  <body>
+ *    <script>
+ *      // Inlined CSS from the "global" bundle
+ *    </script>
+ *  </body>
+ * </html>
+ */
+```
+
+You can also pass in a `"*"` wildcard to `css.inline()` to inline every bundle that was
+used on the page and has not been loaded by any other tags.
+
+```js
+import { html, css } from 'yeti-js';
+
+// HomePage's components have CSS in the "global" and "interactions" bundles.
+const HomePage = () => html`<html>
+  <body>
+    <style>
+      ${js.inline("*")}
+    </style>
+  </body>
+</html>`;
+
+/**
+ * Expected output:
+ * <html>
+ *  <body>
+ *    <style>
+ *      // Inlined CSS from the "global" bundle
+ *      // Inlined CSS from the "interactions" bundle
+ *    </style>
+ *  </body>
+ * </html>
+ */
+```
+
 ### JS bundling
 
 You can attach JavaScript to any Yeti Component by setting its `js` property to a `js` tagged template string.
@@ -467,7 +538,7 @@ MyComponent.js = js`
 `;
 ```
 
-#### `js.import`
+#### `js.import()`
 
 At any point in a `js` template string, you can import the source from an external file into the
 JavaScript bundle by calling `js.import()` with a file path and optional bundle name.
@@ -488,7 +559,7 @@ MyComponent.js = js`
 `;
 ```
 
-#### `js.src`
+#### `js.src()`
 
 To output a JavaScript bundle into an external file that is loaded with a `<script src="">` tag,
 you can create a `<script>` tag and pass `js.src(bundleName)` as the `src` attribute.
@@ -546,7 +617,7 @@ const HomePage = () => html`<html>
  */
 ```
 
-#### `js.inline`
+#### `js.inline()`
 
 To inline JavaScript content directly into a `<script>` tag instead of loading it from an external file,
 you can place `js.inline(bundleName)` inside a `<script>` tag.
@@ -663,7 +734,7 @@ const IconComponent = ({ iconName }) => html`
 `;
 ```
 
-#### `html.inline`
+#### `html.inline()`
 
 To output bundled HTML content directly into your markup, you can use `html.inline()` with the bundle name:
 
