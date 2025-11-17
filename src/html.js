@@ -1,9 +1,10 @@
-import htm from "htm";
+// import htm from "htm";
 import { fileURLToPath } from "node:url";
 import { getCallSites } from "node:util";
 import { bundleTypeSymbol, doesBundleMatchAssetType, getBundleImportFileContents, getBundleImportFilePath, getBundleAssetType, importFilePathSymbol, isBundleImportObject, resolveImportPath, shouldEscapeHTMLSymbol, assetTypeSymbol, bundleNameSymbol, getBundleName, inlinedHTMLBundleTagName, WILDCARD_BUNDLE_NAME, inlinedBundleContentTypeSymbol, isInlinedHTMLBundleContentObject } from "./bundle.js";
 import { escapeHTML } from "./utils/escapeHTML.js";
 import { flattenRenderResults } from "./utils/flattenRenderResults.js";
+import { htm } from "./htm-forked.js";
 
 /**
  * @import { YetiComponent, RenderResult } from "./types"
@@ -60,9 +61,9 @@ const isRenderResultChild = (child) => typeof child === 'object' && child !== nu
  *  [key: string]: any;
  * }} [attrs]
  * @param {unknown[]} children
- * @returns {RenderResult}
+ * @returns {Promise<RenderResult>}
  */
-const h = (tagNameOrComponent, attrs, ...children) => {
+const h = async (tagNameOrComponent, attrs, ...children) => {
   let serializedHTMLStr = "";
 
   attrs = attrs || {};
@@ -123,7 +124,7 @@ const h = (tagNameOrComponent, attrs, ...children) => {
       }
     }
 
-    const componentJS = tagNameOrComponent.js?.();
+    const componentJS = await tagNameOrComponent.js?.();
     if (componentJS) {
       for (const bundleName in componentJS.jsBundles) {
         jsBundles[bundleName] ??= new Set();
@@ -134,10 +135,27 @@ const h = (tagNameOrComponent, attrs, ...children) => {
       }
     }
 
-    const componentRenderResults = tagNameOrComponent({
+    const componentRenderResultPromise = tagNameOrComponent({
       ...attrs,
       children,
     });
+    /**
+     * @type {RenderResult[]}
+     */
+    const unflattenedComponentRenderResults = [{
+      html: "",
+      cssBundles,
+      cssDependencies,
+      jsBundles,
+      jsDependencies,
+      htmlBundles,
+      htmlDependencies,
+    }];
+    if (Array.isArray(componentRenderResultPromise)) {
+      unflattenedComponentRenderResults.push(...await Promise.all(componentRenderResultPromise));
+    } else {
+      unflattenedComponentRenderResults.push(await componentRenderResultPromise);
+    }
 
     return flattenRenderResults([{
       html: "",
@@ -147,7 +165,7 @@ const h = (tagNameOrComponent, attrs, ...children) => {
       jsDependencies,
       htmlBundles,
       htmlDependencies,
-    }].concat(componentRenderResults));
+    }].concat(unflattenedComponentRenderResults));
   }
 
   if (tagNameOrComponent) {
@@ -167,18 +185,23 @@ const h = (tagNameOrComponent, attrs, ...children) => {
       serializedHTMLStr += attrs[setInnerHTMLAttr].__html;
     } else {
       /**
-       * @param {unknown | unknown[]} children
+       * @param {unknown | unknown[]} unresolvedChildren
        */
-      const addChildrenToSerializedStr = (children) => {
-        if (children === null || children === undefined) {
+      const addChildrenToSerializedStr = async (unresolvedChildren) => {
+        if (unresolvedChildren === null || unresolvedChildren === undefined) {
           return;
         }
 
-        if (Array.isArray(children)) {
-          for (const child of children) {
-            addChildrenToSerializedStr(child);
+        if (Array.isArray(unresolvedChildren)) {
+          for (const child of unresolvedChildren) {
+            await addChildrenToSerializedStr(child);
           }
-        } else if (isRenderResultChild(children)) {
+          return;
+        }
+
+        const children = unresolvedChildren instanceof Promise ? await unresolvedChildren : unresolvedChildren;
+
+        if (isRenderResultChild(children)) {
           serializedHTMLStr += children.html;
           if (children.cssBundles) {
             for (const bucketName in children.cssBundles) {

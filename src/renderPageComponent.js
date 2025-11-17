@@ -13,12 +13,12 @@ import { flattenRenderResults } from './utils/flattenRenderResults.js';
  * @param {YetiPageComponent<TProps>} pageComponent
  * @param {EleventyPageData & TProps} props
  *
- * @returns {RenderResult}
+ * @returns {Promise<RenderResult>}
  */
-export function renderPageComponent(pageComponent, props) {
+export async function renderPageComponent(pageComponent, props) {
   // Merge in any component-level CSS/JS; the render result returned by the component only has CSS/JS from its children
   const componentCSS = pageComponent.css?.();
-  const componentJS = pageComponent.js?.();
+  const componentJS = await pageComponent.js?.();
 
   /**
    * @type {RenderResult}
@@ -46,7 +46,16 @@ export function renderPageComponent(pageComponent, props) {
     }
   }
 
-  const componentRenderResults = pageComponent(props);
+  const componentRenderResultPromise = await pageComponent(props);
+  /**
+   * @type {RenderResult[]}
+   */
+  const unflattenedComponentRenderResults = [componentBundleAssetsResult];
+  if (Array.isArray(componentRenderResultPromise)) {
+    unflattenedComponentRenderResults.push(...await Promise.all(componentRenderResultPromise));
+  } else {
+    unflattenedComponentRenderResults.push(await componentRenderResultPromise);
+  }
 
-  return flattenRenderResults([componentBundleAssetsResult].concat(componentRenderResults));
+  return flattenRenderResults(unflattenedComponentRenderResults);
 }

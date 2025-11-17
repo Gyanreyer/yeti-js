@@ -15,13 +15,14 @@ import { yetiPlugin } from "../../src/index.js";
 
 /**
  * @import UserConfig from '@11ty/eleventy/src/UserConfig.js';
- * @import { YetiConfig } from '../../src/types.js';
+ * @import { YetiConfig } from '../../src/types';
+ * @import { DeepPartial } from '../../src/utils/utilityTypes';
  */
 
 /**
  * @param {string} inputDir
  * @param {string} outputDir
- * @param {Partial<YetiConfig>} [config]
+ * @param {DeepPartial<YetiConfig>} [config]
  */
 const getEleventyInstance = (inputDir, outputDir, config = {}) => {
   const eleventy = new Eleventy(inputDir, outputDir, {
@@ -57,7 +58,14 @@ const testInputDir = async (inputDirPath) => {
 
   const expectedOutputDir = resolve(resolvedInputDir, "_expected");
 
-  const eleventy = getEleventyInstance(resolvedInputDir, siteOutputDir);
+  const eleventy = getEleventyInstance(resolvedInputDir, siteOutputDir, {
+    js: {
+      minify: false,
+    },
+    css: {
+      minify: false,
+    },
+  });
   await eleventy.write();
   const actualSiteFiles = (await Array.fromAsync(glob(`${siteOutputDir}/**/*.*`))).map((filePath) =>
     filePath.slice(siteOutputDir.length + 1),

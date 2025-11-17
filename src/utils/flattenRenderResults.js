@@ -7,6 +7,8 @@ export const flattenRenderResults = (results) => {
     return results;
   }
 
+  const resolvedResults = results;
+
   /**
    * @type {RenderResult}
    */
@@ -20,7 +22,7 @@ export const flattenRenderResults = (results) => {
     html: "",
   };
 
-  for (const result of results) {
+  for (const result of resolvedResults) {
     for (const bundleName in result.cssBundles) {
       flattenedResult.cssBundles[bundleName] ??= new Set();
       for (const bundleChunk of result.cssBundles[bundleName]) {

@@ -166,7 +166,7 @@ export const yetiPlugin = (eleventyConfig, userConfig = {}) => {
           cssDependencies: renderedCSSDeps,
           jsDependencies: renderedJSDeps,
           htmlDependencies: renderedHTMLDeps,
-        } = renderPageComponent(pageComponent, data);
+        } = await renderPageComponent(pageComponent, data);
 
         /** @type {any} */(this).addDependencies(inputPath, [...renderedCSSDeps, ...renderedJSDeps, ...renderedHTMLDeps]);
 

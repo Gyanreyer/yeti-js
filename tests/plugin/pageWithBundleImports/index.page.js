@@ -42,6 +42,7 @@ IndexPage.css = css`
 IndexPage.js = js`
   ${js.import("./scripts/global.js")}
   ${js.import("./scripts/other.js", "other")}
+  ${js.import("./scripts/script-with-sub-dep.js")}
 
   ${js.bundle("index")}
   console.log("Hello, Yeti from JavaScript!");

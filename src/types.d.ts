@@ -1,5 +1,6 @@
 import type EleventyUserConfig from '@11ty/eleventy/src/UserConfig';
 import type { bundleNameSymbol, bundleTypeSymbol, assetTypeSymbol, importFilePathSymbol, shouldEscapeHTMLSymbol, bundleSrcPrefix, inlinedHTMLBundleTagName, inlinedBundleContentTypeSymbol } from './bundle';
+import { DeepPartial } from './utils/utilityTypes';
 
 export type YetiConfig = {
   /**
@@ -66,7 +67,7 @@ export type YetiConfig = {
      * @default "global"
      */
     defaultBundleName: string;
-  }
+  };
   /**
    * The file extension used for Yeti page template files.
    * @default ".page.js"
@@ -108,16 +109,16 @@ export type Children = unknown[];
 
 type YetiComponentMetadata = {
   css?: () => CSSResult;
-  js?: () => JSResult;
+  js?: () => Promise<JSResult>;
 }
 
 export type YetiComponentProps = {
   [key: string]: typeof key extends "children" ? never : unknown;
 }
 
-type YetiComponentFunction<TProps extends YetiComponentMetadata> = (data: TProps & {
+type YetiComponentFunction<TProps extends YetiComponentProps> = (data: TProps & {
   children: Children | undefined;
-}) => RenderResult | RenderResult[];
+}) => ReturnType<typeof html>;
 
 export type YetiComponent<TProps extends YetiComponentProps = {}> = YetiComponentFunction<TProps> & YetiComponentMetadata;
 
@@ -151,7 +152,7 @@ export type EleventyPageData = {
   collections: Record<string, any>;
 };
 
-type YetiPageComponentFunction<TData extends Record<string, any>> = (data: TData & EleventyPageData) => RenderResult | RenderResult[];
+type YetiPageComponentFunction<TData extends Record<string, any>> = (data: TData & EleventyPageData) => ReturnType<typeof html>;
 
 export type YetiPageComponent<TData extends Record<string, any> = {}> = YetiPageComponentFunction<TData & EleventyPageData> & YetiComponentMetadata;
 
@@ -192,7 +193,7 @@ export type InlinedHTMLBundleContentObject<TBundleName extends string> = {
  * const myComponent = () => html`<div>Hello, world!</div>`;
  * ```
  */
-export declare const html: ((strings: TemplateStringsArray, ...values: any[]) => RenderResult | RenderResult[]) & {
+export declare const html: ((strings: TemplateStringsArray, ...values: any[]) => Promise<RenderResult> | Promise<RenderResult>[]) & {
   /**
    * Imports an external file as an HTML fragment.
    *
@@ -539,7 +540,7 @@ export declare const css: ((strings: TemplateStringsArray, ...values: any[]) => 
  * `;
  * ```
  */
-export declare const js: ((strings: TemplateStringsArray, ...values: any[]) => () => JSResult) & {
+export declare const js: ((strings: TemplateStringsArray, ...values: any[]) => () => Promise<JSResult>) & {
   /**
    * Marks the start of a new bundle for JavaScript content within a `js` template string.
    *
@@ -681,7 +682,7 @@ export declare const js: ((strings: TemplateStringsArray, ...values: any[]) => (
  * }
  * ```
  */
-export declare function yetiPlugin(eleventyConfig: EleventyUserConfig, userConfig: Omit<Partial<YetiConfig>, "inputDir" | "outputDir" | "quietMode">): void;
+export declare function yetiPlugin(eleventyConfig: EleventyUserConfig, userConfig: Omit<DeepPartial<YetiConfig>, "inputDir" | "outputDir" | "quietMode">): void;
 
 /**
  * Component to inject content into the HTML document's `<head>` section.

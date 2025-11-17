@@ -1,4 +1,5 @@
-import { bundleNameSymbol, bundleSrcPrefix, bundleTypeSymbol, doesBundleMatchAssetType, getBundleImportFileContents, getBundleImportFilePath, getBundleName, getBundleAssetType, importFilePathSymbol, isBundleImportObject, isBundleStartObject, resolveImportPath, WILDCARD_BUNDLE_NAME, assetTypeSymbol } from "./bundle.js";
+import { build } from 'esbuild';
+import { bundleNameSymbol, bundleSrcPrefix, bundleTypeSymbol, doesBundleMatchAssetType, getBundleImportFilePath, getBundleName, getBundleAssetType, importFilePathSymbol, isBundleImportObject, isBundleStartObject, resolveImportPath, WILDCARD_BUNDLE_NAME, assetTypeSymbol } from "./bundle.js";
 import { getConfig } from "./config.js";
 
 const getDefaultBundleName = () => getConfig().js.defaultBundleName;
@@ -7,7 +8,7 @@ const getDefaultBundleName = () => getConfig().js.defaultBundleName;
  * @type {import("./types").js}
  */
 export const js = (strings, ...values) => {
-  return () => {
+  return async () => {
     /**
      * @type {Record<string, string[]>}
      */
@@ -39,16 +40,31 @@ export const js = (strings, ...values) => {
         }
 
         const importFilePath = getBundleImportFilePath(value);
-        jsBundleDependencies.add(importFilePath);
         let importBundleName = currentBundleName;
         const bundleName = getBundleName(value);
         if (bundleName !== undefined) {
           importBundleName = bundleName;
         }
         try {
-          const fileContents = getBundleImportFileContents(value);
+          const result = await build({
+            bundle: true,
+            write: false,
+            minify: false,
+            treeShaking: true,
+            // Outputs data so we can get a list of all input files for dependency tracking
+            metafile: true,
+            absPaths: ["metafile"],
+            target: ["es2020"],
+            format: "esm",
+            platform: "browser",
+            entryPoints: [importFilePath],
+          });
+          const inputFiles = Object.keys(result.metafile.inputs);
+          for (const inputFile of inputFiles) {
+            jsBundleDependencies.add(inputFile);
+          }
           const importBundleArray = (rawJSBundles[importBundleName] ??= []);
-          importBundleArray.push(fileContents.trim());
+          importBundleArray.push(...result.outputFiles.map(file => file.text.trim()));
         } catch (err) {
           throw new Error(`js.import() failed to import file at path "${importFilePath}"`, {
             cause: err,

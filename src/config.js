@@ -1,5 +1,6 @@
 /**
  * @import { YetiConfig } from './types';
+ * @import { DeepPartial } from './utils/utilityTypes';
  */
 
 /**
@@ -35,7 +36,7 @@ const isObject = (value) => {
 /**
  * @template {Record<string, any>} T
  * @param {T} baseConfig
- * @param {Partial<T>} newConfig
+ * @param {DeepPartial<T>} newConfig
  * @returns {T}
  */
 const mergeConfigs = (baseConfig, newConfig) => {
@@ -47,7 +48,7 @@ const mergeConfigs = (baseConfig, newConfig) => {
     const newValue = newConfig[key];
     const baseValue = baseConfig[key];
     if (isObject(newValue) && isObject(baseValue)) {
-      mergedConfig[key] = mergeConfigs(baseValue, /** @type {any} */(newValue));
+      mergedConfig[key] = mergeConfigs(baseValue, newValue);
     } else {
       mergedConfig[key] = newValue;
     }
@@ -56,7 +57,7 @@ const mergeConfigs = (baseConfig, newConfig) => {
 };
 
 /**
- * @param {Partial<YetiConfig>} newConfig
+ * @param {DeepPartial<YetiConfig>} newConfig
  */
 export const updateConfig = (newConfig) => {
   const merged = mergeConfigs(config, newConfig);
