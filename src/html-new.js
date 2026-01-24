@@ -1,6 +1,26 @@
 /**
- * @import { JSResult, CSSResult } from "./types"
+ * @import { JSResult, CSSResult, HTMLImportObject } from "./types"
  */
+
+import {
+  resolveImportPath,
+  importFilePathSymbol,
+  shouldEscapeHTMLSymbol,
+  assetTypeSymbol,
+  bundleTypeSymbol,
+  bundleNameSymbol,
+  WILDCARD_BUNDLE_NAME,
+  inlinedBundleContentTypeSymbol,
+  isBundleImportObject,
+  getBundleImportFilePath,
+  getBundleImportFileContents,
+  isInlinedHTMLBundleContentObject,
+  getBundleName,
+  inlinedHTMLBundleTagName,
+  doesBundleMatchAssetType,
+  getBundleAssetType,
+} from "./bundle.js";
+import { escapeHTML } from "./utils/escapeHTML.js";
 
 /**
  * @typedef {Object} NodeTypeEnum
@@ -52,10 +72,19 @@
  */
 
 /**
+ * @param {unknown} maybeHTMLNode 
+ * @returns {maybeHTMLNode is HTMLNode}
+ */
+const isHTMLNode = (maybeHTMLNode) => typeof maybeHTMLNode === "object" && maybeHTMLNode !== null &&
+  'ty' in maybeHTMLNode && (maybeHTMLNode.ty === NODE_TYPE.DOCTYPE || maybeHTMLNode.ty === NODE_TYPE.TEXT || maybeHTMLNode.ty === NODE_TYPE.ELEMENT || maybeHTMLNode.ty === NODE_TYPE.COMMENT);
+
+/**
  * @typedef {{
  *  nodes: HTMLNode[]
- *  js: JSResult;
  *  css: CSSResult;
+ *  js: JSResult;
+ *  htmlBundles: Record<string, Set<string>>;
+ *  htmlDependencies: Set<string>;
  * }} HTMLResult
  */
 
@@ -796,8 +825,8 @@ class Parser {
 
   /**
    * Process a dynamic value into one or more nodes
-   * @param {any} value - Dynamic value to process
-   * @returns {HTMLNode|ComponentNode|(HTMLNode|ComponentNode)[]|null} Processed node(s)
+   * @param {unknown} value - Dynamic value to process
+   * @returns {HTMLNode|ComponentNode|HTMLImportObject|(HTMLNode|ComponentNode|HTMLImportObject)[]|null} Processed node(s) or bundle objects
    */
   processDynamicValue(value) {
     if (value === null || value === undefined) {
@@ -808,14 +837,25 @@ class Parser {
       return value.flatMap(v => this.processDynamicValue(v)).filter(v => v !== null && v !== undefined);
     }
 
-    if (typeof value === 'object') {
-      // Check if it's a valid tree node
-      if (value.ty && (value.ty === NODE_TYPE.TEXT || value.ty === NODE_TYPE.ELEMENT ||
-        value.ty === NODE_TYPE.COMMENT || value.ty === NODE_TYPE.DOCTYPE)) {
-        return value;
-      }
-      // Invalid object, stringify it
-      return { ty: NODE_TYPE.TEXT, content: String(value) };
+    // Check for HTML bundle import object
+    if (isBundleImportObject(value) && doesBundleMatchAssetType(value, "html")) {
+      // Return the import object as-is; it will be handled during component resolution
+      return value;
+    }
+    // Check for HTML inline bundle object
+    if (isInlinedHTMLBundleContentObject(value)) {
+      // Create a special element node for inline bundle content
+      const bundleName = getBundleName(value);
+      return {
+        ty: NODE_TYPE.ELEMENT,
+        tag: inlinedHTMLBundleTagName,
+        attrs: { 'data-bundlename': bundleName }
+      };
+    }
+
+    // Check if it's a valid tree node
+    if (isHTMLNode(value)) {
+      return value;
     }
 
     // Primitive value
@@ -856,7 +896,43 @@ async function resolveComponents(nodes, depth = 0) {
    */
   const jsDependencies = new Set();
 
+  /**
+   * @type {Record<string, Set<string>>}
+   */
+  const htmlBundles = {};
+  /**
+   * @type {Set<string>}
+   */
+  const htmlDependencies = new Set();
+
   for (const node of nodes) {
+    // Handle HTML bundle import objects (from html.import())
+    if (typeof node === 'object' && node !== null && isBundleImportObject(node)) {
+      try {
+        const importFilePath = getBundleImportFilePath(node);
+        htmlDependencies.add(importFilePath);
+        let importedFileContents = getBundleImportFileContents(node);
+        if (shouldEscapeHTMLSymbol in node && node[shouldEscapeHTMLSymbol]) {
+          importedFileContents = escapeHTML(importedFileContents);
+        }
+
+        const bundleName = getBundleName(node);
+        if (bundleName && typeof bundleName === "string") {
+          htmlBundles[bundleName] ??= new Set();
+          htmlBundles[bundleName].add(importedFileContents);
+        } else {
+          // No bundle name, so inline the content directly as a text node
+          resolvedNodes.push({ ty: NODE_TYPE.TEXT, content: importedFileContents });
+        }
+      } catch (err) {
+        const importFilePath = getBundleImportFilePath(node);
+        throw new Error(`html.import() failed to import file at path "${importFilePath}"`, {
+          cause: err,
+        });
+      }
+      continue;
+    }
+
     switch (node.ty) {
       case COMPONENT_NODE_TYPE: {
         const { tag, attrs, children } = node;
@@ -865,7 +941,9 @@ async function resolveComponents(nodes, depth = 0) {
         const {
           nodes: resolvedChildren,
           css: childCSS,
-          js: childJS
+          js: childJS,
+          htmlBundles: childHTMLBundles,
+          htmlDependencies: childHTMLDeps
         } = await resolveComponents(children, depth + 1);
 
         // Call component function
@@ -876,6 +954,16 @@ async function resolveComponents(nodes, depth = 0) {
 
         mergeBundles(cssBundles, cssDependencies, childCSS.cssBundles, childCSS.cssDependencies);
         mergeBundles(jsBundles, jsDependencies, childJS.jsBundles, childJS.jsDependencies);
+        // Merge HTML bundles and dependencies
+        for (const bundleName in childHTMLBundles) {
+          htmlBundles[bundleName] ??= new Set();
+          for (const content of childHTMLBundles[bundleName]) {
+            htmlBundles[bundleName].add(content);
+          }
+        }
+        for (const dep of childHTMLDeps) {
+          htmlDependencies.add(dep);
+        }
 
         /** @type {unknown} */
         let result;
@@ -917,10 +1005,22 @@ async function resolveComponents(nodes, depth = 0) {
             nodes: nestedNodes,
             css: nestedCSS,
             js: nestedJS,
+            htmlBundles: nestedHTMLBundles,
+            htmlDependencies: nestedHTMLDeps
           } = await resolveComponents(result, depth + 1);
           resolvedNodes.push(...nestedNodes);
           mergeBundles(cssBundles, cssDependencies, nestedCSS.cssBundles, nestedCSS.cssDependencies);
           mergeBundles(jsBundles, jsDependencies, nestedJS.jsBundles, nestedJS.jsDependencies);
+          // Merge HTML bundles and dependencies
+          for (const bundleName in nestedHTMLBundles) {
+            htmlBundles[bundleName] ??= new Set();
+            for (const content of nestedHTMLBundles[bundleName]) {
+              htmlBundles[bundleName].add(content);
+            }
+          }
+          for (const dep of nestedHTMLDeps) {
+            htmlDependencies.add(dep);
+          }
         } else if (typeof result === 'object' && "ty" in result) {
           switch (result.ty) {
             case NODE_TYPE.ELEMENT:
@@ -941,10 +1041,22 @@ async function resolveComponents(nodes, depth = 0) {
                 nodes: nestedNodes,
                 css: nestedCSS,
                 js: nestedJS,
+                htmlBundles: nestedHTMLBundles,
+                htmlDependencies: nestedHTMLDeps
               } = await resolveComponents([/** @type {ComponentNode} */ (result)], depth + 1);
               resolvedNodes.push(...nestedNodes);
               mergeBundles(cssBundles, cssDependencies, nestedCSS.cssBundles, nestedCSS.cssDependencies);
               mergeBundles(jsBundles, jsDependencies, nestedJS.jsBundles, nestedJS.jsDependencies);
+              // Merge HTML bundles and dependencies
+              for (const bundleName in nestedHTMLBundles) {
+                htmlBundles[bundleName] ??= new Set();
+                for (const content of nestedHTMLBundles[bundleName]) {
+                  htmlBundles[bundleName].add(content);
+                }
+              }
+              for (const dep of nestedHTMLDeps) {
+                htmlDependencies.add(dep);
+              }
               break;
             default:
               // Invalid node type
@@ -964,7 +1076,9 @@ async function resolveComponents(nodes, depth = 0) {
           const {
             nodes: resolvedChildren,
             css: childCSS,
-            js: childJS
+            js: childJS,
+            htmlBundles: childHTMLBundles,
+            htmlDependencies: childHTMLDeps
           } = await resolveComponents(node.children, depth);
           if (resolvedChildren.length > 0) {
             newNode.children = resolvedChildren;
@@ -973,6 +1087,16 @@ async function resolveComponents(nodes, depth = 0) {
           }
           mergeBundles(cssBundles, cssDependencies, childCSS.cssBundles, childCSS.cssDependencies);
           mergeBundles(jsBundles, jsDependencies, childJS.jsBundles, childJS.jsDependencies);
+          // Merge HTML bundles and dependencies
+          for (const bundleName in childHTMLBundles) {
+            htmlBundles[bundleName] ??= new Set();
+            for (const content of childHTMLBundles[bundleName]) {
+              htmlBundles[bundleName].add(content);
+            }
+          }
+          for (const dep of childHTMLDeps) {
+            htmlDependencies.add(dep);
+          }
         }
         resolvedNodes.push(newNode);
         break;
@@ -993,7 +1117,9 @@ async function resolveComponents(nodes, depth = 0) {
     js: {
       jsBundles,
       jsDependencies
-    }
+    },
+    htmlBundles,
+    htmlDependencies
   };
 }
 
@@ -1035,5 +1161,52 @@ export async function html(strings, ...values) {
 
   return resolved;
 }
+
+/**
+ * Import an external HTML file, optionally escaping content and assigning to a bundle
+ * @param {string} importPath - Path to the HTML file to import
+ * @param {Object} [options={}] - Import options
+ * @param {boolean} [options.escape=false] - Whether to escape HTML entities
+ * @param {string} [options.bundleName] - Optional bundle name to group this import
+ * @returns {Object} Bundle import object with metadata
+ * @throws {Error} If bundleName is invalid or path resolution fails
+ */
+html.import = (importPath, options = {}) => {
+  const {
+    escape = false,
+    bundleName
+  } = options;
+
+  if (bundleName !== undefined && typeof bundleName !== "string") {
+    throw new Error(`html.import() expected bundleName option to be a string if provided. Received type "${typeof bundleName}".`);
+  } else if (bundleName === WILDCARD_BUNDLE_NAME) {
+    throw new Error(`html.import() called with reserved wildcard bundle name "${WILDCARD_BUNDLE_NAME}"`);
+  }
+
+  try {
+    const resolvedFilePath = resolveImportPath(importPath);
+    return {
+      [importFilePathSymbol]: resolvedFilePath,
+      [shouldEscapeHTMLSymbol]: escape,
+      [assetTypeSymbol]: "html",
+      [bundleTypeSymbol]: "import",
+      [bundleNameSymbol]: bundleName,
+    };
+  } catch (err) {
+    throw new Error(`html.import() failed to resolve path to file at "${importPath}"`, {
+      cause: err,
+    });
+  }
+};
+
+/**
+ * Create a marker for where inline HTML bundle content should be injected
+ * @param {string} bundleName - Name of the bundle to inline
+ * @returns {Object} Bundle inline object with metadata
+ */
+html.inline = (bundleName) => ({
+  [inlinedBundleContentTypeSymbol]: "html",
+  [bundleNameSymbol]: bundleName,
+});
 
 export { NODE_TYPE };
