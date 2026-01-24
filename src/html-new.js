@@ -1,4 +1,8 @@
 /**
+ * @import { JSResult, CSSResult } from "./types"
+ */
+
+/**
  * @typedef {Object} NodeTypeEnum
  * @property {1} DOCTYPE
  * @property {2} TEXT
@@ -23,7 +27,10 @@
  */
 
 /**
- * @typedef {(props: Record<string, any>) => Promise<HtmlNode[] | Primitive>} ComponentFunction
+ * @typedef {((props: Record<string, any>) => Promise<HTMLNode[] | Primitive>) & {
+ *  js?: ()=> Promise<JSResult>
+ *  css?: ()=> Promise<CSSResult>
+ * }} ComponentFunction
  */
 
 /**
@@ -31,7 +38,7 @@
  * @property {typeof NODE_TYPE.ELEMENT} ty - Node type (ELEMENT)
  * @property {string} tag - Tag name
  * @property {Record<string, any>} [attrs] - Element attributes
- * @property {(HtmlNode|ComponentNode)[]} [children] - Child nodes
+ * @property {(HTMLNode|ComponentNode)[]} [children] - Child nodes
  */
 
 /**
@@ -41,7 +48,15 @@
  */
 
 /**
- * @typedef {DoctypeNode | TextNode | ElementNode | CommentNode} HtmlNode
+ * @typedef {DoctypeNode | TextNode | ElementNode | CommentNode} HTMLNode
+ */
+
+/**
+ * @typedef {{
+ *  nodes: HTMLNode[]
+ *  js: JSResult;
+ *  css: CSSResult;
+ * }} HTMLResult
  */
 
 const COMPONENT_NODE_TYPE = 0;
@@ -51,7 +66,7 @@ const COMPONENT_NODE_TYPE = 0;
  * @property {typeof COMPONENT_NODE_TYPE} ty - Node type (component, internal use only)
  * @property {ComponentFunction} tag - Component function
  * @property {Record<string, any>} attrs - Component attributes (props)
- * @property {(HtmlNode|ComponentNode)[]} children - Component children
+ * @property {(HTMLNode|ComponentNode)[]} children - Component children
  */
 
 /**
@@ -171,6 +186,38 @@ const PLACEHOLDER_PREFIX = '\x00PLACEHOLDER_';
 const PLACEHOLDER_SUFFIX = '\x00';
 
 /**
+ * Merge CSS/JS results into target bundles and dependencies
+ * @param {Record<string, string>} targetBundles - Target bundle object
+ * @param {Set<string>} targetDeps - Target dependencies set
+ * @param {Record<string, string>} sourceBundles - Source bundle object
+ * @param {Set<string>} sourceDeps - Source dependencies set
+ */
+function mergeBundles(targetBundles, targetDeps, sourceBundles, sourceDeps) {
+  for (const bundleName in sourceBundles) {
+    targetBundles[bundleName] ??= '';
+    targetBundles[bundleName] += `${sourceBundles[bundleName]}\n`;
+  }
+  for (const dep of sourceDeps) {
+    targetDeps.add(dep);
+  }
+}
+
+/**
+ * Create an element node with optional attributes
+ * @param {string} tag - Tag name
+ * @param {Record<string, any>} attrs - Attributes object
+ * @returns {ElementNode} Element node
+ */
+function createElementNode(tag, attrs) {
+  /** @type {ElementNode} */
+  const node = { ty: NODE_TYPE.ELEMENT, tag };
+  if (Object.keys(attrs).length > 0) {
+    node.attrs = attrs;
+  }
+  return node;
+}
+
+/**
  * Custom error class for HTML parsing errors
  */
 class ParseError extends Error {
@@ -283,8 +330,33 @@ class Parser {
   }
 
   /**
+   * Parse a placeholder and return its value from the values array
+   * @returns {any} The value from the placeholder
+   * @throws {ParseError} If placeholder syntax is invalid
+   */
+  parsePlaceholder() {
+    if (this.peek(PLACEHOLDER_PREFIX.length) !== PLACEHOLDER_PREFIX) {
+      this.error('Expected placeholder');
+    }
+
+    this.advance(PLACEHOLDER_PREFIX.length);
+    let indexStr = '';
+    while (!this.isAtEnd() && this.peek() !== PLACEHOLDER_SUFFIX) {
+      indexStr += this.html[this.pos];
+      this.advance();
+    }
+    if (this.peek() !== PLACEHOLDER_SUFFIX) {
+      this.error('Invalid placeholder');
+    }
+    this.advance(); // Skip suffix
+
+    const index = parseInt(indexStr, 10);
+    return this.values[index];
+  }
+
+  /**
    * Parse the entire HTML document
-   * @returns {(HtmlNode|ComponentNode)[]} Array of parsed nodes (may contain unresolved components)
+   * @returns {(HTMLNode|ComponentNode)[]} Array of parsed nodes (may contain unresolved components)
    * @throws {ParseError} If there are unclosed tags or parsing errors
    */
   parse() {    /** @type {(HtmlNode|ComponentNode)[]} */    const nodes = [];
@@ -309,7 +381,7 @@ class Parser {
 
   /**
    * Parse a single node (element, text, comment, or doctype)
-   * @returns {HtmlNode|ComponentNode|(HtmlNode|ComponentNode)[]|null} Parsed node(s)
+   * @returns {HTMLNode|ComponentNode|(HTMLNode|ComponentNode)[]|null} Parsed node(s)
    */
   parseNode() {
     if (this.peek(2) === '<!') {
@@ -394,19 +466,7 @@ class Parser {
 
     if (this.peek(PLACEHOLDER_PREFIX.length) === PLACEHOLDER_PREFIX) {
       // This is a component placeholder
-      this.advance(PLACEHOLDER_PREFIX.length);
-      let indexStr = '';
-      while (!this.isAtEnd() && this.peek() !== PLACEHOLDER_SUFFIX) {
-        indexStr += this.html[this.pos];
-        this.advance();
-      }
-      if (this.peek() !== PLACEHOLDER_SUFFIX) {
-        this.error('Invalid component placeholder');
-      }
-      this.advance(); // Skip suffix
-
-      const index = parseInt(indexStr, 10);
-      tag = this.values[index];
+      tag = this.parsePlaceholder();
       isComponent = true;
     } else {
       // Regular HTML tag
@@ -433,12 +493,7 @@ class Parser {
         return { ty: COMPONENT_NODE_TYPE, tag, attrs, children: [] };
       }
 
-      /** @type {ElementNode} */
-      const node = { ty: NODE_TYPE.ELEMENT, tag };
-      if (Object.keys(attrs).length > 0) {
-        node.attrs = attrs;
-      }
-      return node;
+      return createElementNode(tag, attrs);
     }
 
     if (this.peek() !== '>') {
@@ -448,16 +503,11 @@ class Parser {
 
     // For void elements, don't expect children or closing tag
     if (!isComponent && VOID_ELEMENTS.has(tag)) {
-      /** @type {ElementNode} */
-      const node = { ty: NODE_TYPE.ELEMENT, tag };
-      if (Object.keys(attrs).length > 0) {
-        node.attrs = attrs;
-      }
-      return node;
+      return createElementNode(tag, attrs);
     }
 
     // Parse children
-    /** @type {(HtmlNode|ComponentNode)[]} */
+    /** @type {(HTMLNode|ComponentNode)[]} */
     const children = [];
     this.stack.push({ tag, isComponent });
 
@@ -483,17 +533,7 @@ class Parser {
           break;
         } else if (this.peek(PLACEHOLDER_PREFIX.length) === PLACEHOLDER_PREFIX) {
           // Component closing tag
-          const closeTagStart = this.pos;
-          this.advance(PLACEHOLDER_PREFIX.length);
-          let indexStr = '';
-          while (!this.isAtEnd() && this.peek() !== PLACEHOLDER_SUFFIX) {
-            indexStr += this.html[this.pos];
-            this.advance();
-          }
-          if (this.peek() !== PLACEHOLDER_SUFFIX) {
-            this.error('Invalid component closing tag');
-          }
-          this.advance();
+          this.parsePlaceholder();
 
           this.skipWhitespace();
           if (this.peek() !== '>') {
@@ -616,19 +656,7 @@ class Parser {
           this.error('Expected placeholder after "..."');
         }
 
-        this.advance(PLACEHOLDER_PREFIX.length);
-        let indexStr = '';
-        while (!this.isAtEnd() && this.peek() !== PLACEHOLDER_SUFFIX) {
-          indexStr += this.html[this.pos];
-          this.advance();
-        }
-        if (this.peek() !== PLACEHOLDER_SUFFIX) {
-          this.error('Invalid spread placeholder');
-        }
-        this.advance();
-
-        const index = parseInt(indexStr, 10);
-        const spreadObj = this.values[index];
+        const spreadObj = this.parsePlaceholder();
 
         if (spreadObj && typeof spreadObj === 'object' && !Array.isArray(spreadObj)) {
           Object.assign(attrs, spreadObj);
@@ -666,19 +694,7 @@ class Parser {
           while (!this.isAtEnd() && this.peek() !== quote) {
             if (this.peek(PLACEHOLDER_PREFIX.length) === PLACEHOLDER_PREFIX) {
               // Dynamic value in attribute
-              this.advance(PLACEHOLDER_PREFIX.length);
-              let indexStr = '';
-              while (!this.isAtEnd() && this.peek() !== PLACEHOLDER_SUFFIX) {
-                indexStr += this.html[this.pos];
-                this.advance();
-              }
-              if (this.peek() !== PLACEHOLDER_SUFFIX) {
-                this.error('Invalid placeholder in attribute');
-              }
-              this.advance();
-
-              const index = parseInt(indexStr, 10);
-              const dynValue = this.values[index];
+              const dynValue = this.parsePlaceholder();
 
               if (dynValue === null || dynValue === undefined) {
                 // Skip this attribute
@@ -703,19 +719,7 @@ class Parser {
           attrs[name] = value;
         } else if (this.peek(PLACEHOLDER_PREFIX.length) === PLACEHOLDER_PREFIX) {
           // Unquoted dynamic attribute value
-          this.advance(PLACEHOLDER_PREFIX.length);
-          let indexStr = '';
-          while (!this.isAtEnd() && this.peek() !== PLACEHOLDER_SUFFIX) {
-            indexStr += this.html[this.pos];
-            this.advance();
-          }
-          if (this.peek() !== PLACEHOLDER_SUFFIX) {
-            this.error('Invalid placeholder in attribute');
-          }
-          this.advance();
-
-          const index = parseInt(indexStr, 10);
-          const dynValue = this.values[index];
+          const dynValue = this.parsePlaceholder();
 
           if (dynValue === null || dynValue === undefined) {
             // Skip this attribute
@@ -747,7 +751,7 @@ class Parser {
 
   /**
    * Parse text content, handling dynamic values
-   * @returns {TextNode|(HtmlNode|ComponentNode)[]|HtmlNode|ComponentNode|null} Text node, array of nodes, or null
+   * @returns {TextNode|(HTMLNode|ComponentNode)[]|HTMLNode|ComponentNode|null} Text node, array of nodes, or null
    * @throws {ParseError} If placeholder syntax is invalid
    */
   parseText() {
@@ -756,19 +760,7 @@ class Parser {
     while (!this.isAtEnd() && this.peek() !== '<') {
       if (this.peek(PLACEHOLDER_PREFIX.length) === PLACEHOLDER_PREFIX) {
         // Dynamic value in text
-        this.advance(PLACEHOLDER_PREFIX.length);
-        let indexStr = '';
-        while (!this.isAtEnd() && this.peek() !== PLACEHOLDER_SUFFIX) {
-          indexStr += this.html[this.pos];
-          this.advance();
-        }
-        if (this.peek() !== PLACEHOLDER_SUFFIX) {
-          this.error('Invalid placeholder in text');
-        }
-        this.advance();
-
-        const index = parseInt(indexStr, 10);
-        const dynValue = this.values[index];
+        const dynValue = this.parsePlaceholder();
 
         // If we have accumulated text, emit it first
         if (text) {
@@ -805,7 +797,7 @@ class Parser {
   /**
    * Process a dynamic value into one or more nodes
    * @param {any} value - Dynamic value to process
-   * @returns {HtmlNode|ComponentNode|(HtmlNode|ComponentNode)[]|null} Processed node(s)
+   * @returns {HTMLNode|ComponentNode|(HTMLNode|ComponentNode)[]|null} Processed node(s)
    */
   processDynamicValue(value) {
     if (value === null || value === undefined) {
@@ -823,7 +815,7 @@ class Parser {
         return value;
       }
       // Invalid object, stringify it
-      return { ty: NODE_TYPE.TEXT, content: '[object Object]' };
+      return { ty: NODE_TYPE.TEXT, content: String(value) };
     }
 
     // Primitive value
@@ -833,9 +825,9 @@ class Parser {
 
 /**
  * Recursively resolve all components in the node tree
- * @param {(HtmlNode|ComponentNode)[]} nodes - Nodes to resolve
+ * @param {(HTMLNode|ComponentNode)[]} nodes - Nodes to resolve
  * @param {number} [depth=0] - Current nesting depth
- * @returns {Promise<HtmlNode[]>} Resolved nodes with all components expanded
+ * @returns {Promise<HTMLResult>} Resolved nodes with all components expanded
  * @throws {Error} If max depth exceeded or component throws error
  */
 async function resolveComponents(nodes, depth = 0) {
@@ -843,8 +835,26 @@ async function resolveComponents(nodes, depth = 0) {
     throw new Error('Maximum component nesting depth exceeded (20). Possible circular reference.');
   }
 
-  /** @type {HtmlNode[]} */
-  const resolved = [];
+  /** @type {HTMLNode[]} */
+  const resolvedNodes = [];
+
+  /**
+   * @type {Record<string, string>}
+   */
+  const cssBundles = {};
+  /**
+   * @type {Set<string>}
+   */
+  const cssDependencies = new Set();
+
+  /**
+   * @type {Record<string, string>}
+   */
+  const jsBundles = {};
+  /**
+   * @type {Set<string>}
+   */
+  const jsDependencies = new Set();
 
   for (const node of nodes) {
     switch (node.ty) {
@@ -852,13 +862,20 @@ async function resolveComponents(nodes, depth = 0) {
         const { tag, attrs, children } = node;
 
         // Resolve children first (bottom-up)
-        const resolvedChildren = children.length > 0 ? await resolveComponents(children, depth + 1) : [];
+        const {
+          nodes: resolvedChildren,
+          css: childCSS,
+          js: childJS
+        } = await resolveComponents(children, depth + 1);
 
         // Call component function
         const props = { ...attrs };
         if (resolvedChildren.length > 0) {
           props.children = resolvedChildren;
         }
+
+        mergeBundles(cssBundles, cssDependencies, childCSS.cssBundles, childCSS.cssDependencies);
+        mergeBundles(jsBundles, jsDependencies, childJS.jsBundles, childJS.jsDependencies);
 
         /** @type {unknown} */
         let result;
@@ -869,6 +886,26 @@ async function resolveComponents(nodes, depth = 0) {
           throw new Error(`Error in component: ${message}`);
         }
 
+        // Merge in any CSS/JS attached to the component
+        if (tag.css) {
+          try {
+            const cssResult = await tag.css();
+            mergeBundles(cssBundles, cssDependencies, cssResult.cssBundles, cssResult.cssDependencies);
+          } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            throw new Error(`Error in component CSS: ${message}`);
+          }
+        }
+        if (tag.js) {
+          try {
+            const jsResult = await tag.js();
+            mergeBundles(jsBundles, jsDependencies, jsResult.jsBundles, jsResult.jsDependencies);
+          } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            throw new Error(`Error in component JS: ${message}`);
+          }
+        }
+
         // Process component result
         if (result === null || result === undefined) {
           continue;
@@ -876,8 +913,14 @@ async function resolveComponents(nodes, depth = 0) {
 
         if (Array.isArray(result)) {
           // Recursively resolve any nested components
-          const nested = await resolveComponents(result, depth + 1);
-          resolved.push(...nested);
+          const {
+            nodes: nestedNodes,
+            css: nestedCSS,
+            js: nestedJS,
+          } = await resolveComponents(result, depth + 1);
+          resolvedNodes.push(...nestedNodes);
+          mergeBundles(cssBundles, cssDependencies, nestedCSS.cssBundles, nestedCSS.cssDependencies);
+          mergeBundles(jsBundles, jsDependencies, nestedJS.jsBundles, nestedJS.jsDependencies);
         } else if (typeof result === 'object' && "ty" in result) {
           switch (result.ty) {
             case NODE_TYPE.ELEMENT:
@@ -885,26 +928,32 @@ async function resolveComponents(nodes, depth = 0) {
               if ('children' in result && Array.isArray(result.children)) {
                 result.children = await resolveComponents(result.children, depth + 1);
               }
-              resolved.push(/** @type {HtmlNode} */(result));
+              resolvedNodes.push(/** @type {HTMLNode} */(result));
               break;
             case NODE_TYPE.TEXT:
             case NODE_TYPE.COMMENT:
             case NODE_TYPE.DOCTYPE:
-              resolved.push(/** @type {HtmlNode} */(result));
+              resolvedNodes.push(/** @type {HTMLNode} */(result));
               break;
             case COMPONENT_NODE_TYPE:
               // Nested component, resolve it
-              const nested = await resolveComponents([/** @type {ComponentNode} */ (result)], depth + 1);
-              resolved.push(...nested);
+              const {
+                nodes: nestedNodes,
+                css: nestedCSS,
+                js: nestedJS,
+              } = await resolveComponents([/** @type {ComponentNode} */ (result)], depth + 1);
+              resolvedNodes.push(...nestedNodes);
+              mergeBundles(cssBundles, cssDependencies, nestedCSS.cssBundles, nestedCSS.cssDependencies);
+              mergeBundles(jsBundles, jsDependencies, nestedJS.jsBundles, nestedJS.jsDependencies);
               break;
             default:
               // Invalid node type
-              resolved.push({ ty: NODE_TYPE.TEXT, content: String(result) });
+              resolvedNodes.push({ ty: NODE_TYPE.TEXT, content: String(result) });
               break;
           }
         } else {
           // Primitive value
-          resolved.push({ ty: NODE_TYPE.TEXT, content: String(result) });
+          resolvedNodes.push({ ty: NODE_TYPE.TEXT, content: String(result) });
         }
         break;
       }
@@ -912,31 +961,48 @@ async function resolveComponents(nodes, depth = 0) {
         const newNode = { .../** @type {ElementNode} */ (node) };
         if (node.children) {
           // Regular element, resolve its children
-          const resolvedChildren = await resolveComponents(node.children, depth);
+          const {
+            nodes: resolvedChildren,
+            css: childCSS,
+            js: childJS
+          } = await resolveComponents(node.children, depth);
           if (resolvedChildren.length > 0) {
             newNode.children = resolvedChildren;
           } else {
             delete newNode.children;
           }
+          mergeBundles(cssBundles, cssDependencies, childCSS.cssBundles, childCSS.cssDependencies);
+          mergeBundles(jsBundles, jsDependencies, childJS.jsBundles, childJS.jsDependencies);
         }
-        resolved.push(newNode);
+        resolvedNodes.push(newNode);
         break;
       }
       default: {
-        resolved.push(/** @type {HtmlNode} */(node));
+        resolvedNodes.push(/** @type {HTMLNode} */(node));
         break;
       }
     }
   }
 
-  return resolved;
+  return {
+    nodes: resolvedNodes,
+    css: {
+      cssBundles,
+      cssDependencies
+    },
+    js: {
+      jsBundles,
+      jsDependencies
+    }
+  };
 }
+
 
 /**
  * Tagged template literal function for parsing HTML with component support
  * @param {TemplateStringsArray} strings - Template string array
  * @param {...any} values - Dynamic values
- * @returns {Promise<HtmlNode[]>} Array of parsed and resolved HTML nodes
+ * @returns {Promise<HTMLResult>} Parsed and resolved HTML result
  * @throws {ParseError} If HTML syntax is invalid
  * @throws {Error} If component resolution fails
  */
@@ -971,18 +1037,3 @@ export async function html(strings, ...values) {
 }
 
 export { NODE_TYPE };
-
-/**
- * @param {Object} props - Component props
- * @param {string} props.name - Name to greet
- * @returns {Promise<HtmlNode[]>} HTML nodes
- */
-const SayHello = async ({ name }) => {
-  return html`<h1>Hello, ${name}!</h1>`;
-};
-
-console.dir(await html`<!DOCTYPE html><div id="main" class="container">
-  <!-- This is a comment -->
-  <h1>Hello, World!</h1>
-  <${SayHello} name="Alice" />
-</div>`, { depth: null });
