@@ -9,7 +9,8 @@
     "strict": true,
     "moduleResolution": "node",
     "maxNodeModuleJsDepth": 1,
-    "allowSyntheticDefaultImports": true
+    "allowSyntheticDefaultImports": true,
+    "allowImportingTsExtensions": true
   },
   "include": ["**/*.js", "**/*.ts"],
   "exclude": ["node_modules", "dist", "tests/**/_site", "tests/**/_expected"]
