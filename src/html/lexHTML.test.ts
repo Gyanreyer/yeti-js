@@ -152,7 +152,7 @@ describe("lexHTML", () => {
     ]);
   });
 
-  test.only("lexes components with shorthand closing tags as expected", () => {
+  test("lexes components with shorthand closing tags as expected", () => {
     const MyComponent = () => "hello";
     const tokens = lexHTML(`<${makeDynamicValuePlaceholder(0)} prop1='value1'>Child content</>`, [MyComponent]);
     assert.deepStrictEqual(tokens, [
@@ -221,8 +221,15 @@ describe("lexHTML", () => {
     const dynamicAttrName1 = "data-attr1";
     // Numbers are allowed as attribute names in HTML (eg, <div 1="value"> is valid HTML), so we should support them as dynamic attribute names as well.
     const dynamicAttrName2 = 1;
+    const dynamicAttrPart1 = "data";
+    const dynamicAttrPart2 = 3;
 
-    const tokens = lexHTML(`<div ${makeDynamicValuePlaceholder(0)}="value1" ${makeDynamicValuePlaceholder(1)}="value2">`, [dynamicAttrName1, dynamicAttrName2]);
+    const tokens = lexHTML(`<div
+  ${makeDynamicValuePlaceholder(0)}="value1"
+  ${makeDynamicValuePlaceholder(1)}="value2"
+  ${makeDynamicValuePlaceholder(2)}-part="value3"
+  part-${makeDynamicValuePlaceholder(3)}="value4"
+>`, [dynamicAttrName1, dynamicAttrName2, dynamicAttrPart1, dynamicAttrPart2]);
     assert.deepStrictEqual(tokens, [
       {
         ty: TOKEN_TYPE.OPENING_TAGNAME,
@@ -244,6 +251,22 @@ describe("lexHTML", () => {
         ty: TOKEN_TYPE.ATTR_VALUE,
         value: "value2",
       },
+      {
+        ty: TOKEN_TYPE.ATTR_NAME,
+        value: `${dynamicAttrPart1}-part`,
+      },
+      {
+        ty: TOKEN_TYPE.ATTR_VALUE,
+        value: "value3",
+      },
+      {
+        ty: TOKEN_TYPE.ATTR_NAME,
+        value: `part-${dynamicAttrPart2}`,
+      },
+      {
+        ty: TOKEN_TYPE.ATTR_VALUE,
+        value: "value4",
+      },
     ]);
   });
 
@@ -258,7 +281,7 @@ describe("lexHTML", () => {
       },
       {
         ty: TOKEN_TYPE.ERROR,
-        value: `Invalid dynamic attribute name: "${dynamicAttrName1}"`,
+        value: `lexAttributeName received invalid attribute name "${dynamicAttrName1}"`
       },
     ]);
 
@@ -272,7 +295,7 @@ describe("lexHTML", () => {
       },
       {
         ty: TOKEN_TYPE.ERROR,
-        value: `Invalid dynamic attribute name: "${String(dynamicAttrName2)}"`,
+        value: `lexAttributeName received invalid attribute name "${dynamicAttrName2}"`
       },
     ]);
   });
@@ -280,7 +303,7 @@ describe("lexHTML", () => {
   test("lexes spread attributes as expected", () => {
     const dynamicSpreadValue = { foo: "bar" };
 
-    const tokens = lexHTML(`<div attr1="value1" ...${makeDynamicValuePlaceholder(0)} attr2="value2">`, [dynamicSpreadValue]);
+    const tokens = lexHTML(`<div attr1="value1" ...="hi" ...${makeDynamicValuePlaceholder(0)} attr2="value2">`, [dynamicSpreadValue]);
 
     assert.deepStrictEqual(tokens, [
       {
@@ -294,6 +317,16 @@ describe("lexHTML", () => {
       {
         ty: TOKEN_TYPE.ATTR_VALUE,
         value: "value1",
+      },
+      // "..." is a valid attribute name, so it should only be treated as a spread attribute if it appears
+      // at the start of an attribute and is followed by a dynamic value placeholder.
+      {
+        ty: TOKEN_TYPE.ATTR_NAME,
+        value: "...",
+      },
+      {
+        ty: TOKEN_TYPE.ATTR_VALUE,
+        value: "hi",
       },
       {
         ty: TOKEN_TYPE.SPREAD_ATTR,

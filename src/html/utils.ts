@@ -65,3 +65,22 @@ export const isValidHTMLTagName = (tagName: string): boolean => {
 
   return true;
 };
+
+export const isValidHTMLAttributeNameChar = (char: string): boolean => {
+  return !isWhiteSpace(char) && char !== "=" && char !== "/" && char !== ">";
+};
+
+export const isValidHTMLAttributeName = (attrName: string): boolean => {
+  if (attrName.length === 0) {
+    return false;
+  }
+
+  for (let i = 0; i < attrName.length; i++) {
+    const char = attrName[i];
+    if (!isValidHTMLAttributeNameChar(char)) {
+      return false;
+    }
+  }
+
+  return true;
+};

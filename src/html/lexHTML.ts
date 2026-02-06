@@ -2,6 +2,7 @@ import {
   DYNAMIC_VALUE_CHARACTER_SEQUENCE_LENGTH,
   DYNAMIC_VALUE_PLACEHOLDER_PREFIX,
   isLetter,
+  isValidHTMLAttributeName,
   isValidHTMLTagName,
   isValidHTMLTagNameChar,
   isWhiteSpace
@@ -303,11 +304,33 @@ const lexOpeningTagname: LexerFunction<"OPENING_TAGNAME" | "ERROR"> = (ctx) => {
   return nextLexerFunction;
 }
 
-const lexAttributeName: LexerFunction<"ATTR_NAME" | "ERROR"> = (ctx) => {
+const lexAttributeName: LexerFunction<"ATTR_NAME" | "SPREAD_ATTR" | "ERROR"> = (ctx) => {
   let nextLexerFunction: LexerFunction<any> | null = null;
   let attrName = "";
 
   while (!ctx.isAtEnd()) {
+    // Check for spread attributes (e.g., ...{object})
+    if (!attrName && ctx.peekMatch("...")) {
+      // Check for dynamic value after "..."
+      const dynamicValue = ctx.peekDynamicValue(3);
+      if (dynamicValue !== NO_DYNAMIC_VALUE) {
+        ctx.addToken(TOKEN_TYPE.SPREAD_ATTR, dynamicValue);
+        // Consume the "..." + dynamic value char sequence
+        ctx.advance(3 + DYNAMIC_VALUE_CHARACTER_SEQUENCE_LENGTH);
+        return lexAttributeName;
+      }
+    }
+
+    // Check for dynamic value as part of attribute name
+    const dynamicValue = ctx.peekDynamicValue();
+    if (dynamicValue !== NO_DYNAMIC_VALUE) {
+      // Add the dynamic value to the attribute name
+      const dynamicStr = String(dynamicValue);
+      attrName += dynamicStr;
+      ctx.advance(DYNAMIC_VALUE_CHARACTER_SEQUENCE_LENGTH);
+      continue;
+    }
+
     const nextChar = ctx.peek();
 
     // Attribute names can contain any non-terminating character.
@@ -344,7 +367,12 @@ const lexAttributeName: LexerFunction<"ATTR_NAME" | "ERROR"> = (ctx) => {
     }
   }
 
+
   if (attrName) {
+    if (!isValidHTMLAttributeName(attrName)) {
+      ctx.addToken(TOKEN_TYPE.ERROR, `lexAttributeName received invalid attribute name "${attrName}"`);
+      return null;
+    }
     // Only add attribute name token if we found a valid name.
     // It's okay if we didn't as long as we're not transitioning to attribute value lexing.
     ctx.addToken(TOKEN_TYPE.ATTR_NAME, attrName);
@@ -361,11 +389,22 @@ const lexAttributeValue: LexerFunction<"ATTR_VALUE" | "ERROR"> = (ctx) => {
   }
 
   let nextLexerFunction: LexerFunction<any> | null = null;
-  let attrValue = "";
+  let attrValue: unknown = "";
 
   // Consume leading whitespace
   while (!ctx.isAtEnd() && isWhiteSpace(ctx.peek())) {
     ctx.advance(1);
+  }
+
+  // Check for unquoted dynamic value
+  const dynamicValueBeforeQuote = ctx.peekDynamicValue();
+  if (dynamicValueBeforeQuote !== NO_DYNAMIC_VALUE) {
+    // This is an unquoted dynamic value (e.g., attr={value})
+    attrValue = dynamicValueBeforeQuote;
+    ctx.advance(DYNAMIC_VALUE_CHARACTER_SEQUENCE_LENGTH);
+    ctx.addToken(TOKEN_TYPE.ATTR_VALUE, attrValue);
+    nextLexerFunction = lexAttributeName;
+    return nextLexerFunction;
   }
 
   const quoteChar = ctx.peek();
@@ -374,8 +413,24 @@ const lexAttributeValue: LexerFunction<"ATTR_VALUE" | "ERROR"> = (ctx) => {
     ctx.advance(1); // Consume opening quote
 
     let escapeDepth = 0;
+    let stringValue = "";
 
     while (!ctx.isAtEnd()) {
+      // Check for dynamic value inside quotes
+      const dynamicValue = ctx.peekDynamicValue();
+      if (dynamicValue !== NO_DYNAMIC_VALUE) {
+        // If we haven't accumulated any string value yet, use the dynamic value directly
+        if (stringValue === "") {
+          attrValue = dynamicValue;
+        } else {
+          // If we have accumulated string value, concatenate
+          stringValue += String(dynamicValue);
+          attrValue = stringValue;
+        }
+        ctx.advance(DYNAMIC_VALUE_CHARACTER_SEQUENCE_LENGTH);
+        continue;
+      }
+
       // Make sure to handle escaped quotes in attribute values
       const nextChar = ctx.peek();
       if (nextChar === `\\`) {
@@ -393,10 +448,14 @@ const lexAttributeValue: LexerFunction<"ATTR_VALUE" | "ERROR"> = (ctx) => {
         escapeDepth = 0;
       }
 
-      attrValue += ctx.advance(1);
+      stringValue += ctx.advance(1);
+      if (typeof attrValue === "string") {
+        attrValue = stringValue;
+      }
     }
   } else {
     // Unquoted attribute value
+    let stringValue = "";
     while (!ctx.isAtEnd()) {
       const nextChar = ctx.peek();
       if (isWhiteSpace(nextChar) || nextChar === ">" || (nextChar === "/" && ctx.peekMatch("/>", 0))) {
@@ -404,12 +463,13 @@ const lexAttributeValue: LexerFunction<"ATTR_VALUE" | "ERROR"> = (ctx) => {
         nextLexerFunction = lexAttributeName; // Transition back to attribute name lexing
         break;
       } else {
-        attrValue += ctx.advance(1);
+        stringValue += ctx.advance(1);
       }
     }
+    attrValue = stringValue;
   }
 
-  if (attrValue) {
+  if (attrValue !== "") {
     ctx.addToken(TOKEN_TYPE.ATTR_VALUE, attrValue);
   }
 
@@ -437,7 +497,7 @@ const lexClosingTag: LexerFunction<"CLOSING_TAGNAME" | "ERROR"> = (ctx) => {
   }
 
   let nextLexerFunction: LexerFunction<any> | null = null;
-  let tagName = "";
+  let tagName: string | Function = "";
   let hasFinishedConsumingTagName = false;
 
   while (!ctx.isAtEnd()) {
@@ -452,6 +512,24 @@ const lexClosingTag: LexerFunction<"CLOSING_TAGNAME" | "ERROR"> = (ctx) => {
       if (hasFinishedConsumingTagName) {
         ctx.advance(1);
         continue;
+      }
+
+      // Check for dynamic value
+      const dynamicValue = ctx.peekDynamicValue();
+      if (dynamicValue !== NO_DYNAMIC_VALUE) {
+        if (typeof dynamicValue === "function" && tagName === "") {
+          // Component closing tag (only if we haven't started consuming a string tag name)
+          tagName = dynamicValue;
+          ctx.advance(DYNAMIC_VALUE_CHARACTER_SEQUENCE_LENGTH);
+          hasFinishedConsumingTagName = true;
+          continue;
+        } else {
+          // Dynamic string tag name or part of tag name
+          tagName += String(dynamicValue);
+          ctx.advance(DYNAMIC_VALUE_CHARACTER_SEQUENCE_LENGTH);
+          // Continue to see if there's more to the tag name
+          continue;
+        }
       }
 
       if (tagName.length === 0 && isLetter(nextChar) || isValidHTMLTagNameChar(nextChar)) {
