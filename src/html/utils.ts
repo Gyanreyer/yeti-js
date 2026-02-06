@@ -6,10 +6,20 @@ export const isPrimitiveValue = (value: unknown): value is null | string | numbe
   );
 };
 
-export const DYNAMIC_VALUE_PLACEHOLDER_PREFIX = "\x00DV_";
-export const DYNAMIC_VALUE_PLACEHOLDER_SUFFIX = "\x00";
+export const DYNAMIC_VALUE_PLACEHOLDER_PREFIX = "\x00";
+// 1 for the prefix and 1 for the encoded index
+export const DYNAMIC_VALUE_CHARACTER_SEQUENCE_LENGTH = 2;
 
-export const makeDynamicValuePlaceholder = (index: number): string => `${DYNAMIC_VALUE_PLACEHOLDER_PREFIX}${index}${DYNAMIC_VALUE_PLACEHOLDER_SUFFIX}`;
+export const makeDynamicValuePlaceholder = (index: number): string => {
+  if (index < 0 || index > 0xFFFF) {
+    throw new Error("Dynamic value index out of bounds (must be between 0 and 65535)");
+  }
+
+  // Packing the index as a single character to keep the placeholder short.
+  // NOTE: This limits us to 65536 dynamic values in a single template.
+  const encodedIndex = String.fromCharCode(index);
+  return `${DYNAMIC_VALUE_PLACEHOLDER_PREFIX}${encodedIndex}`;
+}
 
 export const isLetter = (char: string): boolean => {
   // Fancy bitwise trick to check if char is in [A-Za-z].
@@ -29,4 +39,29 @@ export const isDigit = (char: string): boolean => {
 
 export const isWhiteSpace = (char: string): boolean => {
   return char === " " || char === "\t" || char === "\n" || char === "\r" || char === "\f" || char === "\v";
+};
+
+export const isValidHTMLTagNameChar = (char: string): boolean => {
+  return isLetter(char) || isDigit(char) || char === "-" || char === ":";
+};
+
+export const isValidHTMLTagName = (tagName: string): boolean => {
+  if (tagName.length === 0) {
+    return false;
+  }
+
+  // First character must be a letter
+  if (!isLetter(tagName[0])) {
+    return false;
+  }
+
+  // Subsequent characters can be letters, digits, "-", or ":"
+  for (let i = 1; i < tagName.length; i++) {
+    const char = tagName[i];
+    if (!isValidHTMLTagNameChar(char)) {
+      return false;
+    }
+  }
+
+  return true;
 };

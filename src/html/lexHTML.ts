@@ -1,20 +1,29 @@
-import { DYNAMIC_VALUE_PLACEHOLDER_PREFIX, DYNAMIC_VALUE_PLACEHOLDER_SUFFIX, isLetter, isWhiteSpace } from "./utils.ts";
+import {
+  DYNAMIC_VALUE_CHARACTER_SEQUENCE_LENGTH,
+  DYNAMIC_VALUE_PLACEHOLDER_PREFIX,
+  isLetter,
+  isValidHTMLTagName,
+  isValidHTMLTagNameChar,
+  isWhiteSpace
+} from "./utils.ts";
 
 // TODO:
 // - Handle component tags (tags where the tag name is a function placeholder)
 // - Resolve dynamic value placeholders; a dynamic value can appear anywhere so all lexer functions need to be aware of them.
 //   - A util for matching and extracting dynamic value placeholders would be helpful here.
+//   - Need to be able to unwrap iterables, promises, etc
 // - Ensure all error cases are handled gracefully and produce useful error messages.
 
-const TOKEN_TYPE = {
+export const TOKEN_TYPE = {
   ERROR: 0,
-  TEXT: 10,
+  CHILD_CONTENT: 10,
   OPENING_TAGNAME: 20,
   OPENING_TAG_END: 21,
   SELF_CLOSING_TAG_END: 22,
   CLOSING_TAGNAME: 23,
   ATTR_NAME: 30,
   ATTR_VALUE: 31,
+  SPREAD_ATTR: 32,
   COMMENT: 40,
   DOCTYPE: 50,
 } as const satisfies Record<string, number>;
@@ -27,22 +36,24 @@ type LexerTokensWithValue = Exclude<LexerTokenType, LexerTokenTypesWithNoValue>;
 
 type LexerToken = {
   ty: LexerTokenType;
-  v?: string;
+  value?: unknown;
 } & ({
   ty: LexerTokensWithValue;
-  v: string;
+  value: unknown;
 } | {
   ty: LexerTokenTypesWithNoValue;
-  v?: never;
+  value?: never;
 });
+
+const NO_DYNAMIC_VALUE = Symbol("NO_DYNAMIC_VALUE");
 
 type LexerContext<TTokenNames extends LexerTokenName = LexerTokenName> = {
   /**
    * Peeks ahead in the input string without advancing the current position.
-   * 
+   *
    * @param  {number} [peekLength=1] - The number of characters to peek ahead.
    * @param {number} [peekOffset=0] - The number of characters to offset from the current position for the peek.
-   * 
+   *
    * @example
    * ```ts
    * ctx.peek(); // Peeks the next character from the current position
@@ -58,19 +69,25 @@ type LexerContext<TTokenNames extends LexerTokenName = LexerTokenName> = {
    * @param {number} [peekOffset=0] - The number of characters to offset from the current position for the match.
    */
   peekMatch(matchString: string, peekOffset?: number): boolean;
+  /**
+   * Peeks ahead to check for a dynamic value placeholder and returns metadata for the corresponding dynamic value if found.
+   *
+   * @param {number} [peekOffset=0] - The number of characters to offset from the current position for the peek.
+   * @returns The dynamic value, or NO_DYNAMIC_VALUE symbol if no dynamic value placeholder is found.
+   */
+  peekDynamicValue(peekOffset?: number): unknown | typeof NO_DYNAMIC_VALUE;
   advance(advanceLength?: number): string;
   isAtEnd(): boolean;
-  getDynamicValue(index: number): unknown;
   addToken(tokenType: Extract<LexerTokenTypesWithNoValue, typeof TOKEN_TYPE[TTokenNames]>, value?: never): void;
-  addToken(tokenType: Extract<LexerTokensWithValue, typeof TOKEN_TYPE[TTokenNames]>, value: string): void;
+  addToken(tokenType: Extract<LexerTokensWithValue, typeof TOKEN_TYPE[TTokenNames]>, value: unknown): void;
 }
 
 /**
  * A function that performs lexing and returns the next lexer function to execute, or null if lexing is complete.
  */
-type LexerFunction<TTokenNames extends LexerTokenName> = (ctx: LexerContext<TTokenNames>) => Promise<LexerFunction<any> | null>;
+type LexerFunction<TTokenNames extends LexerTokenName> = (ctx: LexerContext<TTokenNames>) => LexerFunction<any> | null;
 
-const lexTextContent: LexerFunction<"TEXT" | "ERROR"> = async (ctx) => {
+const lexTextContent: LexerFunction<"CHILD_CONTENT" | "ERROR"> = (ctx) => {
   let textContent = "";
   let nextLexerFunction: LexerFunction<any> | null = null;
 
@@ -108,32 +125,50 @@ const lexTextContent: LexerFunction<"TEXT" | "ERROR"> = async (ctx) => {
           break;
         }
 
-        if (ctx.peekMatch(DYNAMIC_VALUE_PLACEHOLDER_PREFIX, 1)) {
-          // If we find a dynamic value placeholder after the "<" and it maps to a function,
-          // we treat it as a component tag.
-          let peekOffset = 1 + DYNAMIC_VALUE_PLACEHOLDER_PREFIX.length;
-          let indexChars = "";
-          while (!ctx.peekMatch(DYNAMIC_VALUE_PLACEHOLDER_SUFFIX, peekOffset)) {
-            indexChars += ctx.peek(1, peekOffset);
-            peekOffset++;
-          }
-          const dynamicValueIndex = parseInt(indexChars, 10);
-          const dynamicValue = ctx.getDynamicValue(dynamicValueIndex);
-          if (typeof dynamicValue === "function") {
-            // TRANSITION TO COMPONENT TAG
-            // nextLexerFunction = lexComponentTag;
-            break;
-          }
+        const dynamicValue = ctx.peekDynamicValue(1);
+        if (
+          // `<${function}` => component tag
+          typeof dynamicValue === "function" ||
+          // `<${string}` => element tag with dynamic string tag name (unless the string is empty or starts with a non-letter,
+          // in which case we can just proceed and treat it as text content)
+          (typeof dynamicValue === "string" && dynamicValue.length > 0 && isLetter(dynamicValue[0]))
+        ) {
+          // Transition to lex opening tagname; the lexer will consume the dynamic value.
+          // If the dynamic value is a function, the token will just be `{ ty: OPENING_TAGNAME, v: [Function] }`,
+          // and the parser can handle it from there.
+          nextLexerFunction = lexOpeningTagname;
+          break;
         }
-      }
+      } else {
+        const dynamicValue = ctx.peekDynamicValue();
+        if (dynamicValue !== NO_DYNAMIC_VALUE) {
+          if (typeof dynamicValue === "string") {
+            // If the dynamic value is a string, we can roll it into the text content
+            textContent += dynamicValue;
+          } else {
+            if (textContent.length > 0) {
+              // Emit any accumulated text content before transitioning
+              ctx.addToken(TOKEN_TYPE.CHILD_CONTENT, textContent);
+              textContent = "";
+            }
+            // Emit the raw dynamic value as a child content token; the parser can handle it from there
+            // if we want to unwrap iterables, promises, inlined functions, etc
+            ctx.addToken(TOKEN_TYPE.CHILD_CONTENT, dynamicValue);
+          }
 
-      // We didn't find a transition point, so just consume the next character as text content
-      textContent += ctx.advance(1);
+          // Advance past the dynamic value character sequence
+          ctx.advance(DYNAMIC_VALUE_CHARACTER_SEQUENCE_LENGTH);
+          continue;
+        }
+
+        // We didn't find a transition point, so just consume the next character as text content
+        textContent += ctx.advance(1);
+      }
     }
 
     if (textContent.length > 0) {
       // Skip text content token if empty
-      ctx.addToken(TOKEN_TYPE.TEXT, textContent);
+      ctx.addToken(TOKEN_TYPE.CHILD_CONTENT, textContent);
     }
 
     return nextLexerFunction;
@@ -143,7 +178,7 @@ const lexTextContent: LexerFunction<"TEXT" | "ERROR"> = async (ctx) => {
   }
 }
 
-const lexComment: LexerFunction<"COMMENT" | "ERROR"> = async (ctx) => {
+const lexComment: LexerFunction<"COMMENT" | "ERROR"> = (ctx) => {
   // Skip the opening "<!--"
   const skipped = ctx.advance(4);
   if (skipped !== "<!--") {
@@ -160,14 +195,22 @@ const lexComment: LexerFunction<"COMMENT" | "ERROR"> = async (ctx) => {
       ctx.advance(3);
       break;
     }
-    commentContent += ctx.advance(1);
+
+    const dynamicValue = ctx.peekDynamicValue();
+    if (dynamicValue !== NO_DYNAMIC_VALUE) {
+      // Just stringify the dynamic value and include it in the comment content
+      commentContent += String(dynamicValue);
+      ctx.advance(DYNAMIC_VALUE_CHARACTER_SEQUENCE_LENGTH);
+    } else {
+      commentContent += ctx.advance(1);
+    }
   }
 
   ctx.addToken(TOKEN_TYPE.COMMENT, commentContent);
   return nextLexerFunction;
 };
 
-const lexDoctype: LexerFunction<"DOCTYPE" | "ERROR"> = async (ctx) => {
+const lexDoctype: LexerFunction<"DOCTYPE" | "ERROR"> = (ctx) => {
   // Skip the opening "<!DOCTYPE"
   const skipped = ctx.advance(9);
   if (skipped !== "<!DOCTYPE") {
@@ -178,13 +221,18 @@ const lexDoctype: LexerFunction<"DOCTYPE" | "ERROR"> = async (ctx) => {
 
   let doctypeContent = "";
   while (!ctx.isAtEnd()) {
-    const nextChar = ctx.peek();
-    if (nextChar === ">") {
+    if (ctx.peekMatch(">")) {
       nextLexerFunction = lexTextContent;
       // Consume the closing ">"
       ctx.advance(1);
       break;
     }
+
+    if (ctx.peekDynamicValue() !== NO_DYNAMIC_VALUE) {
+      ctx.addToken(TOKEN_TYPE.ERROR, `Dynamic values are not allowed inside DOCTYPE declarations.`);
+      return null;
+    }
+
     doctypeContent += ctx.advance(1);
   }
 
@@ -192,7 +240,7 @@ const lexDoctype: LexerFunction<"DOCTYPE" | "ERROR"> = async (ctx) => {
   return nextLexerFunction;
 }
 
-const lexOpeningTagname: LexerFunction<"OPENING_TAGNAME" | "ERROR"> = async (ctx) => {
+const lexOpeningTagname: LexerFunction<"OPENING_TAGNAME" | "ERROR"> = (ctx) => {
   // Skip the opening "<"
   const skipped = ctx.advance(1);
   if (skipped !== "<") {
@@ -201,12 +249,32 @@ const lexOpeningTagname: LexerFunction<"OPENING_TAGNAME" | "ERROR"> = async (ctx
   }
 
   let nextLexerFunction: LexerFunction<any> | null = null;
-  let tagName = "";
+  let tagName: string | Function = "";
 
   while (!ctx.isAtEnd()) {
+    const dynamicValue = ctx.peekDynamicValue();
+    if (dynamicValue !== NO_DYNAMIC_VALUE) {
+      if (!tagName && typeof dynamicValue === "function") {
+        // If the dynamic value is a function and we haven't consumed any tag name characters yet,
+        // we can treat this as a component tag.
+        tagName = dynamicValue;
+        ctx.advance(DYNAMIC_VALUE_CHARACTER_SEQUENCE_LENGTH);
+        nextLexerFunction = lexAttributeName;
+        break;
+      }
+
+      // If we encounter a dynamic value, we treat it as the entire tag name.
+      // The parser can handle it from there.
+      tagName += String(dynamicValue);
+      ctx.advance(DYNAMIC_VALUE_CHARACTER_SEQUENCE_LENGTH);
+    }
+
     const nextChar = ctx.peek();
 
-    if (isLetter(nextChar)) {
+    if (
+      (tagName.length === 0 && isLetter(nextChar)) ||
+      isValidHTMLTagNameChar(nextChar)
+    ) {
       tagName += ctx.advance(1);
     } else if (isWhiteSpace(nextChar)) {
       // Consume whitespace and transition to attribute lexing
@@ -226,8 +294,8 @@ const lexOpeningTagname: LexerFunction<"OPENING_TAGNAME" | "ERROR"> = async (ctx
     }
   }
 
-  if (!tagName) {
-    ctx.addToken(TOKEN_TYPE.ERROR, `lexOpeningTagname did not find a valid tag name.`);
+  if (typeof tagName === "string" && !isValidHTMLTagName(tagName)) {
+    ctx.addToken(TOKEN_TYPE.ERROR, `lexOpeningTagname received invalid tag name "${tagName}".`);
     return null;
   }
 
@@ -235,7 +303,7 @@ const lexOpeningTagname: LexerFunction<"OPENING_TAGNAME" | "ERROR"> = async (ctx
   return nextLexerFunction;
 }
 
-const lexAttributeName: LexerFunction<"ATTR_NAME" | "ERROR"> = async (ctx) => {
+const lexAttributeName: LexerFunction<"ATTR_NAME" | "ERROR"> = (ctx) => {
   let nextLexerFunction: LexerFunction<any> | null = null;
   let attrName = "";
 
@@ -285,7 +353,7 @@ const lexAttributeName: LexerFunction<"ATTR_NAME" | "ERROR"> = async (ctx) => {
   return nextLexerFunction;
 }
 
-const lexAttributeValue: LexerFunction<"ATTR_VALUE" | "ERROR"> = async (ctx) => {
+const lexAttributeValue: LexerFunction<"ATTR_VALUE" | "ERROR"> = (ctx) => {
   const skipped = ctx.advance(1);
   if (skipped !== "=") {
     ctx.addToken(TOKEN_TYPE.ERROR, `lexAttributeValue expected "=" but found "${skipped}"`);
@@ -348,7 +416,7 @@ const lexAttributeValue: LexerFunction<"ATTR_VALUE" | "ERROR"> = async (ctx) => 
   return nextLexerFunction;
 }
 
-const lexSelfClosingTagEnd: LexerFunction<"SELF_CLOSING_TAG_END" | "ERROR"> = async (ctx) => {
+const lexSelfClosingTagEnd: LexerFunction<"SELF_CLOSING_TAG_END" | "ERROR"> = (ctx) => {
   // Skip the opening "/>"
   const skipped = ctx.advance(2);
   if (skipped !== "/>") {
@@ -360,7 +428,7 @@ const lexSelfClosingTagEnd: LexerFunction<"SELF_CLOSING_TAG_END" | "ERROR"> = as
   return lexTextContent;
 };
 
-const lexClosingTag: LexerFunction<"CLOSING_TAGNAME" | "ERROR"> = async (ctx) => {
+const lexClosingTag: LexerFunction<"CLOSING_TAGNAME" | "ERROR"> = (ctx) => {
   // Skip the opening "</"
   const skipped = ctx.advance(2);
   if (skipped !== "</") {
@@ -380,64 +448,81 @@ const lexClosingTag: LexerFunction<"CLOSING_TAGNAME" | "ERROR"> = async (ctx) =>
       ctx.advance(1);
       nextLexerFunction = lexTextContent;
       break;
-    } else if (isLetter(nextChar)) {
-      if (!hasFinishedConsumingTagName) {
-        tagName += ctx.advance(1);
+    } else {
+      if (hasFinishedConsumingTagName) {
+        ctx.advance(1);
+        continue;
       }
-    } else if (isWhiteSpace(nextChar)) {
-      // If we encounter whitespace, that means the tag name is complete.
-      // We can keep going until we hit the closing ">" but any more characters
-      // we encounter will be ignored.
-      hasFinishedConsumingTagName = true;
-      ctx.advance(1);
-      continue;
+
+      if (tagName.length === 0 && isLetter(nextChar) || isValidHTMLTagNameChar(nextChar)) {
+        tagName += ctx.advance(1);
+      } else {
+        hasFinishedConsumingTagName = true;
+        ctx.advance(1);
+      }
     }
+  }
+
+  if (
+    typeof tagName === "string" &&
+    tagName !== "" &&
+    !isValidHTMLTagName(tagName)
+  ) {
+    ctx.addToken(TOKEN_TYPE.ERROR, `lexClosingTag received invalid tag name "${tagName}".`);
+    return null;
   }
 
   ctx.addToken(TOKEN_TYPE.CLOSING_TAGNAME, tagName);
   return nextLexerFunction;
 };
 
-export const lexHTML = async (htmlString: string, dynamicValues: unknown[]): Promise<LexerToken[]> => {
+export const lexHTML = (htmlString: string, dynamicValues: unknown[]): LexerToken[] => {
   const htmlStringLength = htmlString.length;
 
   let charIndex = 0;
 
   const tokens = new Array<LexerToken>();
 
+  // TODO: what is the least-sucky way to resolve dynamic value placeholders here?
   const lexerContext: LexerContext = {
-    peek(peekLength = 1, peekOffset = 0): string {
+    peek(peekLength = 1, peekOffset = 0) {
       const startIndex = charIndex + peekOffset;
       const endIndex = startIndex + peekLength;
 
-      // Otherwise, just use the length from the current index
       return htmlString.slice(startIndex, Math.min(endIndex, htmlStringLength));
     },
-    peekMatch(matchString: string, peekOffset = 0): boolean {
+    peekMatch(matchString: string, peekOffset = 0) {
       const peekedString = this.peek(matchString.length, peekOffset);
       return peekedString === matchString;
     },
-    advance(advanceLength: number = 1): string {
+    peekDynamicValue(peekOffset = 0) {
+      if (!this.peekMatch(DYNAMIC_VALUE_PLACEHOLDER_PREFIX, peekOffset)) {
+        return NO_DYNAMIC_VALUE;
+      }
+
+      const dynamicValueIndex = htmlString.charCodeAt(charIndex + peekOffset + 1);
+      const dynamicValue = dynamicValues[dynamicValueIndex];
+
+      return dynamicValue;
+    },
+    advance(advanceLength = 1) {
       return htmlString.slice(charIndex, (charIndex = Math.min(charIndex + advanceLength, htmlStringLength)));
     },
-    isAtEnd(): boolean {
+    isAtEnd() {
       return charIndex >= htmlString.length;
-    },
-    getDynamicValue(index: number): unknown {
-      return dynamicValues[index];
     },
     addToken(tokenType, value) {
       if (value === undefined) {
         tokens.push({ ty: tokenType as LexerTokenTypesWithNoValue });
       } else {
-        tokens.push({ ty: tokenType as LexerTokensWithValue, v: value });
+        tokens.push({ ty: tokenType as LexerTokensWithValue, value: value });
       }
     }
   };
 
   let lexerFunction: LexerFunction<any> | null = lexTextContent;
   while (lexerFunction !== null) {
-    lexerFunction = await lexerFunction(lexerContext);
+    lexerFunction = lexerFunction(lexerContext);
   }
 
   return tokens;
