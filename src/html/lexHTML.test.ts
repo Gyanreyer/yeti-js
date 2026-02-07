@@ -3,180 +3,99 @@ import {
   test,
 } from "node:test";
 import assert from "node:assert/strict";
-import { lexHTML, TOKEN_TYPE } from "./lexHTML.ts";
+import { lexHTML, TOKEN_TYPE, type LexerToken } from "./lexHTML.ts";
 import { makeDynamicValuePlaceholder } from "./utils.ts";
 
 describe("lexHTML", () => {
   test("lexes empty string as expected", async () => {
-    const tokens = await lexHTML("", []);
+    const tokens = Array.from(lexHTML("", []));
     assert.deepStrictEqual(tokens, []);
   });
 
   test("lexes a string with only whitespace as expected", async () => {
-    const tokens = await lexHTML("   \n", []);
-    assert.deepStrictEqual(tokens, [{
-      ty: TOKEN_TYPE.CHILD_CONTENT,
-      value: "   \n",
-    }]);
+    const tokens = Array.from(lexHTML("   \n", []));
+    assert.deepStrictEqual(tokens, [
+      [TOKEN_TYPE.CHILD_CONTENT, "   \n"],
+    ] satisfies LexerToken[]);
   });
 
   test("lexes doctype declaration as expected", () => {
-    const tokens = lexHTML("<!DOCTYPE html>", []);
-    assert.deepStrictEqual(tokens, [{
-      ty: TOKEN_TYPE.DOCTYPE,
-      value: "html",
-    }]);
+    const tokens = Array.from(lexHTML("<!DOCTYPE html>", []));
+    assert.deepStrictEqual(tokens, [
+      [TOKEN_TYPE.DOCTYPE, "html"],
+    ] satisfies LexerToken[]);
   });
 
   test("lexes a single HTML element as expected", () => {
-    const tokens = lexHTML("<div></div>", []);
+    const tokens = Array.from(lexHTML("<div></div>", []));
     assert.deepStrictEqual(tokens, [
-      {
-        ty: TOKEN_TYPE.OPENING_TAGNAME,
-        value: "div",
-      },
-      {
-        ty: TOKEN_TYPE.CLOSING_TAGNAME,
-        value: "div",
-      },
-    ]);
+      [TOKEN_TYPE.OPENING_TAGNAME, "div"],
+      [TOKEN_TYPE.CLOSING_TAGNAME, "div"],
+    ] satisfies LexerToken[]);
   });
 
   test("lexes self-closing HTML elements as expected", () => {
-    const tokens = lexHTML("<img />", []);
+    const tokens = Array.from(lexHTML("<img />", []));
     assert.deepStrictEqual(tokens, [
-      {
-        ty: TOKEN_TYPE.OPENING_TAGNAME,
-        value: "img",
-      },
-      {
-        ty: TOKEN_TYPE.SELF_CLOSING_TAG_END,
-      },
-    ]);
+      [TOKEN_TYPE.OPENING_TAGNAME, "img"],
+      [TOKEN_TYPE.SELF_CLOSING_TAG_END],
+    ] satisfies LexerToken[]);
   });
 
   test("lexes nested HTML elements as expected", () => {
-    const tokens = lexHTML("<div><span>Hello, world!</span></div>", []);
+    const tokens = Array.from(lexHTML("<div><span>Hello, world!</span></div>", []));
     assert.deepStrictEqual(tokens, [
-      {
-        ty: TOKEN_TYPE.OPENING_TAGNAME,
-        value: "div",
-      },
-      {
-        ty: TOKEN_TYPE.OPENING_TAGNAME,
-        value: "span",
-      },
-      {
-        ty: TOKEN_TYPE.CHILD_CONTENT,
-        value: "Hello, world!",
-      },
-      {
-        ty: TOKEN_TYPE.CLOSING_TAGNAME,
-        value: "span",
-      },
-      {
-        ty: TOKEN_TYPE.CLOSING_TAGNAME,
-        value: "div",
-      },
-    ]);
+      [TOKEN_TYPE.OPENING_TAGNAME, "div"],
+      [TOKEN_TYPE.OPENING_TAGNAME, "span"],
+      [TOKEN_TYPE.CHILD_CONTENT, "Hello, world!"],
+      [TOKEN_TYPE.CLOSING_TAGNAME, "span"],
+      [TOKEN_TYPE.CLOSING_TAGNAME, "div"],
+    ] satisfies LexerToken[]);
   });
 
   test("lexes attributes with static values as expected", () => {
-    const tokens = lexHTML('<input type="text" disabled>', []);
+    const tokens = Array.from(lexHTML('<input type="text" disabled>', []));
     assert.deepStrictEqual(tokens, [
-      {
-        ty: TOKEN_TYPE.OPENING_TAGNAME,
-        value: "input",
-      },
-      {
-        ty: TOKEN_TYPE.ATTR_NAME,
-        value: "type",
-      },
-      {
-        ty: TOKEN_TYPE.ATTR_VALUE,
-        value: "text",
-      },
-      {
-        ty: TOKEN_TYPE.ATTR_NAME,
-        value: "disabled",
-      },
-    ]);
+      [TOKEN_TYPE.OPENING_TAGNAME, "input"],
+      [TOKEN_TYPE.ATTR_NAME, "type"],
+      [TOKEN_TYPE.ATTR_VALUE, "text"],
+      [TOKEN_TYPE.ATTR_NAME, "disabled"],
+    ] satisfies LexerToken[]);
   });
 
   test("lexes self-closing components as expected", () => {
     const MyComponent = () => "hello";
-    const tokens = lexHTML(`<${makeDynamicValuePlaceholder(0)} prop1='value1' />`, [MyComponent]);
+    const tokens = Array.from(lexHTML(`<${makeDynamicValuePlaceholder(0)} prop1='value1' />`, [MyComponent]));
     assert.deepStrictEqual(tokens, [
-      {
-        ty: TOKEN_TYPE.OPENING_TAGNAME,
-        value: MyComponent,
-      },
-      {
-        ty: TOKEN_TYPE.ATTR_NAME,
-        value: "prop1",
-      },
-      {
-        ty: TOKEN_TYPE.ATTR_VALUE,
-        value: "value1",
-      },
-      {
-        ty: TOKEN_TYPE.SELF_CLOSING_TAG_END,
-      },
-    ]);
+      [TOKEN_TYPE.OPENING_TAGNAME, MyComponent],
+      [TOKEN_TYPE.ATTR_NAME, "prop1"],
+      [TOKEN_TYPE.ATTR_VALUE, "value1"],
+      [TOKEN_TYPE.SELF_CLOSING_TAG_END],
+    ] satisfies LexerToken[]);
   });
 
   test("lexes components with child content as expected", () => {
     const MyComponent = () => "hello";
-    const tokens = lexHTML(`<${makeDynamicValuePlaceholder(0)} prop1='value1'>Child content</${makeDynamicValuePlaceholder(1)}>`, [MyComponent, MyComponent]);
+    const tokens = Array.from(lexHTML(`<${makeDynamicValuePlaceholder(0)} prop1='value1'>Child content</${makeDynamicValuePlaceholder(1)}>`, [MyComponent, MyComponent]));
     assert.deepStrictEqual(tokens, [
-      {
-        ty: TOKEN_TYPE.OPENING_TAGNAME,
-        value: MyComponent,
-      },
-      {
-        ty: TOKEN_TYPE.ATTR_NAME,
-        value: "prop1",
-      },
-      {
-        ty: TOKEN_TYPE.ATTR_VALUE,
-        value: "value1",
-      },
-      {
-        ty: TOKEN_TYPE.CHILD_CONTENT,
-        value: "Child content",
-      },
-      {
-        ty: TOKEN_TYPE.CLOSING_TAGNAME,
-        value: MyComponent,
-      },
-    ]);
+      [TOKEN_TYPE.OPENING_TAGNAME, MyComponent],
+      [TOKEN_TYPE.ATTR_NAME, "prop1"],
+      [TOKEN_TYPE.ATTR_VALUE, "value1"],
+      [TOKEN_TYPE.CHILD_CONTENT, "Child content"],
+      [TOKEN_TYPE.CLOSING_TAGNAME, MyComponent],
+    ] satisfies LexerToken[]);
   });
 
   test("lexes components with shorthand closing tags as expected", () => {
     const MyComponent = () => "hello";
-    const tokens = lexHTML(`<${makeDynamicValuePlaceholder(0)} prop1='value1'>Child content</>`, [MyComponent]);
+    const tokens = Array.from(lexHTML(`<${makeDynamicValuePlaceholder(0)} prop1='value1'>Child content</>`, [MyComponent]));
     assert.deepStrictEqual(tokens, [
-      {
-        ty: TOKEN_TYPE.OPENING_TAGNAME,
-        value: MyComponent,
-      },
-      {
-        ty: TOKEN_TYPE.ATTR_NAME,
-        value: "prop1",
-      },
-      {
-        ty: TOKEN_TYPE.ATTR_VALUE,
-        value: "value1",
-      },
-      {
-        ty: TOKEN_TYPE.CHILD_CONTENT,
-        value: "Child content",
-      },
-      {
-        ty: TOKEN_TYPE.CLOSING_TAGNAME,
-        value: "",
-      },
-    ]);
+      [TOKEN_TYPE.OPENING_TAGNAME, MyComponent],
+      [TOKEN_TYPE.ATTR_NAME, "prop1"],
+      [TOKEN_TYPE.ATTR_VALUE, "value1"],
+      [TOKEN_TYPE.CHILD_CONTENT, "Child content"],
+      [TOKEN_TYPE.CLOSING_TAGNAME, ""],
+    ] satisfies LexerToken[]);
   });
 
   test("lexes dynamic values in attributes as expected", () => {
@@ -184,37 +103,16 @@ describe("lexHTML", () => {
     const dynamicValue2 = 0;
     const dynamicValue3 = { foo: "bar" };
 
-    const tokens = lexHTML(`<div attr1="${makeDynamicValuePlaceholder(0)}" attr2=${makeDynamicValuePlaceholder(1)} attr3=${makeDynamicValuePlaceholder(2)}>`, [dynamicValue1, dynamicValue2, dynamicValue3]);
+    const tokens = Array.from(lexHTML(`<div attr1="${makeDynamicValuePlaceholder(0)}" attr2=${makeDynamicValuePlaceholder(1)} attr3=${makeDynamicValuePlaceholder(2)}>`, [dynamicValue1, dynamicValue2, dynamicValue3]));
     assert.deepStrictEqual(tokens, [
-      {
-        ty: TOKEN_TYPE.OPENING_TAGNAME,
-        value: "div",
-      },
-      {
-        ty: TOKEN_TYPE.ATTR_NAME,
-        value: "attr1",
-      },
-      {
-        ty: TOKEN_TYPE.ATTR_VALUE,
-        value: dynamicValue1,
-      },
-      {
-        ty: TOKEN_TYPE.ATTR_NAME,
-        value: "attr2",
-      },
-      {
-        ty: TOKEN_TYPE.ATTR_VALUE,
-        value: dynamicValue2,
-      },
-      {
-        ty: TOKEN_TYPE.ATTR_NAME,
-        value: "attr3",
-      },
-      {
-        ty: TOKEN_TYPE.ATTR_VALUE,
-        value: dynamicValue3,
-      },
-    ]);
+      [TOKEN_TYPE.OPENING_TAGNAME, "div"],
+      [TOKEN_TYPE.ATTR_NAME, "attr1"],
+      [TOKEN_TYPE.ATTR_VALUE, dynamicValue1],
+      [TOKEN_TYPE.ATTR_NAME, "attr2"],
+      [TOKEN_TYPE.ATTR_VALUE, dynamicValue2],
+      [TOKEN_TYPE.ATTR_NAME, "attr3"],
+      [TOKEN_TYPE.ATTR_VALUE, dynamicValue3],
+    ] satisfies LexerToken[]);
   });
 
   test("lexes dynamic attribute names as expected", () => {
@@ -224,123 +122,60 @@ describe("lexHTML", () => {
     const dynamicAttrPart1 = "data";
     const dynamicAttrPart2 = 3;
 
-    const tokens = lexHTML(`<div
+    const tokens = Array.from(lexHTML(`<div
   ${makeDynamicValuePlaceholder(0)}="value1"
   ${makeDynamicValuePlaceholder(1)}="value2"
   ${makeDynamicValuePlaceholder(2)}-part="value3"
   part-${makeDynamicValuePlaceholder(3)}="value4"
->`, [dynamicAttrName1, dynamicAttrName2, dynamicAttrPart1, dynamicAttrPart2]);
+>`, [dynamicAttrName1, dynamicAttrName2, dynamicAttrPart1, dynamicAttrPart2]));
     assert.deepStrictEqual(tokens, [
-      {
-        ty: TOKEN_TYPE.OPENING_TAGNAME,
-        value: "div",
-      },
-      {
-        ty: TOKEN_TYPE.ATTR_NAME,
-        value: dynamicAttrName1,
-      },
-      {
-        ty: TOKEN_TYPE.ATTR_VALUE,
-        value: "value1",
-      },
-      {
-        ty: TOKEN_TYPE.ATTR_NAME,
-        value: String(dynamicAttrName2),
-      },
-      {
-        ty: TOKEN_TYPE.ATTR_VALUE,
-        value: "value2",
-      },
-      {
-        ty: TOKEN_TYPE.ATTR_NAME,
-        value: `${dynamicAttrPart1}-part`,
-      },
-      {
-        ty: TOKEN_TYPE.ATTR_VALUE,
-        value: "value3",
-      },
-      {
-        ty: TOKEN_TYPE.ATTR_NAME,
-        value: `part-${dynamicAttrPart2}`,
-      },
-      {
-        ty: TOKEN_TYPE.ATTR_VALUE,
-        value: "value4",
-      },
-    ]);
+      [TOKEN_TYPE.OPENING_TAGNAME, "div"],
+      [TOKEN_TYPE.ATTR_NAME, dynamicAttrName1],
+      [TOKEN_TYPE.ATTR_VALUE, "value1"],
+      [TOKEN_TYPE.ATTR_NAME, String(dynamicAttrName2)],
+      [TOKEN_TYPE.ATTR_VALUE, "value2"],
+      [TOKEN_TYPE.ATTR_NAME, `${dynamicAttrPart1}-part`],
+      [TOKEN_TYPE.ATTR_VALUE, "value3"],
+      [TOKEN_TYPE.ATTR_NAME, `part-${dynamicAttrPart2}`],
+      [TOKEN_TYPE.ATTR_VALUE, "value4"],
+    ] satisfies LexerToken[]);
   });
 
   test("returns error token for dynamic attribute names which aren't valid attribute names", () => {
     const dynamicAttrName1 = "invalid attribute name";
 
-    const tokens = lexHTML(`<div ${makeDynamicValuePlaceholder(0)}="value1">`, [dynamicAttrName1]);
+    const tokens = Array.from(lexHTML(`<div ${makeDynamicValuePlaceholder(0)}="value1">`, [dynamicAttrName1]));
     assert.deepStrictEqual(tokens, [
-      {
-        ty: TOKEN_TYPE.OPENING_TAGNAME,
-        value: "div",
-      },
-      {
-        ty: TOKEN_TYPE.ERROR,
-        value: `lexAttributeName received invalid attribute name "${dynamicAttrName1}"`
-      },
-    ]);
+      [TOKEN_TYPE.OPENING_TAGNAME, "div"],
+      [TOKEN_TYPE.ERROR, `lexAttributeName received invalid attribute name "${dynamicAttrName1}"`],
+    ] satisfies LexerToken[]);
 
     const dynamicAttrName2 = { foo: "bar" };
 
-    const tokens2 = lexHTML(`<div ${makeDynamicValuePlaceholder(0)}="value1">`, [dynamicAttrName2]);
+    const tokens2 = Array.from(lexHTML(`<div ${makeDynamicValuePlaceholder(0)}="value1">`, [dynamicAttrName2]));
     assert.deepStrictEqual(tokens2, [
-      {
-        ty: TOKEN_TYPE.OPENING_TAGNAME,
-        value: "div",
-      },
-      {
-        ty: TOKEN_TYPE.ERROR,
-        value: `lexAttributeName received invalid attribute name "${dynamicAttrName2}"`
-      },
-    ]);
+      [TOKEN_TYPE.OPENING_TAGNAME, "div"],
+      [TOKEN_TYPE.ERROR, `lexAttributeName received invalid attribute name "${dynamicAttrName2}"`],
+    ] satisfies LexerToken[]);
   });
 
   test("lexes spread attributes as expected", () => {
     const dynamicSpreadValue = { foo: "bar" };
 
-    const tokens = lexHTML(`<div attr1="value1" ...="hi" ...${makeDynamicValuePlaceholder(0)} attr2="value2">`, [dynamicSpreadValue]);
+    const tokens = Array.from(lexHTML(`<div attr1="value1" ...="hi" ...${makeDynamicValuePlaceholder(0)} attr2="value2">`, [dynamicSpreadValue]));
 
     assert.deepStrictEqual(tokens, [
-      {
-        ty: TOKEN_TYPE.OPENING_TAGNAME,
-        value: "div",
-      },
-      {
-        ty: TOKEN_TYPE.ATTR_NAME,
-        value: "attr1",
-      },
-      {
-        ty: TOKEN_TYPE.ATTR_VALUE,
-        value: "value1",
-      },
+      [TOKEN_TYPE.OPENING_TAGNAME, "div"],
+      [TOKEN_TYPE.ATTR_NAME, "attr1"],
+      [TOKEN_TYPE.ATTR_VALUE, "value1"],
       // "..." is a valid attribute name, so it should only be treated as a spread attribute if it appears
       // at the start of an attribute and is followed by a dynamic value placeholder.
-      {
-        ty: TOKEN_TYPE.ATTR_NAME,
-        value: "...",
-      },
-      {
-        ty: TOKEN_TYPE.ATTR_VALUE,
-        value: "hi",
-      },
-      {
-        ty: TOKEN_TYPE.SPREAD_ATTR,
-        value: dynamicSpreadValue,
-      },
-      {
-        ty: TOKEN_TYPE.ATTR_NAME,
-        value: "attr2",
-      },
-      {
-        ty: TOKEN_TYPE.ATTR_VALUE,
-        value: "value2",
-      },
-    ]);
+      [TOKEN_TYPE.ATTR_NAME, "..."],
+      [TOKEN_TYPE.ATTR_VALUE, "hi"],
+      [TOKEN_TYPE.SPREAD_ATTR, dynamicSpreadValue],
+      [TOKEN_TYPE.ATTR_NAME, "attr2"],
+      [TOKEN_TYPE.ATTR_VALUE, "value2"],
+    ] satisfies LexerToken[]);
   });
 
   test("lexes dynamic string tagnames as expected", () => {
@@ -348,7 +183,7 @@ describe("lexHTML", () => {
     const dynamicTagNamePart1 = "my";
     const dynamicTagNamePart2 = 3;
 
-    const tokens = lexHTML(`
+    const tokens = Array.from(lexHTML(`
 <${makeDynamicValuePlaceholder(0)}></${makeDynamicValuePlaceholder(1)}>
 <${makeDynamicValuePlaceholder(2)}-tag></${makeDynamicValuePlaceholder(3)}-tag>
 <h${makeDynamicValuePlaceholder(4)}></h${makeDynamicValuePlaceholder(5)}>
@@ -356,20 +191,21 @@ describe("lexHTML", () => {
       dynamicTagName1, dynamicTagName1,
       dynamicTagNamePart1, dynamicTagNamePart1,
       dynamicTagNamePart2, dynamicTagNamePart2,
-    ]);
+    ],
+    ));
 
     assert.deepStrictEqual(tokens, [
-      { ty: TOKEN_TYPE.CHILD_CONTENT, value: "\n" },
-      { ty: TOKEN_TYPE.OPENING_TAGNAME, value: dynamicTagName1 },
-      { ty: TOKEN_TYPE.CLOSING_TAGNAME, value: dynamicTagName1 },
-      { ty: TOKEN_TYPE.CHILD_CONTENT, value: "\n" },
-      { ty: TOKEN_TYPE.OPENING_TAGNAME, value: `${dynamicTagNamePart1}-tag` },
-      { ty: TOKEN_TYPE.CLOSING_TAGNAME, value: `${dynamicTagNamePart1}-tag` },
-      { ty: TOKEN_TYPE.CHILD_CONTENT, value: "\n" },
-      { ty: TOKEN_TYPE.OPENING_TAGNAME, value: `h${dynamicTagNamePart2}` },
-      { ty: TOKEN_TYPE.CLOSING_TAGNAME, value: `h${dynamicTagNamePart2}` },
-      { ty: TOKEN_TYPE.CHILD_CONTENT, value: "\n" },
-    ]);
+      [TOKEN_TYPE.CHILD_CONTENT, "\n"],
+      [TOKEN_TYPE.OPENING_TAGNAME, dynamicTagName1],
+      [TOKEN_TYPE.CLOSING_TAGNAME, dynamicTagName1],
+      [TOKEN_TYPE.CHILD_CONTENT, "\n"],
+      [TOKEN_TYPE.OPENING_TAGNAME, `${dynamicTagNamePart1}-tag`],
+      [TOKEN_TYPE.CLOSING_TAGNAME, `${dynamicTagNamePart1}-tag`],
+      [TOKEN_TYPE.CHILD_CONTENT, "\n"],
+      [TOKEN_TYPE.OPENING_TAGNAME, `h${dynamicTagNamePart2}`],
+      [TOKEN_TYPE.CLOSING_TAGNAME, `h${dynamicTagNamePart2}`],
+      [TOKEN_TYPE.CHILD_CONTENT, "\n"],
+    ] satisfies LexerToken[]);
   });
 
   test("lexes a standard static HTML page as expected", () => {
@@ -387,166 +223,48 @@ describe("lexHTML", () => {
 </html>
 `;
 
-    const tokens = lexHTML(html, []);
+    const tokens = Array.from(lexHTML(html, []));
     assert.deepStrictEqual(tokens, [
-      {
-        ty: TOKEN_TYPE.DOCTYPE,
-        value: "html",
-      },
-      {
-        ty: TOKEN_TYPE.CHILD_CONTENT,
-        value: "\n",
-      },
-      {
-        ty: TOKEN_TYPE.OPENING_TAGNAME,
-        value: "html",
-      },
-      {
-        ty: TOKEN_TYPE.ATTR_NAME,
-        value: "lang",
-      },
-      {
-        ty: TOKEN_TYPE.ATTR_VALUE,
-        value: "en",
-      },
-      {
-        ty: TOKEN_TYPE.CHILD_CONTENT,
-        value: "\n  ",
-      },
-      {
-        ty: TOKEN_TYPE.OPENING_TAGNAME,
-        value: "head",
-      },
-      {
-        ty: TOKEN_TYPE.CHILD_CONTENT,
-        value: "\n    ",
-      },
-      {
-        ty: TOKEN_TYPE.OPENING_TAGNAME,
-        value: "meta",
-      },
-      {
-        ty: TOKEN_TYPE.ATTR_NAME,
-        value: "charset",
-      },
-      {
-        ty: TOKEN_TYPE.ATTR_VALUE,
-        value: "UTF-8",
-      },
-      {
-        ty: TOKEN_TYPE.SELF_CLOSING_TAG_END,
-      },
-      {
-        ty: TOKEN_TYPE.CHILD_CONTENT,
-        value: "\n    ",
-      },
-      {
-        ty: TOKEN_TYPE.OPENING_TAGNAME,
-        value: "meta",
-      },
-      {
-        ty: TOKEN_TYPE.ATTR_NAME,
-        value: "name",
-      },
-      {
-        ty: TOKEN_TYPE.ATTR_VALUE,
-        value: "viewport",
-      },
-      {
-        ty: TOKEN_TYPE.ATTR_NAME,
-        value: "content",
-      },
-      {
-        ty: TOKEN_TYPE.ATTR_VALUE,
-        value: "width=device-width, initial-scale=1.0",
-      },
-      {
-        ty: TOKEN_TYPE.SELF_CLOSING_TAG_END,
-      },
-      {
-        ty: TOKEN_TYPE.CHILD_CONTENT,
-        value: "\n    ",
-      },
-      {
-        ty: TOKEN_TYPE.OPENING_TAGNAME,
-        value: "title",
-      },
-      {
-        ty: TOKEN_TYPE.CHILD_CONTENT,
-        value: "Test Page",
-      },
-      {
-        ty: TOKEN_TYPE.CLOSING_TAGNAME,
-        value: "title",
-      },
-      {
-        ty: TOKEN_TYPE.CHILD_CONTENT,
-        value: "\n  ",
-      },
-      {
-        ty: TOKEN_TYPE.CLOSING_TAGNAME,
-        value: "head",
-      },
-      {
-        ty: TOKEN_TYPE.CHILD_CONTENT,
-        value: "\n  ",
-      },
-      {
-        ty: TOKEN_TYPE.OPENING_TAGNAME,
-        value: "body",
-      },
-      {
-        ty: TOKEN_TYPE.CHILD_CONTENT,
-        value: "\n    ",
-      },
-      {
-        ty: TOKEN_TYPE.OPENING_TAGNAME,
-        value: "h1",
-      },
-      {
-        ty: TOKEN_TYPE.CHILD_CONTENT,
-        value: "Hello, world!",
-      },
-      {
-        ty: TOKEN_TYPE.CLOSING_TAGNAME,
-        value: "h1",
-      },
-      {
-        ty: TOKEN_TYPE.CHILD_CONTENT,
-        value: "\n    ",
-      },
-      {
-        ty: TOKEN_TYPE.OPENING_TAGNAME,
-        value: "p",
-      },
-      {
-        ty: TOKEN_TYPE.CHILD_CONTENT,
-        value: "This is a test page.",
-      },
-      {
-        ty: TOKEN_TYPE.CLOSING_TAGNAME,
-        value: "p",
-      },
-      {
-        ty: TOKEN_TYPE.CHILD_CONTENT,
-        value: "\n  ",
-      },
-      {
-        ty: TOKEN_TYPE.CLOSING_TAGNAME,
-        value: "body",
-      },
-      {
-        ty: TOKEN_TYPE.CHILD_CONTENT,
-        value: "\n",
-      },
-      {
-        ty: TOKEN_TYPE.CLOSING_TAGNAME,
-        value: "html",
-      },
-      {
-        ty: TOKEN_TYPE.CHILD_CONTENT,
-        value: "\n",
-      },
-    ]);
+      [TOKEN_TYPE.DOCTYPE, "html"],
+      [TOKEN_TYPE.CHILD_CONTENT, "\n"],
+      [TOKEN_TYPE.OPENING_TAGNAME, "html"],
+      [TOKEN_TYPE.ATTR_NAME, "lang"],
+      [TOKEN_TYPE.ATTR_VALUE, "en"],
+      [TOKEN_TYPE.CHILD_CONTENT, "\n  "],
+      [TOKEN_TYPE.OPENING_TAGNAME, "head"],
+      [TOKEN_TYPE.CHILD_CONTENT, "\n    "],
+      [TOKEN_TYPE.OPENING_TAGNAME, "meta"],
+      [TOKEN_TYPE.ATTR_NAME, "charset"],
+      [TOKEN_TYPE.ATTR_VALUE, "UTF-8"],
+      [TOKEN_TYPE.SELF_CLOSING_TAG_END],
+      [TOKEN_TYPE.CHILD_CONTENT, "\n    "],
+      [TOKEN_TYPE.OPENING_TAGNAME, "meta"],
+      [TOKEN_TYPE.ATTR_NAME, "name"],
+      [TOKEN_TYPE.ATTR_VALUE, "viewport"],
+      [TOKEN_TYPE.ATTR_NAME, "content"],
+      [TOKEN_TYPE.ATTR_VALUE, "width=device-width, initial-scale=1.0"],
+      [TOKEN_TYPE.SELF_CLOSING_TAG_END],
+      [TOKEN_TYPE.CHILD_CONTENT, "\n    "],
+      [TOKEN_TYPE.OPENING_TAGNAME, "title"],
+      [TOKEN_TYPE.CHILD_CONTENT, "Test Page"],
+      [TOKEN_TYPE.CLOSING_TAGNAME, "title"],
+      [TOKEN_TYPE.CHILD_CONTENT, "\n  "],
+      [TOKEN_TYPE.CLOSING_TAGNAME, "head"],
+      [TOKEN_TYPE.CHILD_CONTENT, "\n  "],
+      [TOKEN_TYPE.OPENING_TAGNAME, "body"],
+      [TOKEN_TYPE.CHILD_CONTENT, "\n    "],
+      [TOKEN_TYPE.OPENING_TAGNAME, "h1"],
+      [TOKEN_TYPE.CHILD_CONTENT, "Hello, world!"],
+      [TOKEN_TYPE.CLOSING_TAGNAME, "h1"],
+      [TOKEN_TYPE.CHILD_CONTENT, "\n    "],
+      [TOKEN_TYPE.OPENING_TAGNAME, "p"],
+      [TOKEN_TYPE.CHILD_CONTENT, "This is a test page."],
+      [TOKEN_TYPE.CLOSING_TAGNAME, "p"],
+      [TOKEN_TYPE.CHILD_CONTENT, "\n  "],
+      [TOKEN_TYPE.CLOSING_TAGNAME, "body"],
+      [TOKEN_TYPE.CHILD_CONTENT, "\n"],
+      [TOKEN_TYPE.CLOSING_TAGNAME, "html"],
+      [TOKEN_TYPE.CHILD_CONTENT, "\n"],
+    ] satisfies LexerToken[]);
   });
 });

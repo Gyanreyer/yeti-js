@@ -19,9 +19,8 @@ export const TOKEN_TYPE = {
   ERROR: 0,
   CHILD_CONTENT: 10,
   OPENING_TAGNAME: 20,
-  OPENING_TAG_END: 21,
-  SELF_CLOSING_TAG_END: 22,
-  CLOSING_TAGNAME: 23,
+  SELF_CLOSING_TAG_END: 25,
+  CLOSING_TAGNAME: 26,
   ATTR_NAME: 30,
   ATTR_VALUE: 31,
   SPREAD_ATTR: 32,
@@ -32,23 +31,15 @@ export const TOKEN_TYPE = {
 type LexerTokenName = keyof typeof TOKEN_TYPE;
 type LexerTokenType = typeof TOKEN_TYPE[LexerTokenName];
 
-type LexerTokenTypesWithNoValue = typeof TOKEN_TYPE.OPENING_TAG_END | typeof TOKEN_TYPE.SELF_CLOSING_TAG_END;
-type LexerTokensWithValue = Exclude<LexerTokenType, LexerTokenTypesWithNoValue>;
+export type LexerTokenTypesWithNoValue = typeof TOKEN_TYPE.SELF_CLOSING_TAG_END;
+export type LexerTokensWithValue = Exclude<LexerTokenType, LexerTokenTypesWithNoValue>;
 
-type LexerToken = {
-  ty: LexerTokenType;
-  value?: unknown;
-} & ({
-  ty: LexerTokensWithValue;
-  value: unknown;
-} | {
-  ty: LexerTokenTypesWithNoValue;
-  value?: never;
-});
+// Token format: naked token type for tokens without values, tuple for tokens with values
+export type LexerToken<T extends LexerTokenType = LexerTokenType> = T extends LexerTokenTypesWithNoValue ? [T] : [T, unknown];
 
 const NO_DYNAMIC_VALUE = Symbol("NO_DYNAMIC_VALUE");
 
-type LexerContext<TTokenNames extends LexerTokenName = LexerTokenName> = {
+type LexerContext = {
   /**
    * Peeks ahead in the input string without advancing the current position.
    *
@@ -79,16 +70,14 @@ type LexerContext<TTokenNames extends LexerTokenName = LexerTokenName> = {
   peekDynamicValue(peekOffset?: number): unknown | typeof NO_DYNAMIC_VALUE;
   advance(advanceLength?: number): string;
   isAtEnd(): boolean;
-  addToken(tokenType: Extract<LexerTokenTypesWithNoValue, typeof TOKEN_TYPE[TTokenNames]>, value?: never): void;
-  addToken(tokenType: Extract<LexerTokensWithValue, typeof TOKEN_TYPE[TTokenNames]>, value: unknown): void;
 }
 
 /**
- * A function that performs lexing and returns the next lexer function to execute, or null if lexing is complete.
+ * A generator function that performs lexing and yields the next lexer function to execute, or null if lexing is complete.
  */
-type LexerFunction<TTokenNames extends LexerTokenName> = (ctx: LexerContext<TTokenNames>) => LexerFunction<any> | null;
+type LexerFunction<TTokenNames extends LexerTokenName> = (ctx: LexerContext) => Generator<LexerToken<typeof TOKEN_TYPE[TTokenNames]>, LexerFunction<any> | null, void>;
 
-const lexTextContent: LexerFunction<"CHILD_CONTENT" | "ERROR"> = (ctx) => {
+const lexTextContent: LexerFunction<"CHILD_CONTENT" | "ERROR"> = function* (ctx) {
   let textContent = "";
   let nextLexerFunction: LexerFunction<any> | null = null;
 
@@ -149,12 +138,12 @@ const lexTextContent: LexerFunction<"CHILD_CONTENT" | "ERROR"> = (ctx) => {
           } else {
             if (textContent.length > 0) {
               // Emit any accumulated text content before transitioning
-              ctx.addToken(TOKEN_TYPE.CHILD_CONTENT, textContent);
+              yield [TOKEN_TYPE.CHILD_CONTENT, textContent];
               textContent = "";
             }
             // Emit the raw dynamic value as a child content token; the parser can handle it from there
             // if we want to unwrap iterables, promises, inlined functions, etc
-            ctx.addToken(TOKEN_TYPE.CHILD_CONTENT, dynamicValue);
+            yield [TOKEN_TYPE.CHILD_CONTENT, dynamicValue];
           }
 
           // Advance past the dynamic value character sequence
@@ -169,21 +158,21 @@ const lexTextContent: LexerFunction<"CHILD_CONTENT" | "ERROR"> = (ctx) => {
 
     if (textContent.length > 0) {
       // Skip text content token if empty
-      ctx.addToken(TOKEN_TYPE.CHILD_CONTENT, textContent);
+      yield [TOKEN_TYPE.CHILD_CONTENT, textContent];
     }
 
     return nextLexerFunction;
   } catch (e) {
-    ctx.addToken(TOKEN_TYPE.ERROR, (e instanceof Error) ? e.message : `Unknown lexing error: ${e}`);
+    yield [TOKEN_TYPE.ERROR, (e instanceof Error) ? e.message : `Unknown lexing error: ${e}`];
     return null;
   }
 }
 
-const lexComment: LexerFunction<"COMMENT" | "ERROR"> = (ctx) => {
+const lexComment: LexerFunction<"COMMENT" | "ERROR"> = function* (ctx) {
   // Skip the opening "<!--"
   const skipped = ctx.advance(4);
   if (skipped !== "<!--") {
-    ctx.addToken(TOKEN_TYPE.ERROR, `lexComment received invalid comment opening sequence "${skipped}"`);
+    yield [TOKEN_TYPE.ERROR, `lexComment received invalid comment opening sequence "${skipped}"`];
     return null;
   }
   let nextLexerFunction: LexerFunction<any> | null = null;
@@ -207,15 +196,15 @@ const lexComment: LexerFunction<"COMMENT" | "ERROR"> = (ctx) => {
     }
   }
 
-  ctx.addToken(TOKEN_TYPE.COMMENT, commentContent);
+  yield [TOKEN_TYPE.COMMENT, commentContent];
   return nextLexerFunction;
 };
 
-const lexDoctype: LexerFunction<"DOCTYPE" | "ERROR"> = (ctx) => {
+const lexDoctype: LexerFunction<"DOCTYPE" | "ERROR"> = function* (ctx) {
   // Skip the opening "<!DOCTYPE"
   const skipped = ctx.advance(9);
   if (skipped !== "<!DOCTYPE") {
-    ctx.addToken(TOKEN_TYPE.ERROR, `lexDoctype received invalid doctype opening sequence "${skipped}"`);
+    yield [TOKEN_TYPE.ERROR, `lexDoctype received invalid doctype opening sequence "${skipped}"`];
     return null;
   }
   let nextLexerFunction: LexerFunction<any> | null = null;
@@ -230,22 +219,22 @@ const lexDoctype: LexerFunction<"DOCTYPE" | "ERROR"> = (ctx) => {
     }
 
     if (ctx.peekDynamicValue() !== NO_DYNAMIC_VALUE) {
-      ctx.addToken(TOKEN_TYPE.ERROR, `Dynamic values are not allowed inside DOCTYPE declarations.`);
+      yield [TOKEN_TYPE.ERROR, `Dynamic values are not allowed inside DOCTYPE declarations.`];
       return null;
     }
 
     doctypeContent += ctx.advance(1);
   }
 
-  ctx.addToken(TOKEN_TYPE.DOCTYPE, doctypeContent.trim());
+  yield [TOKEN_TYPE.DOCTYPE, doctypeContent.trim()];
   return nextLexerFunction;
 }
 
-const lexOpeningTagname: LexerFunction<"OPENING_TAGNAME" | "ERROR"> = (ctx) => {
+const lexOpeningTagname: LexerFunction<"OPENING_TAGNAME" | "ERROR"> = function* (ctx) {
   // Skip the opening "<"
   const skipped = ctx.advance(1);
   if (skipped !== "<") {
-    ctx.addToken(TOKEN_TYPE.ERROR, `lexOpeningTagname received invalid opening tag opening sequence "${skipped}"`);
+    yield [TOKEN_TYPE.ERROR, `lexOpeningTagname received invalid opening tag opening sequence "${skipped}"`];
     return null;
   }
 
@@ -296,15 +285,15 @@ const lexOpeningTagname: LexerFunction<"OPENING_TAGNAME" | "ERROR"> = (ctx) => {
   }
 
   if (typeof tagName === "string" && !isValidHTMLTagName(tagName)) {
-    ctx.addToken(TOKEN_TYPE.ERROR, `lexOpeningTagname received invalid tag name "${tagName}".`);
+    yield [TOKEN_TYPE.ERROR, `lexOpeningTagname received invalid tag name "${tagName}".`];
     return null;
   }
 
-  ctx.addToken(TOKEN_TYPE.OPENING_TAGNAME, tagName);
+  yield [TOKEN_TYPE.OPENING_TAGNAME, tagName];
   return nextLexerFunction;
 }
 
-const lexAttributeName: LexerFunction<"ATTR_NAME" | "SPREAD_ATTR" | "ERROR"> = (ctx) => {
+const lexAttributeName: LexerFunction<"ATTR_NAME" | "SPREAD_ATTR" | "ERROR"> = function* (ctx) {
   let nextLexerFunction: LexerFunction<any> | null = null;
   let attrName = "";
 
@@ -314,10 +303,10 @@ const lexAttributeName: LexerFunction<"ATTR_NAME" | "SPREAD_ATTR" | "ERROR"> = (
       // Check for dynamic value after "..."
       const dynamicValue = ctx.peekDynamicValue(3);
       if (dynamicValue !== NO_DYNAMIC_VALUE) {
-        ctx.addToken(TOKEN_TYPE.SPREAD_ATTR, dynamicValue);
+        yield [TOKEN_TYPE.SPREAD_ATTR, dynamicValue];
         // Consume the "..." + dynamic value char sequence
         ctx.advance(3 + DYNAMIC_VALUE_CHARACTER_SEQUENCE_LENGTH);
-        return lexAttributeName;
+        return yield* lexAttributeName(ctx);
       }
     }
 
@@ -338,7 +327,7 @@ const lexAttributeName: LexerFunction<"ATTR_NAME" | "SPREAD_ATTR" | "ERROR"> = (
     if (nextChar === "=") {
       // Handle the case where there is no attribute name, just an "="
       if (!attrName) {
-        ctx.addToken(TOKEN_TYPE.ERROR, `lexAttributeName did not find a valid attribute name.`);
+        yield [TOKEN_TYPE.ERROR, `lexAttributeName did not find a valid attribute name.`];
         return null;
       }
 
@@ -370,21 +359,21 @@ const lexAttributeName: LexerFunction<"ATTR_NAME" | "SPREAD_ATTR" | "ERROR"> = (
 
   if (attrName) {
     if (!isValidHTMLAttributeName(attrName)) {
-      ctx.addToken(TOKEN_TYPE.ERROR, `lexAttributeName received invalid attribute name "${attrName}"`);
+      yield [TOKEN_TYPE.ERROR, `lexAttributeName received invalid attribute name "${attrName}"`];
       return null;
     }
     // Only add attribute name token if we found a valid name.
     // It's okay if we didn't as long as we're not transitioning to attribute value lexing.
-    ctx.addToken(TOKEN_TYPE.ATTR_NAME, attrName);
+    yield [TOKEN_TYPE.ATTR_NAME, attrName];
   }
 
   return nextLexerFunction;
 }
 
-const lexAttributeValue: LexerFunction<"ATTR_VALUE" | "ERROR"> = (ctx) => {
+const lexAttributeValue: LexerFunction<"ATTR_VALUE" | "ERROR"> = function* (ctx) {
   const skipped = ctx.advance(1);
   if (skipped !== "=") {
-    ctx.addToken(TOKEN_TYPE.ERROR, `lexAttributeValue expected "=" but found "${skipped}"`);
+    yield [TOKEN_TYPE.ERROR, `lexAttributeValue expected "=" but found "${skipped}"`];
     return null;
   }
 
@@ -402,9 +391,8 @@ const lexAttributeValue: LexerFunction<"ATTR_VALUE" | "ERROR"> = (ctx) => {
     // This is an unquoted dynamic value (e.g., attr={value})
     attrValue = dynamicValueBeforeQuote;
     ctx.advance(DYNAMIC_VALUE_CHARACTER_SEQUENCE_LENGTH);
-    ctx.addToken(TOKEN_TYPE.ATTR_VALUE, attrValue);
-    nextLexerFunction = lexAttributeName;
-    return nextLexerFunction;
+    yield [TOKEN_TYPE.ATTR_VALUE, attrValue];
+    return lexAttributeName;
   }
 
   const quoteChar = ctx.peek();
@@ -470,29 +458,29 @@ const lexAttributeValue: LexerFunction<"ATTR_VALUE" | "ERROR"> = (ctx) => {
   }
 
   if (attrValue !== "") {
-    ctx.addToken(TOKEN_TYPE.ATTR_VALUE, attrValue);
+    yield [TOKEN_TYPE.ATTR_VALUE, attrValue];
   }
 
   return nextLexerFunction;
 }
 
-const lexSelfClosingTagEnd: LexerFunction<"SELF_CLOSING_TAG_END" | "ERROR"> = (ctx) => {
+const lexSelfClosingTagEnd: LexerFunction<"SELF_CLOSING_TAG_END" | "ERROR"> = function* (ctx) {
   // Skip the opening "/>"
   const skipped = ctx.advance(2);
   if (skipped !== "/>") {
-    ctx.addToken(TOKEN_TYPE.ERROR, `lextSelfClosingTagEnd received invalid self-closing tag end sequence "${skipped}"`);
+    yield [TOKEN_TYPE.ERROR, `lextSelfClosingTagEnd received invalid self-closing tag end sequence "${skipped}"`];
     return null;
   }
 
-  ctx.addToken(TOKEN_TYPE.SELF_CLOSING_TAG_END);
+  yield [TOKEN_TYPE.SELF_CLOSING_TAG_END];
   return lexTextContent;
 };
 
-const lexClosingTag: LexerFunction<"CLOSING_TAGNAME" | "ERROR"> = (ctx) => {
+const lexClosingTag: LexerFunction<"CLOSING_TAGNAME" | "ERROR"> = function* (ctx) {
   // Skip the opening "</"
   const skipped = ctx.advance(2);
   if (skipped !== "</") {
-    ctx.addToken(TOKEN_TYPE.ERROR, `lexClosingTag received invalid closing tag opening sequence "${skipped}"`);
+    yield [TOKEN_TYPE.ERROR, `lexClosingTag received invalid closing tag opening sequence "${skipped}"`];
     return null;
   }
 
@@ -546,20 +534,39 @@ const lexClosingTag: LexerFunction<"CLOSING_TAGNAME" | "ERROR"> = (ctx) => {
     tagName !== "" &&
     !isValidHTMLTagName(tagName)
   ) {
-    ctx.addToken(TOKEN_TYPE.ERROR, `lexClosingTag received invalid tag name "${tagName}".`);
+    yield [TOKEN_TYPE.ERROR, `lexClosingTag received invalid tag name "${tagName}".`];
     return null;
   }
 
-  ctx.addToken(TOKEN_TYPE.CLOSING_TAGNAME, tagName);
+  yield [TOKEN_TYPE.CLOSING_TAGNAME, tagName];
   return nextLexerFunction;
 };
 
-export const lexHTML = (htmlString: string, dynamicValues: unknown[]): LexerToken[] => {
+/**
+ * Lexes HTML strings into tokens using a generator-based approach.
+ *
+ * Yields tokens as they are parsed:
+ * - Tokens without values are yielded as naked token types (e.g., `TOKEN_TYPE.SELF_CLOSING_TAG_END`)
+ * - Tokens with values are yielded as tuples `[tokenType, value]` (e.g., `[TOKEN_TYPE.OPENING_TAGNAME, "div"]`)
+ *
+ * @param htmlString - The HTML string to lex
+ * @param dynamicValues - Array of dynamic values that can be referenced via placeholder character sequences in the HTML
+ *
+ * @example
+ * ```ts
+ * for (const token of lexHTML('<div>Hello</div>', [])) {
+ *   if (typeof token === 'number') {
+ *     console.log('Token type:', token);
+ *   } else {
+ *     console.log('Token type:', token[0], 'Value:', token[1]);
+ *   }
+ * }
+ * ```
+ */
+export function* lexHTML(htmlString: string, dynamicValues: unknown[]): Generator<LexerToken, void, void> {
   const htmlStringLength = htmlString.length;
 
   let charIndex = 0;
-
-  const tokens = new Array<LexerToken>();
 
   // TODO: what is the least-sucky way to resolve dynamic value placeholders here?
   const lexerContext: LexerContext = {
@@ -589,19 +596,10 @@ export const lexHTML = (htmlString: string, dynamicValues: unknown[]): LexerToke
     isAtEnd() {
       return charIndex >= htmlString.length;
     },
-    addToken(tokenType, value) {
-      if (value === undefined) {
-        tokens.push({ ty: tokenType as LexerTokenTypesWithNoValue });
-      } else {
-        tokens.push({ ty: tokenType as LexerTokensWithValue, value: value });
-      }
-    }
   };
 
   let lexerFunction: LexerFunction<any> | null = lexTextContent;
   while (lexerFunction !== null) {
-    lexerFunction = lexerFunction(lexerContext);
+    lexerFunction = yield* lexerFunction(lexerContext);
   }
-
-  return tokens;
 }
