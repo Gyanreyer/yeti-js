@@ -7,6 +7,7 @@ import {
   isValidHTMLTagNameChar,
   isWhiteSpace
 } from "./utils.ts";
+import { YetiHTMLParsingError } from "./error.ts";
 
 // TODO:
 // - Handle component tags (tags where the tag name is a function placeholder)
@@ -31,11 +32,22 @@ export const TOKEN_TYPE = {
 type LexerTokenName = keyof typeof TOKEN_TYPE;
 type LexerTokenType = typeof TOKEN_TYPE[LexerTokenName];
 
-export type LexerTokenTypesWithNoValue = typeof TOKEN_TYPE.SELF_CLOSING_TAG_END;
-export type LexerTokensWithValue = Exclude<LexerTokenType, LexerTokenTypesWithNoValue>;
+type LexerTokenValueTypeMap = {
+  [TOKEN_TYPE.ERROR]: YetiHTMLParsingError;
+  [TOKEN_TYPE.CHILD_CONTENT]: unknown; // Can be a string or a raw dynamic value
+  [TOKEN_TYPE.OPENING_TAGNAME]: string | Function; // A tag name can be a string or a function placeholder for components
+  [TOKEN_TYPE.SELF_CLOSING_TAG_END]: null;
+  [TOKEN_TYPE.CLOSING_TAGNAME]: string | Function; // A tag name can be a string or a function placeholder for components
+  [TOKEN_TYPE.ATTR_NAME]: string; // Should be a string, but we allow dynamic values that resolve to strings
+  [TOKEN_TYPE.ATTR_VALUE]: unknown; // Can be a string or a raw dynamic value
+  [TOKEN_TYPE.SPREAD_ATTR]: unknown; // A raw dynamic value representing the object to spread
+  [TOKEN_TYPE.COMMENT]: string; // Should be a string, but we allow dynamic values that resolve to strings
+  [TOKEN_TYPE.DOCTYPE]: string;
+};
 
-// Token format: naked token type for tokens without values, tuple for tokens with values
-export type LexerToken<T extends LexerTokenType = LexerTokenType> = T extends LexerTokenTypesWithNoValue ? [T] : [T, unknown];
+// Using a distributive conditional type to create a union of properly typed tuples where the
+// first item is a token type and the second item is the corresponding value type for that token.
+export type LexerToken<T extends LexerTokenType = LexerTokenType> = T extends T ? [T, LexerTokenValueTypeMap[T]] : never;
 
 const NO_DYNAMIC_VALUE = Symbol("NO_DYNAMIC_VALUE");
 
@@ -163,7 +175,9 @@ const lexTextContent: LexerFunction<"CHILD_CONTENT" | "ERROR"> = function* (ctx)
 
     return nextLexerFunction;
   } catch (e) {
-    yield [TOKEN_TYPE.ERROR, (e instanceof Error) ? e.message : `Unknown lexing error: ${e}`];
+    yield [TOKEN_TYPE.ERROR, new YetiHTMLParsingError("Encountered an unexpected error while parsing html", e instanceof Error ? {
+      cause: e,
+    } : undefined)];
     return null;
   }
 }
@@ -172,7 +186,7 @@ const lexComment: LexerFunction<"COMMENT" | "ERROR"> = function* (ctx) {
   // Skip the opening "<!--"
   const skipped = ctx.advance(4);
   if (skipped !== "<!--") {
-    yield [TOKEN_TYPE.ERROR, `lexComment received invalid comment opening sequence "${skipped}"`];
+    yield [TOKEN_TYPE.ERROR, new YetiHTMLParsingError(`lexComment received invalid comment opening sequence "${skipped}"`)];
     return null;
   }
   let nextLexerFunction: LexerFunction<any> | null = null;
@@ -204,7 +218,7 @@ const lexDoctype: LexerFunction<"DOCTYPE" | "ERROR"> = function* (ctx) {
   // Skip the opening "<!DOCTYPE"
   const skipped = ctx.advance(9);
   if (skipped !== "<!DOCTYPE") {
-    yield [TOKEN_TYPE.ERROR, `lexDoctype received invalid doctype opening sequence "${skipped}"`];
+    yield [TOKEN_TYPE.ERROR, new YetiHTMLParsingError(`lexDoctype received invalid doctype opening sequence "${skipped}"`)];
     return null;
   }
   let nextLexerFunction: LexerFunction<any> | null = null;
@@ -219,7 +233,7 @@ const lexDoctype: LexerFunction<"DOCTYPE" | "ERROR"> = function* (ctx) {
     }
 
     if (ctx.peekDynamicValue() !== NO_DYNAMIC_VALUE) {
-      yield [TOKEN_TYPE.ERROR, `Dynamic values are not allowed inside DOCTYPE declarations.`];
+      yield [TOKEN_TYPE.ERROR, new YetiHTMLParsingError(`Dynamic values are not allowed inside DOCTYPE declarations.`)];
       return null;
     }
 
@@ -234,7 +248,7 @@ const lexOpeningTagname: LexerFunction<"OPENING_TAGNAME" | "ERROR"> = function* 
   // Skip the opening "<"
   const skipped = ctx.advance(1);
   if (skipped !== "<") {
-    yield [TOKEN_TYPE.ERROR, `lexOpeningTagname received invalid opening tag opening sequence "${skipped}"`];
+    yield [TOKEN_TYPE.ERROR, new YetiHTMLParsingError(`lexOpeningTagname received invalid opening tag opening sequence "${skipped}"`)];
     return null;
   }
 
@@ -285,7 +299,7 @@ const lexOpeningTagname: LexerFunction<"OPENING_TAGNAME" | "ERROR"> = function* 
   }
 
   if (typeof tagName === "string" && !isValidHTMLTagName(tagName)) {
-    yield [TOKEN_TYPE.ERROR, `lexOpeningTagname received invalid tag name "${tagName}".`];
+    yield [TOKEN_TYPE.ERROR, new YetiHTMLParsingError(`lexOpeningTagname received invalid tag name "${tagName}".`)];
     return null;
   }
 
@@ -327,7 +341,7 @@ const lexAttributeName: LexerFunction<"ATTR_NAME" | "SPREAD_ATTR" | "ERROR"> = f
     if (nextChar === "=") {
       // Handle the case where there is no attribute name, just an "="
       if (!attrName) {
-        yield [TOKEN_TYPE.ERROR, `lexAttributeName did not find a valid attribute name.`];
+        yield [TOKEN_TYPE.ERROR, new YetiHTMLParsingError(`lexAttributeName did not find a valid attribute name.`)];
         return null;
       }
 
@@ -359,7 +373,7 @@ const lexAttributeName: LexerFunction<"ATTR_NAME" | "SPREAD_ATTR" | "ERROR"> = f
 
   if (attrName) {
     if (!isValidHTMLAttributeName(attrName)) {
-      yield [TOKEN_TYPE.ERROR, `lexAttributeName received invalid attribute name "${attrName}"`];
+      yield [TOKEN_TYPE.ERROR, new YetiHTMLParsingError(`lexAttributeName received invalid attribute name "${attrName}"`)];
       return null;
     }
     // Only add attribute name token if we found a valid name.
@@ -373,7 +387,7 @@ const lexAttributeName: LexerFunction<"ATTR_NAME" | "SPREAD_ATTR" | "ERROR"> = f
 const lexAttributeValue: LexerFunction<"ATTR_VALUE" | "ERROR"> = function* (ctx) {
   const skipped = ctx.advance(1);
   if (skipped !== "=") {
-    yield [TOKEN_TYPE.ERROR, `lexAttributeValue expected "=" but found "${skipped}"`];
+    yield [TOKEN_TYPE.ERROR, new YetiHTMLParsingError(`lexAttributeValue expected "=" but found "${skipped}"`)];
     return null;
   }
 
@@ -468,11 +482,11 @@ const lexSelfClosingTagEnd: LexerFunction<"SELF_CLOSING_TAG_END" | "ERROR"> = fu
   // Skip the opening "/>"
   const skipped = ctx.advance(2);
   if (skipped !== "/>") {
-    yield [TOKEN_TYPE.ERROR, `lextSelfClosingTagEnd received invalid self-closing tag end sequence "${skipped}"`];
+    yield [TOKEN_TYPE.ERROR, new YetiHTMLParsingError(`lexSelfClosingTagEnd received invalid self-closing tag end sequence "${skipped}"`)];
     return null;
   }
 
-  yield [TOKEN_TYPE.SELF_CLOSING_TAG_END];
+  yield [TOKEN_TYPE.SELF_CLOSING_TAG_END, null];
   return lexTextContent;
 };
 
@@ -480,7 +494,7 @@ const lexClosingTag: LexerFunction<"CLOSING_TAGNAME" | "ERROR"> = function* (ctx
   // Skip the opening "</"
   const skipped = ctx.advance(2);
   if (skipped !== "</") {
-    yield [TOKEN_TYPE.ERROR, `lexClosingTag received invalid closing tag opening sequence "${skipped}"`];
+    yield [TOKEN_TYPE.ERROR, new YetiHTMLParsingError(`lexClosingTag received invalid closing tag opening sequence "${skipped}"`)];
     return null;
   }
 
@@ -534,7 +548,7 @@ const lexClosingTag: LexerFunction<"CLOSING_TAGNAME" | "ERROR"> = function* (ctx
     tagName !== "" &&
     !isValidHTMLTagName(tagName)
   ) {
-    yield [TOKEN_TYPE.ERROR, `lexClosingTag received invalid tag name "${tagName}".`];
+    yield [TOKEN_TYPE.ERROR, new YetiHTMLParsingError(`lexClosingTag received invalid tag name "${tagName}".`)];
     return null;
   }
 
@@ -545,21 +559,16 @@ const lexClosingTag: LexerFunction<"CLOSING_TAGNAME" | "ERROR"> = function* (ctx
 /**
  * Lexes HTML strings into tokens using a generator-based approach.
  *
- * Yields tokens as they are parsed:
- * - Tokens without values are yielded as naked token types (e.g., `TOKEN_TYPE.SELF_CLOSING_TAG_END`)
- * - Tokens with values are yielded as tuples `[tokenType, value]` (e.g., `[TOKEN_TYPE.OPENING_TAGNAME, "div"]`)
+ * Yields tuples for tokens as they are parsed, where the first item is the token type
+ * and the second item is the token value (e.g., `[TOKEN_TYPE.OPENING_TAGNAME, "div"]`)
  *
  * @param htmlString - The HTML string to lex
  * @param dynamicValues - Array of dynamic values that can be referenced via placeholder character sequences in the HTML
  *
  * @example
  * ```ts
- * for (const token of lexHTML('<div>Hello</div>', [])) {
- *   if (typeof token === 'number') {
- *     console.log('Token type:', token);
- *   } else {
- *     console.log('Token type:', token[0], 'Value:', token[1]);
- *   }
+ * for (const [tokenType, tokenValue] of lexHTML('<div>Hello</div>', [])) {
+ *   console.log('Token type:', tokenType, 'Value:', tokenValue);
  * }
  * ```
  */
@@ -568,7 +577,6 @@ export function* lexHTML(htmlString: string, dynamicValues: unknown[]): Generato
 
   let charIndex = 0;
 
-  // TODO: what is the least-sucky way to resolve dynamic value placeholders here?
   const lexerContext: LexerContext = {
     peek(peekLength = 1, peekOffset = 0) {
       const startIndex = charIndex + peekOffset;

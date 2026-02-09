@@ -5,6 +5,7 @@ import {
 import assert from "node:assert/strict";
 import { lexHTML, TOKEN_TYPE, type LexerToken } from "./lexHTML.ts";
 import { makeDynamicValuePlaceholder } from "./utils.ts";
+import { YetiHTMLParsingError } from "./error.ts";
 
 describe("lexHTML", () => {
   test("lexes empty string as expected", async () => {
@@ -38,7 +39,7 @@ describe("lexHTML", () => {
     const tokens = Array.from(lexHTML("<img />", []));
     assert.deepStrictEqual(tokens, [
       [TOKEN_TYPE.OPENING_TAGNAME, "img"],
-      [TOKEN_TYPE.SELF_CLOSING_TAG_END],
+      [TOKEN_TYPE.SELF_CLOSING_TAG_END, null],
     ] satisfies LexerToken[]);
   });
 
@@ -70,7 +71,7 @@ describe("lexHTML", () => {
       [TOKEN_TYPE.OPENING_TAGNAME, MyComponent],
       [TOKEN_TYPE.ATTR_NAME, "prop1"],
       [TOKEN_TYPE.ATTR_VALUE, "value1"],
-      [TOKEN_TYPE.SELF_CLOSING_TAG_END],
+      [TOKEN_TYPE.SELF_CLOSING_TAG_END, null],
     ] satisfies LexerToken[]);
   });
 
@@ -147,7 +148,7 @@ describe("lexHTML", () => {
     const tokens = Array.from(lexHTML(`<div ${makeDynamicValuePlaceholder(0)}="value1">`, [dynamicAttrName1]));
     assert.deepStrictEqual(tokens, [
       [TOKEN_TYPE.OPENING_TAGNAME, "div"],
-      [TOKEN_TYPE.ERROR, `lexAttributeName received invalid attribute name "${dynamicAttrName1}"`],
+      [TOKEN_TYPE.ERROR, new YetiHTMLParsingError(`lexAttributeName received invalid attribute name "${dynamicAttrName1}"`)],
     ] satisfies LexerToken[]);
 
     const dynamicAttrName2 = { foo: "bar" };
@@ -155,7 +156,7 @@ describe("lexHTML", () => {
     const tokens2 = Array.from(lexHTML(`<div ${makeDynamicValuePlaceholder(0)}="value1">`, [dynamicAttrName2]));
     assert.deepStrictEqual(tokens2, [
       [TOKEN_TYPE.OPENING_TAGNAME, "div"],
-      [TOKEN_TYPE.ERROR, `lexAttributeName received invalid attribute name "${dynamicAttrName2}"`],
+      [TOKEN_TYPE.ERROR, new YetiHTMLParsingError(`lexAttributeName received invalid attribute name "${dynamicAttrName2}"`)],
     ] satisfies LexerToken[]);
   });
 
@@ -236,14 +237,14 @@ describe("lexHTML", () => {
       [TOKEN_TYPE.OPENING_TAGNAME, "meta"],
       [TOKEN_TYPE.ATTR_NAME, "charset"],
       [TOKEN_TYPE.ATTR_VALUE, "UTF-8"],
-      [TOKEN_TYPE.SELF_CLOSING_TAG_END],
+      [TOKEN_TYPE.SELF_CLOSING_TAG_END, null],
       [TOKEN_TYPE.CHILD_CONTENT, "\n    "],
       [TOKEN_TYPE.OPENING_TAGNAME, "meta"],
       [TOKEN_TYPE.ATTR_NAME, "name"],
       [TOKEN_TYPE.ATTR_VALUE, "viewport"],
       [TOKEN_TYPE.ATTR_NAME, "content"],
       [TOKEN_TYPE.ATTR_VALUE, "width=device-width, initial-scale=1.0"],
-      [TOKEN_TYPE.SELF_CLOSING_TAG_END],
+      [TOKEN_TYPE.SELF_CLOSING_TAG_END, null],
       [TOKEN_TYPE.CHILD_CONTENT, "\n    "],
       [TOKEN_TYPE.OPENING_TAGNAME, "title"],
       [TOKEN_TYPE.CHILD_CONTENT, "Test Page"],
