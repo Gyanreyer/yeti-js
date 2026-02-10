@@ -20,7 +20,7 @@ export const TOKEN_TYPE = {
   ERROR: 0,
   CHILD_CONTENT: 10,
   OPENING_TAGNAME: 20,
-  SELF_CLOSING_TAG_END: 25,
+  OPENING_TAG_END: 21,
   CLOSING_TAGNAME: 26,
   ATTR_NAME: 30,
   ATTR_VALUE: 31,
@@ -35,8 +35,8 @@ type LexerTokenType = typeof TOKEN_TYPE[LexerTokenName];
 type LexerTokenValueTypeMap = {
   [TOKEN_TYPE.ERROR]: YetiHTMLParsingError;
   [TOKEN_TYPE.CHILD_CONTENT]: unknown; // Can be a string or a raw dynamic value
+  [TOKEN_TYPE.OPENING_TAG_END]: boolean; // Whether the opening tag is self-closing or not (i.e., whether we lexed a "/>" or a ">")
   [TOKEN_TYPE.OPENING_TAGNAME]: string | Function; // A tag name can be a string or a function placeholder for components
-  [TOKEN_TYPE.SELF_CLOSING_TAG_END]: null;
   [TOKEN_TYPE.CLOSING_TAGNAME]: string | Function; // A tag name can be a string or a function placeholder for components
   [TOKEN_TYPE.ATTR_NAME]: string; // Should be a string, but we allow dynamic values that resolve to strings
   [TOKEN_TYPE.ATTR_VALUE]: unknown; // Can be a string or a raw dynamic value
@@ -210,7 +210,7 @@ const lexComment: LexerFunction<"COMMENT" | "ERROR"> = function* (ctx) {
     }
   }
 
-  yield [TOKEN_TYPE.COMMENT, commentContent];
+  yield [TOKEN_TYPE.COMMENT, commentContent.trim()];
   return nextLexerFunction;
 };
 
@@ -285,15 +285,9 @@ const lexOpeningTagname: LexerFunction<"OPENING_TAGNAME" | "ERROR"> = function* 
       ctx.advance(1);
       nextLexerFunction = lexAttributeName;
       break;
-    } else if (nextChar === ">") {
-      // Consume the closing ">" and transition back to text content lexing
-      ctx.advance(1);
-      nextLexerFunction = lexTextContent;
-      break;
-    } else if (nextChar === "/" && ctx.peekMatch("/>", 0)) {
-      // Consume the self-closing "/>" and transition back to text content lexing
-      ctx.advance(2);
-      nextLexerFunction = lexSelfClosingTagEnd;
+    } else if (nextChar === ">" || nextChar === "/" && ctx.peekMatch("/>")) {
+      // Lex the end of the opening tag and transition back to text content lexing
+      nextLexerFunction = lexOpeningTagEnd;
       break;
     }
   }
@@ -347,13 +341,9 @@ const lexAttributeName: LexerFunction<"ATTR_NAME" | "SPREAD_ATTR" | "ERROR"> = f
 
       nextLexerFunction = lexAttributeValue;
       break;
-    } else if (nextChar === ">") {
-      // Consume the closing ">" and transition back to text content lexing
-      ctx.advance(1);
-      nextLexerFunction = lexTextContent;
-      break;
-    } else if (nextChar === "/" && ctx.peekMatch("/>")) {
-      nextLexerFunction = lexSelfClosingTagEnd;
+    } else if (nextChar === ">" || nextChar === "/" && ctx.peekMatch("/>")) {
+      // Lex the end of the opening tag and transition back to text content lexing
+      nextLexerFunction = lexOpeningTagEnd;
       break;
     } else if (isWhiteSpace(nextChar)) {
       // Skip whitespace
@@ -369,7 +359,6 @@ const lexAttributeName: LexerFunction<"ATTR_NAME" | "SPREAD_ATTR" | "ERROR"> = f
       attrName += ctx.advance(1);
     }
   }
-
 
   if (attrName) {
     if (!isValidHTMLAttributeName(attrName)) {
@@ -478,17 +467,25 @@ const lexAttributeValue: LexerFunction<"ATTR_VALUE" | "ERROR"> = function* (ctx)
   return nextLexerFunction;
 }
 
-const lexSelfClosingTagEnd: LexerFunction<"SELF_CLOSING_TAG_END" | "ERROR"> = function* (ctx) {
-  // Skip the opening "/>"
-  const skipped = ctx.advance(2);
-  if (skipped !== "/>") {
-    yield [TOKEN_TYPE.ERROR, new YetiHTMLParsingError(`lexSelfClosingTagEnd received invalid self-closing tag end sequence "${skipped}"`)];
+const lexOpeningTagEnd: LexerFunction<"OPENING_TAG_END" | "ERROR"> = function* (ctx) {
+  // This lexer function is just responsible for consuming the closing ">" or "/>" of an opening tag and yielding the appropriate token.
+  if (ctx.peekMatch("/>")) {
+    // If we see a "/>" here, it means we have a self-closing tag. We should yield an OPENING_TAG_END token with a value of true to indicate this,
+    // and then transition to lexSelfClosingTagEnd to consume the "/>" and transition back to text content lexing.
+    yield [TOKEN_TYPE.OPENING_TAG_END, true];
+    ctx.advance(2); // Consume the "/>"
+  } else if (ctx.peekMatch(">")) {
+    // Normal opening tag end
+    yield [TOKEN_TYPE.OPENING_TAG_END, false];
+    ctx.advance(1); // Consume the ">"
+  } else {
+    // We should never get here because lexOpeningTagname should only transition to this lexer function if it sees a ">" or "/>" character, but we'll include an error case just in case.
+    yield [TOKEN_TYPE.ERROR, new YetiHTMLParsingError(`lexOpeningTagEnd expected ">" or "/>" but found "${ctx.peek(2)}"`)];
     return null;
   }
 
-  yield [TOKEN_TYPE.SELF_CLOSING_TAG_END, null];
   return lexTextContent;
-};
+}
 
 const lexClosingTag: LexerFunction<"CLOSING_TAGNAME" | "ERROR"> = function* (ctx) {
   // Skip the opening "</"

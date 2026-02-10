@@ -84,3 +84,22 @@ export const isValidHTMLAttributeName = (attrName: string): boolean => {
 
   return true;
 };
+
+const VOID_TAG_SET = new Set([
+  "area",
+  "base",
+  "br",
+  "col",
+  "embed",
+  "hr",
+  "img",
+  "input",
+  "link",
+  "meta",
+  "param",
+  "source",
+  "track",
+  "wbr",
+]);
+
+export const isVoidTag = (tagName: string) => VOID_TAG_SET.has(tagName.toLowerCase());

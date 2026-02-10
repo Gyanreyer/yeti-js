@@ -31,6 +31,7 @@ describe("lexHTML", () => {
     const tokens = Array.from(lexHTML("<div></div>", []));
     assert.deepStrictEqual(tokens, [
       [TOKEN_TYPE.OPENING_TAGNAME, "div"],
+      [TOKEN_TYPE.OPENING_TAG_END, false],
       [TOKEN_TYPE.CLOSING_TAGNAME, "div"],
     ] satisfies LexerToken[]);
   });
@@ -39,7 +40,7 @@ describe("lexHTML", () => {
     const tokens = Array.from(lexHTML("<img />", []));
     assert.deepStrictEqual(tokens, [
       [TOKEN_TYPE.OPENING_TAGNAME, "img"],
-      [TOKEN_TYPE.SELF_CLOSING_TAG_END, null],
+      [TOKEN_TYPE.OPENING_TAG_END, true],
     ] satisfies LexerToken[]);
   });
 
@@ -47,7 +48,9 @@ describe("lexHTML", () => {
     const tokens = Array.from(lexHTML("<div><span>Hello, world!</span></div>", []));
     assert.deepStrictEqual(tokens, [
       [TOKEN_TYPE.OPENING_TAGNAME, "div"],
+      [TOKEN_TYPE.OPENING_TAG_END, false],
       [TOKEN_TYPE.OPENING_TAGNAME, "span"],
+      [TOKEN_TYPE.OPENING_TAG_END, false],
       [TOKEN_TYPE.CHILD_CONTENT, "Hello, world!"],
       [TOKEN_TYPE.CLOSING_TAGNAME, "span"],
       [TOKEN_TYPE.CLOSING_TAGNAME, "div"],
@@ -61,6 +64,7 @@ describe("lexHTML", () => {
       [TOKEN_TYPE.ATTR_NAME, "type"],
       [TOKEN_TYPE.ATTR_VALUE, "text"],
       [TOKEN_TYPE.ATTR_NAME, "disabled"],
+      [TOKEN_TYPE.OPENING_TAG_END, false],
     ] satisfies LexerToken[]);
   });
 
@@ -71,7 +75,7 @@ describe("lexHTML", () => {
       [TOKEN_TYPE.OPENING_TAGNAME, MyComponent],
       [TOKEN_TYPE.ATTR_NAME, "prop1"],
       [TOKEN_TYPE.ATTR_VALUE, "value1"],
-      [TOKEN_TYPE.SELF_CLOSING_TAG_END, null],
+      [TOKEN_TYPE.OPENING_TAG_END, true],
     ] satisfies LexerToken[]);
   });
 
@@ -82,6 +86,7 @@ describe("lexHTML", () => {
       [TOKEN_TYPE.OPENING_TAGNAME, MyComponent],
       [TOKEN_TYPE.ATTR_NAME, "prop1"],
       [TOKEN_TYPE.ATTR_VALUE, "value1"],
+      [TOKEN_TYPE.OPENING_TAG_END, false],
       [TOKEN_TYPE.CHILD_CONTENT, "Child content"],
       [TOKEN_TYPE.CLOSING_TAGNAME, MyComponent],
     ] satisfies LexerToken[]);
@@ -94,6 +99,7 @@ describe("lexHTML", () => {
       [TOKEN_TYPE.OPENING_TAGNAME, MyComponent],
       [TOKEN_TYPE.ATTR_NAME, "prop1"],
       [TOKEN_TYPE.ATTR_VALUE, "value1"],
+      [TOKEN_TYPE.OPENING_TAG_END, false],
       [TOKEN_TYPE.CHILD_CONTENT, "Child content"],
       [TOKEN_TYPE.CLOSING_TAGNAME, ""],
     ] satisfies LexerToken[]);
@@ -113,6 +119,7 @@ describe("lexHTML", () => {
       [TOKEN_TYPE.ATTR_VALUE, dynamicValue2],
       [TOKEN_TYPE.ATTR_NAME, "attr3"],
       [TOKEN_TYPE.ATTR_VALUE, dynamicValue3],
+      [TOKEN_TYPE.OPENING_TAG_END, false],
     ] satisfies LexerToken[]);
   });
 
@@ -139,6 +146,7 @@ describe("lexHTML", () => {
       [TOKEN_TYPE.ATTR_VALUE, "value3"],
       [TOKEN_TYPE.ATTR_NAME, `part-${dynamicAttrPart2}`],
       [TOKEN_TYPE.ATTR_VALUE, "value4"],
+      [TOKEN_TYPE.OPENING_TAG_END, false],
     ] satisfies LexerToken[]);
   });
 
@@ -176,6 +184,7 @@ describe("lexHTML", () => {
       [TOKEN_TYPE.SPREAD_ATTR, dynamicSpreadValue],
       [TOKEN_TYPE.ATTR_NAME, "attr2"],
       [TOKEN_TYPE.ATTR_VALUE, "value2"],
+      [TOKEN_TYPE.OPENING_TAG_END, false],
     ] satisfies LexerToken[]);
   });
 
@@ -198,12 +207,15 @@ describe("lexHTML", () => {
     assert.deepStrictEqual(tokens, [
       [TOKEN_TYPE.CHILD_CONTENT, "\n"],
       [TOKEN_TYPE.OPENING_TAGNAME, dynamicTagName1],
+      [TOKEN_TYPE.OPENING_TAG_END, false],
       [TOKEN_TYPE.CLOSING_TAGNAME, dynamicTagName1],
       [TOKEN_TYPE.CHILD_CONTENT, "\n"],
       [TOKEN_TYPE.OPENING_TAGNAME, `${dynamicTagNamePart1}-tag`],
+      [TOKEN_TYPE.OPENING_TAG_END, false],
       [TOKEN_TYPE.CLOSING_TAGNAME, `${dynamicTagNamePart1}-tag`],
       [TOKEN_TYPE.CHILD_CONTENT, "\n"],
       [TOKEN_TYPE.OPENING_TAGNAME, `h${dynamicTagNamePart2}`],
+      [TOKEN_TYPE.OPENING_TAG_END, false],
       [TOKEN_TYPE.CLOSING_TAGNAME, `h${dynamicTagNamePart2}`],
       [TOKEN_TYPE.CHILD_CONTENT, "\n"],
     ] satisfies LexerToken[]);
@@ -231,34 +243,40 @@ describe("lexHTML", () => {
       [TOKEN_TYPE.OPENING_TAGNAME, "html"],
       [TOKEN_TYPE.ATTR_NAME, "lang"],
       [TOKEN_TYPE.ATTR_VALUE, "en"],
+      [TOKEN_TYPE.OPENING_TAG_END, false],
       [TOKEN_TYPE.CHILD_CONTENT, "\n  "],
       [TOKEN_TYPE.OPENING_TAGNAME, "head"],
+      [TOKEN_TYPE.OPENING_TAG_END, false],
       [TOKEN_TYPE.CHILD_CONTENT, "\n    "],
       [TOKEN_TYPE.OPENING_TAGNAME, "meta"],
       [TOKEN_TYPE.ATTR_NAME, "charset"],
       [TOKEN_TYPE.ATTR_VALUE, "UTF-8"],
-      [TOKEN_TYPE.SELF_CLOSING_TAG_END, null],
+      [TOKEN_TYPE.OPENING_TAG_END, true],
       [TOKEN_TYPE.CHILD_CONTENT, "\n    "],
       [TOKEN_TYPE.OPENING_TAGNAME, "meta"],
       [TOKEN_TYPE.ATTR_NAME, "name"],
       [TOKEN_TYPE.ATTR_VALUE, "viewport"],
       [TOKEN_TYPE.ATTR_NAME, "content"],
       [TOKEN_TYPE.ATTR_VALUE, "width=device-width, initial-scale=1.0"],
-      [TOKEN_TYPE.SELF_CLOSING_TAG_END, null],
+      [TOKEN_TYPE.OPENING_TAG_END, true],
       [TOKEN_TYPE.CHILD_CONTENT, "\n    "],
       [TOKEN_TYPE.OPENING_TAGNAME, "title"],
+      [TOKEN_TYPE.OPENING_TAG_END, false],
       [TOKEN_TYPE.CHILD_CONTENT, "Test Page"],
       [TOKEN_TYPE.CLOSING_TAGNAME, "title"],
       [TOKEN_TYPE.CHILD_CONTENT, "\n  "],
       [TOKEN_TYPE.CLOSING_TAGNAME, "head"],
       [TOKEN_TYPE.CHILD_CONTENT, "\n  "],
       [TOKEN_TYPE.OPENING_TAGNAME, "body"],
+      [TOKEN_TYPE.OPENING_TAG_END, false],
       [TOKEN_TYPE.CHILD_CONTENT, "\n    "],
       [TOKEN_TYPE.OPENING_TAGNAME, "h1"],
+      [TOKEN_TYPE.OPENING_TAG_END, false],
       [TOKEN_TYPE.CHILD_CONTENT, "Hello, world!"],
       [TOKEN_TYPE.CLOSING_TAGNAME, "h1"],
       [TOKEN_TYPE.CHILD_CONTENT, "\n    "],
       [TOKEN_TYPE.OPENING_TAGNAME, "p"],
+      [TOKEN_TYPE.OPENING_TAG_END, false],
       [TOKEN_TYPE.CHILD_CONTENT, "This is a test page."],
       [TOKEN_TYPE.CLOSING_TAGNAME, "p"],
       [TOKEN_TYPE.CHILD_CONTENT, "\n  "],

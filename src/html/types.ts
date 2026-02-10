@@ -1,14 +1,23 @@
 export const YETI_NODE_TYPE = {
-  ELEMENT: 0,
+  ROOT: 0,
+  ELEMENT: 2,
   TEXT: 4,
   COMMENT: 8,
   DOCTYPE: 12,
 } as const;
 
+export const parentNode = Symbol.for("parentNode");
+
 export type YetiNodeType = typeof YETI_NODE_TYPE[keyof typeof YETI_NODE_TYPE];
 
 export interface BaseYetiNode {
   type: YetiNodeType;
+  [parentNode]: YetiElementNode | YetiRootNode;
+}
+
+export interface YetiRootNode extends Omit<BaseYetiNode, typeof parentNode> {
+  type: typeof YETI_NODE_TYPE.ROOT;
+  children: Array<Exclude<YetiNode, YetiRootNode>>;
 }
 
 export interface YetiTextNode extends BaseYetiNode {
@@ -29,8 +38,8 @@ export interface YetiDoctypeNode extends BaseYetiNode {
 export interface YetiElementNode extends BaseYetiNode {
   type: typeof YETI_NODE_TYPE.ELEMENT;
   tagName: string;
-  attributes: Record<string, string>;
-  children: Array<YetiElementNode | YetiTextNode | YetiCommentNode | YetiDoctypeNode>;
+  attributes: Record<string, string | boolean>;
+  children: Array<Exclude<YetiNode, YetiRootNode>>;
 }
 
-export type YetiNode = YetiElementNode | YetiTextNode | YetiCommentNode | YetiDoctypeNode;
+export type YetiNode = YetiElementNode | YetiTextNode | YetiCommentNode | YetiDoctypeNode | YetiRootNode;
