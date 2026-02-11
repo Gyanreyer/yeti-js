@@ -1,3 +1,5 @@
+import { YETI_NODE_TYPE, type YetiNode } from "./types.ts";
+
 export const isPrimitiveValue = (value: unknown): value is null | string | number | boolean | bigint | symbol | undefined => {
   return (
     value === null ||
@@ -103,3 +105,27 @@ const VOID_TAG_SET = new Set([
 ]);
 
 export const isVoidTag = (tagName: string) => VOID_TAG_SET.has(tagName.toLowerCase());
+
+const sanitizedHTMLEscapeCharMap: Record<string, string> = {
+  "&": "&amp;",
+  "<": "&lt;",
+  ">": "&gt;",
+  '"': "&quot;",
+  "'": "&#39;",
+};
+
+export const sanitizeHTMLTextContent = (text: string): string => {
+  let sanitizedText = "";
+
+  for (let i = 0; i < text.length; i++) {
+    const char = text[i];
+    sanitizedText += sanitizedHTMLEscapeCharMap[char] ?? char;
+  }
+  return sanitizedText;
+};
+
+const yetiNodeTypes = new Set<number>(Object.values(YETI_NODE_TYPE));
+
+export const isYetiNode = (value: unknown): value is YetiNode => {
+  return typeof value === "object" && value !== null && "type" in value && typeof value.type === "number" && yetiNodeTypes.has(value.type);
+}

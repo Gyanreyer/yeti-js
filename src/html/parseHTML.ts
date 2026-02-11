@@ -1,53 +1,135 @@
 import { lexHTML, TOKEN_TYPE } from "./lexHTML.ts";
-import { YETI_NODE_TYPE, parentNode } from "./types.ts";
-import type { YetiNode, YetiRootNode, YetiElementNode } from "./types.ts";
+import { YETI_NODE_TYPE } from "./types.ts";
+import type { YetiNode, YetiRootNode, YetiElementNode, YetiTextNode } from "./types.ts";
 import { YetiHTMLParsingError } from "./error.ts";
-import { isVoidTag } from "./utils.ts";
+import { isVoidTag, sanitizeHTMLTextContent } from "./utils.ts";
 
 // Node type to identify a component node
 const COMPONENT_NODE_TYPE = 1000;
 
-// A node representing a parsed component. This will be rendered into actual YetiNodes before being inserted into the tree.
-// We need to keep track of the component function reference and its props so that we can render it later.
+// A node representing a parsed component which has not been closed and rendered yet.
+// Once closed, we will render the component by calling the component function with the parsed attributes and children,
+// and then insert the rendered content into the tree.
 type OpenComponentNode = {
   type: typeof COMPONENT_NODE_TYPE;
   component: Function;
   attributes: Record<string, unknown>;
   children: YetiNode[];
-  [parentNode]: YetiRootNode | YetiElementNode | OpenComponentNode | OpenElementNode;
 };
 
-// A node representing an open element tag that has not been closed yet.
-// We need to keep track of the parent node so that we can move back up the tree when we encounter a closing tag.
-type OpenElementNode = Omit<YetiElementNode, typeof parentNode> & {
-  [parentNode]: YetiRootNode | YetiElementNode | OpenComponentNode | OpenElementNode;
+const makeTextNode = (content: string): YetiTextNode => ({
+  type: YETI_NODE_TYPE.TEXT,
+  content: sanitizeHTMLTextContent(content),
+});
+
+const isYetiNode = (value: unknown): value is YetiNode => {
+  return typeof value === "object" && value !== null && "type" in value;
+};
+
+const appendContentToNode = async (parent: YetiRootNode | YetiElementNode | OpenComponentNode, content: unknown) => {
+  let unwrappedContent = content;
+  if (typeof unwrappedContent === "function") {
+    try {
+      unwrappedContent = unwrappedContent();
+    } catch (error) {
+      throw new YetiHTMLParsingError(`An error occurred while executing inlined function in HTML`, {
+        cause: error,
+      });
+    }
+  }
+  if (unwrappedContent instanceof Promise) {
+    unwrappedContent = await unwrappedContent;
+  }
+
+  if (unwrappedContent === null || unwrappedContent === undefined || unwrappedContent === "") {
+    // If the content is null, undefined, or an empty string, we can just ignore it and not insert anything.
+    return;
+  }
+
+  if (typeof unwrappedContent === "object") {
+    // If the content is an object, we will try to unwrap any iterables or YetiNodes and insert them appropriately.
+    if (
+      // If the content is an iterable object, iterate over its values and insert each item as a separate node. Handle both sync and async iterables.
+      (Symbol.iterator in unwrappedContent && typeof unwrappedContent[Symbol.iterator] === "function")
+      || (Symbol.asyncIterator in unwrappedContent && typeof unwrappedContent[Symbol.asyncIterator] === "function")) {
+      for await (const item of unwrappedContent as any) {
+        await appendContentToNode(parent, item);
+      }
+      return;
+    }
+
+    if (isYetiNode(unwrappedContent)) {
+      if (unwrappedContent.type === YETI_NODE_TYPE.ROOT) {
+        // Unwrap root nodes' children and insert them directly, since we don't want to nest root nodes inside other nodes.
+        // We may get a root node from dynamic content like the return value from rendering a nested component.
+        parent.children.push(...unwrappedContent.children);
+      } else {
+        // Append any other Yeti nodes directly
+        parent.children.push(unwrappedContent);
+      }
+
+      return;
+    }
+  }
+
+  // If all else fails, we'll stringify the value and insert it as a text node.
+  parent.children.push(
+    makeTextNode(String(unwrappedContent))
+  );
 };
 
 /**
- * 
- * @param htmlString 
- * @param dynamicValues 
- * @returns 
+ * Parses an HTML string into a tree of YetiNodes. This is the main entry point for the HTML parsing logic.
+ * The parser works by first lexing the input HTML string into a stream of tokens using the lexHTML function,
+ * and then processing each token to build up the node tree.
  */
 export const parseHTML = async (htmlString: string, dynamicValues: unknown[]): Promise<YetiRootNode> => {
   const rootNode: YetiRootNode = { type: YETI_NODE_TYPE.ROOT, children: [] };
-  let currentParent: YetiRootNode | YetiElementNode | OpenComponentNode | OpenElementNode = rootNode;
+
+  let openParentStack: Array<YetiElementNode | OpenComponentNode> = [];
+  const getCurrentOpenParent = () => openParentStack.at(-1) ?? rootNode;
 
   let openAttributeName: string | null = null;
+
+  /**
+   * Closes the current open parent node and appends it to its parent's children array.
+   * If the current open node is a component, we will render it and then append the returned contents to its parent.
+   */
+  const closeCurrentParent = async () => {
+    const closingParentNode = openParentStack.pop();
+    if (!closingParentNode) {
+      // No open parent to close, we're already at the root node
+      return null;
+    }
+
+    const nextParent = getCurrentOpenParent();
+
+    if (closingParentNode.type === COMPONENT_NODE_TYPE) {
+      const componentContent = closingParentNode.component({
+        children: closingParentNode.children,
+        ...closingParentNode.attributes,
+      });
+      await appendContentToNode(nextParent, componentContent);
+    } else {
+      // For regular element nodes, we can just insert them directly.
+      await appendContentToNode(nextParent, closingParentNode);
+    }
+
+    return closingParentNode;
+  };
 
   for (const [tokenType, tokenValue] of lexHTML(htmlString, dynamicValues)) {
     switch (tokenType) {
       case TOKEN_TYPE.OPENING_TAGNAME: {
         if (typeof tokenValue === "string") {
           // Create a new element node and set it as the current parent
-          const newElementNode: OpenElementNode = {
+          const newElementNode: YetiElementNode = {
             type: YETI_NODE_TYPE.ELEMENT,
             tagName: tokenValue,
             attributes: {},
             children: [],
-            [parentNode]: currentParent,
           };
-          currentParent = newElementNode;
+          openParentStack.push(newElementNode);
         } else {
           // If the token value is a function, this is a component. We need to
           // gather the props and children for this component and then render it to get the actual nodes to insert.
@@ -57,9 +139,8 @@ export const parseHTML = async (htmlString: string, dynamicValues: unknown[]): P
             component: tokenValue,
             attributes: {},
             children: [],
-            [parentNode]: currentParent,
           };
-          currentParent = newComponentNode;
+          openParentStack.push(newComponentNode);
         }
         break;
       }
@@ -68,73 +149,13 @@ export const parseHTML = async (htmlString: string, dynamicValues: unknown[]): P
         // String = move up the tree until we find a matching tag name (or the root), then move up one more level to set the current parent.
         // Function = component closing tag, closes the open component with the matching function reference.
 
-        const closeCurrentParent = () => {
-          if (currentParent.type === YETI_NODE_TYPE.ROOT) {
-            // Cannot close the root node
-            return null;
-          }
-
-          const closingParentNode = currentParent;
-          const nextParent = currentParent[parentNode];
-
-          if (closingParentNode.type === COMPONENT_NODE_TYPE) {
-            const componentContent = closingParentNode.component({
-              children: closingParentNode.children,
-              ...closingParentNode.attributes,
-            });
-            if ("type" in componentContent && componentContent.type === YETI_NODE_TYPE.ROOT && Array.isArray(componentContent.children)) {
-              // If the component content is a root node, we can just take its children and insert them directly.
-              for (const child of componentContent.children) {
-                nextParent.children.push({
-                  ...child,
-                  [parentNode]: nextParent as YetiRootNode | YetiElementNode,
-                });
-              }
-            } else if (Array.isArray(componentContent)) {
-              // If the component content is an array, we can assume it's an array of nodes and insert them directly.
-              for (const child of componentContent) {
-                if ("type" in child && "children" in child) {
-                  nextParent.children.push({
-                    ...child,
-                    [parentNode]: nextParent as YetiRootNode | YetiElementNode,
-                  });
-                } else {
-                  // If the child is not a node, we will stringify it and insert it as a text node.
-                  nextParent.children.push({
-                    type: YETI_NODE_TYPE.TEXT,
-                    content: String(child),
-                    [parentNode]: nextParent as YetiRootNode | YetiElementNode,
-                  });
-                }
-              }
-            } else {
-              // Otherwise, we assume it's a single node and insert it directly.
-              nextParent.children.push({
-                type: YETI_NODE_TYPE.TEXT,
-                content: String(componentContent),
-                [parentNode]: nextParent as YetiRootNode | YetiElementNode,
-              });
-            }
-          } else {
-            // For regular element nodes, we can just insert them directly.
-            nextParent.children.push({
-              ...closingParentNode,
-              [parentNode]: nextParent as YetiRootNode | YetiElementNode,
-            });
-          }
-
-          currentParent = nextParent;
-
-          return closingParentNode;
-        };
-
         if (tokenValue === "") {
           // Just move up one level to close the current element/component
-          closeCurrentParent();
+          await closeCurrentParent();
         } else {
           // Move up the tree until we find a matching tag name or the root
           while (true) {
-            const closedParentNode = closeCurrentParent();
+            const closedParentNode = await closeCurrentParent();
             if (
               !closedParentNode ||
               (closedParentNode.type === YETI_NODE_TYPE.ELEMENT && closedParentNode.tagName === tokenValue) ||
@@ -147,71 +168,31 @@ export const parseHTML = async (htmlString: string, dynamicValues: unknown[]): P
         break;
       }
       case TOKEN_TYPE.OPENING_TAG_END: {
-        if (currentParent.type === YETI_NODE_TYPE.ROOT) {
+        const currentOpenParent = getCurrentOpenParent();
+
+        if (currentOpenParent.type === YETI_NODE_TYPE.ROOT) {
           throw new YetiHTMLParsingError("Received invalid OPENING_TAG_END token: Cannot self-close the root node");
         }
 
         if (openAttributeName) {
-          currentParent.attributes[openAttributeName] = true;
+          // If we're terminating an opening tag but still have an open attribute name, that means we received an attribute name without a value.
+          // We will treat this as a boolean attribute with a value of true.
+          currentOpenParent.attributes[openAttributeName] = true;
           openAttributeName = null;
         }
 
+        // Token value is a boolean indicating whether the opening tag was terminated with a self-closing slash (/>) or not (>)
         const isSelfClosing = tokenValue === true;
 
-        // If the tag was self-closing, or if it's a known void tag which cannot have any children, then we can immediately add it to the tree and move on.
-        if (isSelfClosing || (currentParent.type === YETI_NODE_TYPE.ELEMENT && isVoidTag(currentParent.tagName))) {
-          const closingParentNode = currentParent;
-          const nextParent = currentParent[parentNode] as YetiRootNode | YetiElementNode;
-          if (closingParentNode.type === COMPONENT_NODE_TYPE) {
-            const componentContent = closingParentNode.component({
-              children: [],
-              ...closingParentNode.attributes,
-            });
-            if ("type" in componentContent && componentContent.type === YETI_NODE_TYPE.ROOT && Array.isArray(componentContent.children)) {
-              // If the component content is a root node, we can just take its children and insert them directly.
-              for (const child of componentContent.children) {
-                closingParentNode.children.push({
-                  ...child,
-                  [parentNode]: nextParent as YetiRootNode | YetiElementNode,
-                });
-              }
-            } else if (Array.isArray(componentContent)) {
-              // If the component content is an array, we can assume it's an array of nodes and insert them directly.
-              for (const child of componentContent) {
-                if ("type" in child && "children" in child) {
-                  closingParentNode.children.push({
-                    ...child,
-                    [parentNode]: nextParent as YetiRootNode | YetiElementNode,
-                  });
-                } else {
-                  // If the child is not a node, we will stringify it and insert it as a text node.
-                  closingParentNode.children.push({
-                    type: YETI_NODE_TYPE.TEXT,
-                    content: String(child),
-                    [parentNode]: nextParent as YetiRootNode | YetiElementNode,
-                  });
-                }
-              }
-            } else {
-              // Otherwise, we assume it's a single node and insert it directly.
-              closingParentNode.children.push({
-                type: YETI_NODE_TYPE.TEXT,
-                content: String(componentContent),
-                [parentNode]: nextParent as YetiRootNode | YetiElementNode,
-              });
-            }
-          } else {
-            // For regular element nodes, we can just insert them directly.
-            nextParent.children.push({
-              ...closingParentNode,
-              [parentNode]: nextParent as YetiRootNode | YetiElementNode,
-            });
-          }
-          currentParent = nextParent;
+        // If the tag was self-closing, or if it's a known void tag which cannot have any children, then we can immediately close it and move on.
+        if (isSelfClosing || (currentOpenParent.type === YETI_NODE_TYPE.ELEMENT && isVoidTag(currentOpenParent.tagName))) {
+          await closeCurrentParent();
         }
         break;
       }
       case TOKEN_TYPE.ATTR_NAME: {
+        const currentParent = getCurrentOpenParent();
+
         if (currentParent.type === YETI_NODE_TYPE.ROOT) {
           throw new YetiHTMLParsingError("Received invalid ATTR_NAME token: Cannot set attributes on the root node");
         }
@@ -229,11 +210,14 @@ export const parseHTML = async (htmlString: string, dynamicValues: unknown[]): P
         break;
       }
       case TOKEN_TYPE.ATTR_VALUE: {
-        if (!openAttributeName) {
-          throw new YetiHTMLParsingError("Received ATTR_VALUE token without an open attribute name");
-        }
+        const currentParent = getCurrentOpenParent();
+
         if (currentParent.type === YETI_NODE_TYPE.ROOT) {
           throw new YetiHTMLParsingError("Received invalid ATTR_VALUE token: Cannot set attributes on the root node");
+        }
+
+        if (!openAttributeName) {
+          throw new YetiHTMLParsingError("Received ATTR_VALUE token without an open attribute name");
         }
 
         currentParent.attributes[openAttributeName] = tokenValue;
@@ -241,124 +225,39 @@ export const parseHTML = async (htmlString: string, dynamicValues: unknown[]): P
         break;
       }
       case TOKEN_TYPE.CHILD_CONTENT: {
-        // Unwrap the child content...
-        // 1. If it's a promise, await it
-        // 2. If it's a root node, insert its children directly
-        // 3. If it's an iterable, iterate over its values and insert each item as a separate node. Handle both sync and async iterables.
-        // 4. If it's a function, call it and insert the result (handle both sync and async functions)
-        // 5. Otherwise, insert it as a text node
-        let contentToInsert = tokenValue;
-        if (typeof contentToInsert === "function") {
-          try {
-            contentToInsert = contentToInsert();
-          } catch (error) {
-            throw new YetiHTMLParsingError(`An error occurred while executing inlined function in HTML`, {
-              cause: error,
-            });
-          }
-        }
-        if (contentToInsert instanceof Promise) {
-          contentToInsert = await contentToInsert;
-        }
-
-        if (contentToInsert === null || contentToInsert === undefined || contentToInsert === "") {
-          // If the content is null, undefined, or an empty string, we can just ignore it and not insert anything.
-          break;
-        }
-
-        if (typeof contentToInsert === "object") {
-          if ("type" in contentToInsert && "children" in contentToInsert && Array.isArray(contentToInsert.children)) {
-            for (const child of contentToInsert.children) {
-              currentParent.children.push({
-                ...child,
-                [parentNode]: currentParent as YetiRootNode | YetiElementNode,
-              });
-            }
-          } else if (Symbol.iterator in contentToInsert && typeof contentToInsert[Symbol.iterator] === "function") {
-            const generator = (contentToInsert as any)[Symbol.iterator]() as Generator;
-            for (const item of generator) {
-              if (item === null || item === undefined || item === "") {
-                continue;
-              }
-
-              if (typeof item === "object" && "type" in item && "children" in item && Array.isArray(item.children)) {
-                for (const child of item.children) {
-                  currentParent.children.push({
-                    ...child,
-                    [parentNode]: currentParent as YetiRootNode | YetiElementNode,
-                  });
-                }
-              } else {
-                currentParent.children.push({
-                  type: YETI_NODE_TYPE.TEXT,
-                  content: String(item),
-                  [parentNode]: currentParent as YetiRootNode | YetiElementNode,
-                });
-              }
-            }
-          } else if (Symbol.asyncIterator in contentToInsert && typeof contentToInsert[Symbol.asyncIterator] === "function") {
-            const asyncGenerator = (contentToInsert as any)[Symbol.asyncIterator]() as AsyncGenerator;
-            for await (const item of asyncGenerator) {
-              if (item === null || item === undefined || item === "") {
-                continue;
-              }
-
-              if (typeof item === "object" && "type" in item && "children" in item && Array.isArray(item.children)) {
-                for (const child of item.children) {
-                  currentParent.children.push({
-                    ...child,
-                    [parentNode]: currentParent as YetiRootNode | YetiElementNode,
-                  });
-                }
-              } else {
-                currentParent.children.push({
-                  type: YETI_NODE_TYPE.TEXT,
-                  content: String(item),
-                  [parentNode]: currentParent as YetiRootNode | YetiElementNode,
-                });
-              }
-            }
-          } else {
-            // If it's just a regular object, we'll stringify it and insert it as a text node.
-            currentParent.children.push({
-              type: YETI_NODE_TYPE.TEXT,
-              content: String(contentToInsert),
-              [parentNode]: currentParent as YetiRootNode | YetiElementNode,
-            });
-          }
-        } else {
-          // For any other type of content, we will stringify it and insert it as a text node.
-          currentParent.children.push({
-            type: YETI_NODE_TYPE.TEXT,
-            content: String(contentToInsert),
-            [parentNode]: currentParent as YetiRootNode | YetiElementNode,
-          });
-        }
-
+        await appendContentToNode(getCurrentOpenParent(), tokenValue);
         break;
       }
       case TOKEN_TYPE.COMMENT: {
+        const currentParent = getCurrentOpenParent();
         currentParent.children.push({
           type: YETI_NODE_TYPE.COMMENT,
           content: tokenValue,
-          [parentNode]: currentParent as YetiRootNode | YetiElementNode,
         });
         break;
       }
       case TOKEN_TYPE.DOCTYPE: {
+        const currentParent = getCurrentOpenParent();
         currentParent.children.push({
           type: YETI_NODE_TYPE.DOCTYPE,
           content: tokenValue,
-          [parentNode]: currentParent as YetiRootNode | YetiElementNode,
         });
         break;
       }
       case TOKEN_TYPE.SPREAD_ATTR: {
+        const currentParent = getCurrentOpenParent();
         if (currentParent.type === YETI_NODE_TYPE.ROOT) {
           throw new YetiHTMLParsingError("Received invalid SPREAD_ATTR token: Cannot set attributes on the root node");
         }
-        if (typeof tokenValue !== "object" || tokenValue === null) {
-          throw new YetiHTMLParsingError("Received invalid SPREAD_ATTR token: Token value must be a non-null object");
+
+        if (tokenValue === null || tokenValue === undefined) {
+          // Ignore null or undefined spread values
+          break;
+        }
+
+        if (typeof tokenValue !== "object") {
+          // Primitive values cannot be spread since they don't have any properties to spread. Throw an error to alert the developer that their input is invalid.
+          throw new YetiHTMLParsingError("Received invalid SPREAD_ATTR token: Token value must be an object");
         }
 
         // Apply all of the attributes from the spread object to the current element's attributes.
@@ -372,56 +271,9 @@ export const parseHTML = async (htmlString: string, dynamicValues: unknown[]): P
     }
   }
 
-  while (currentParent.type !== YETI_NODE_TYPE.ROOT) {
-    const closingParentNode = currentParent;
-    const nextParent = currentParent[parentNode] as YetiRootNode | YetiElementNode;
-    if (closingParentNode.type === COMPONENT_NODE_TYPE) {
-      const componentContent = closingParentNode.component({
-        children: closingParentNode.children,
-        ...closingParentNode.attributes,
-      });
-      if ("type" in componentContent && componentContent.type === YETI_NODE_TYPE.ROOT && Array.isArray(componentContent.children)) {
-        // If the component content is a root node, we can just take its children and insert them directly.
-        for (const child of componentContent.children) {
-          closingParentNode.children.push({
-            ...child,
-            [parentNode]: nextParent as YetiRootNode | YetiElementNode,
-          });
-        }
-      } else if (Array.isArray(componentContent)) {
-        // If the component content is an array, we can assume it's an array of nodes and insert them directly.
-        for (const child of componentContent) {
-          if ("type" in child && "children" in child) {
-            closingParentNode.children.push({
-              ...child,
-              [parentNode]: nextParent as YetiRootNode | YetiElementNode,
-            });
-          } else {
-            // If the child is not a node, we will stringify it and insert it as a text node.
-            closingParentNode.children.push({
-              type: YETI_NODE_TYPE.TEXT,
-              content: String(child),
-              [parentNode]: nextParent as YetiRootNode | YetiElementNode,
-            });
-          }
-        }
-      } else {
-        // Otherwise, we assume it's a single node and insert it directly.
-        closingParentNode.children.push({
-          type: YETI_NODE_TYPE.TEXT,
-          content: String(componentContent),
-          [parentNode]: nextParent as YetiRootNode | YetiElementNode,
-        });
-      }
-    } else {
-      // For regular element nodes, we can just insert them directly.
-      nextParent.children.push({
-        ...closingParentNode,
-        [parentNode]: nextParent as YetiRootNode | YetiElementNode,
-      });
-    }
-
-    currentParent = nextParent;
+  while (await closeCurrentParent() !== null) {
+    // Keep closing any open nodes until we reach the root. This will ensure that all nodes are properly closed and appended to the tree, 
+    // even if there are unclosed tags in the input HTML.
   }
 
   return rootNode;

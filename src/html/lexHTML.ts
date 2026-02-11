@@ -162,10 +162,10 @@ const lexTextContent: LexerFunction<"CHILD_CONTENT" | "ERROR"> = function* (ctx)
           ctx.advance(DYNAMIC_VALUE_CHARACTER_SEQUENCE_LENGTH);
           continue;
         }
-
-        // We didn't find a transition point, so just consume the next character as text content
-        textContent += ctx.advance(1);
       }
+
+      // We didn't find a transition point, so just consume the next character as text content
+      textContent += ctx.advance(1);
     }
 
     if (textContent.length > 0) {
@@ -570,6 +570,7 @@ const lexClosingTag: LexerFunction<"CLOSING_TAGNAME" | "ERROR"> = function* (ctx
  * ```
  */
 export function* lexHTML(htmlString: string, dynamicValues: unknown[]): Generator<LexerToken, void, void> {
+  debugger;
   const htmlStringLength = htmlString.length;
 
   let charIndex = 0;

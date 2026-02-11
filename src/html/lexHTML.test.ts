@@ -123,6 +123,16 @@ describe("lexHTML", () => {
     ] satisfies LexerToken[]);
   });
 
+  test("moves past unescaped characters in text content as expected", () => {
+    const tokens = Array.from(lexHTML("<div>Text with & < > \" ' characters</div>", []));
+    assert.deepStrictEqual(tokens, [
+      [TOKEN_TYPE.OPENING_TAGNAME, "div"],
+      [TOKEN_TYPE.OPENING_TAG_END, false],
+      [TOKEN_TYPE.CHILD_CONTENT, "Text with & < > \" ' characters"],
+      [TOKEN_TYPE.CLOSING_TAGNAME, "div"],
+    ] satisfies LexerToken[]);
+  });
+
   test("lexes dynamic attribute names as expected", () => {
     const dynamicAttrName1 = "data-attr1";
     // Numbers are allowed as attribute names in HTML (eg, <div 1="value"> is valid HTML), so we should support them as dynamic attribute names as well.

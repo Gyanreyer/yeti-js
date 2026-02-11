@@ -6,18 +6,15 @@ export const YETI_NODE_TYPE = {
   DOCTYPE: 12,
 } as const;
 
-export const parentNode = Symbol.for("parentNode");
-
 export type YetiNodeType = typeof YETI_NODE_TYPE[keyof typeof YETI_NODE_TYPE];
 
 export interface BaseYetiNode {
   type: YetiNodeType;
-  [parentNode]: YetiElementNode | YetiRootNode;
 }
 
-export interface YetiRootNode extends Omit<BaseYetiNode, typeof parentNode> {
+export interface YetiRootNode extends BaseYetiNode {
   type: typeof YETI_NODE_TYPE.ROOT;
-  children: Array<Exclude<YetiNode, YetiRootNode>>;
+  children: YetiChildNode[];
 }
 
 export interface YetiTextNode extends BaseYetiNode {
@@ -39,7 +36,8 @@ export interface YetiElementNode extends BaseYetiNode {
   type: typeof YETI_NODE_TYPE.ELEMENT;
   tagName: string;
   attributes: Record<string, string | boolean>;
-  children: Array<Exclude<YetiNode, YetiRootNode>>;
+  children: YetiChildNode[];
 }
 
-export type YetiNode = YetiElementNode | YetiTextNode | YetiCommentNode | YetiDoctypeNode | YetiRootNode;
+export type YetiChildNode = YetiElementNode | YetiTextNode | YetiCommentNode | YetiDoctypeNode;
+export type YetiNode = YetiChildNode | YetiRootNode;
