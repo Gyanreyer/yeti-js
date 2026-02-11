@@ -48,11 +48,14 @@ const appendContentToNode = async (parent: YetiRootNode | YetiElementNode | Open
 
   if (typeof unwrappedContent === "object") {
     // If the content is an object, we will try to unwrap any iterables or YetiNodes and insert them appropriately.
-    if (
-      // If the content is an iterable object, iterate over its values and insert each item as a separate node. Handle both sync and async iterables.
-      (Symbol.iterator in unwrappedContent && typeof unwrappedContent[Symbol.iterator] === "function")
-      || (Symbol.asyncIterator in unwrappedContent && typeof unwrappedContent[Symbol.asyncIterator] === "function")) {
-      for await (const item of unwrappedContent as any) {
+    // If the content is an iterable object, iterate over its values and insert each item as a separate node. Handle both sync and async iterables.
+    if (Symbol.iterator in unwrappedContent && typeof unwrappedContent[Symbol.iterator] === "function") {
+      for (const item of unwrappedContent as Generator) {
+        await appendContentToNode(parent, item);
+      }
+      return;
+    } else if (Symbol.asyncIterator in unwrappedContent && typeof unwrappedContent[Symbol.asyncIterator] === "function") {
+      for await (const item of unwrappedContent as AsyncGenerator) {
         await appendContentToNode(parent, item);
       }
       return;
@@ -87,7 +90,10 @@ export const parseHTML = async (htmlString: string, dynamicValues: unknown[]): P
   const rootNode: YetiRootNode = { type: YETI_NODE_TYPE.ROOT, children: [] };
 
   let openParentStack: Array<YetiElementNode | OpenComponentNode> = [];
-  const getCurrentOpenParent = () => openParentStack.at(-1) ?? rootNode;
+  const getCurrentOpenParent = () => {
+    const stackLength = openParentStack.length;
+    return stackLength > 0 ? openParentStack[stackLength - 1] : rootNode;
+  };
 
   let openAttributeName: string | null = null;
 

@@ -1,6 +1,6 @@
 import { parseHTML } from './parseHTML.ts';
 import { makeDynamicValuePlaceholder } from './utils.ts';
-import { YetiRootNode } from './types.ts';
+import type { YetiRootNode } from './types.ts';
 
 export const html = async (strings: TemplateStringsArray, ...values: unknown[]): Promise<YetiRootNode> => {
   let htmlString = "";

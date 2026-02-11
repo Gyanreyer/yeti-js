@@ -575,8 +575,13 @@ describe("parseHTML", () => {
         children: [
           {
             type: YETI_NODE_TYPE.TEXT,
-            content: "Special chars: &amp; &lt; &gt; &amp; &lt; &gt; &quot; &#39;",
+            content: "Special chars: &amp; &lt; &gt; ",
           },
+          // The dynamic content gets a separate text node
+          {
+            type: YETI_NODE_TYPE.TEXT,
+            content: "&amp; &lt; &gt; &quot; &#39;",
+          }
         ],
       }],
     } satisfies YetiRootNode, "Special characters in text content should be escaped");
