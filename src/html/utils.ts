@@ -70,24 +70,26 @@ export const isWhiteSpaceCharCode = (charCode: number): boolean => {
   );
 };
 
-
 export const isValidHTMLTagNameCharCode = (charCode: number): boolean => {
   return isLetterCharCode(charCode) || (charCode >= 48 && charCode <= 57) || charCode === CHAR_CODE_DASH || charCode === CHAR_CODE_COLON;
 }
 
-export const isValidHTMLTagNameCharCodeArray = (charCodes: number[]): boolean => {
-  if (charCodes.length === 0) {
+export const isValidHTMLTagNameString = (tagNameStr: string): boolean => {
+  const strLen = tagNameStr.length;
+
+  if (strLen === 0) {
     return false;
   }
 
   // First character must be a letter
-  if (!isLetterCharCode(charCodes[0])) {
+  if (!isLetterCharCode(tagNameStr.charCodeAt(0))) {
     return false;
   }
 
+
   // Subsequent characters can be letters, digits, "-", or ":"
-  for (let i = 1; i < charCodes.length; i++) {
-    if (!isValidHTMLTagNameCharCode(charCodes[i])) {
+  for (let i = 1; i < strLen; i++) {
+    if (!isValidHTMLTagNameCharCode(tagNameStr.charCodeAt(i))) {
       return false;
     }
   }
@@ -99,13 +101,14 @@ export const isValidHTMLAttributeNameCharCode = (charCode: number): boolean => {
   return !isWhiteSpaceCharCode(charCode) && charCode !== CHAR_CODE_EQUAL && charCode !== CHAR_CODE_GT && charCode !== CHAR_CODE_SLASH;
 };
 
-export const isValidHTMLAttributeNameCharCodeArray = (attrNameCharCodes: number[]): boolean => {
-  if (attrNameCharCodes.length === 0) {
+export const isValidHTMLAttributeNameString = (attrNameStr: string): boolean => {
+  const strLen = attrNameStr.length;
+  if (strLen === 0) {
     return false;
   }
 
-  for (let i = 0; i < attrNameCharCodes.length; i++) {
-    if (!isValidHTMLAttributeNameCharCode(attrNameCharCodes[i])) {
+  for (let i = 0; i < strLen; i++) {
+    if (!isValidHTMLAttributeNameCharCode(attrNameStr.charCodeAt(i))) {
       return false;
     }
   }
@@ -127,6 +130,26 @@ export const stringToUint16CharCodeArray = (str: string): Uint16Array => {
     charCodes[i] = str.charCodeAt(i);
   }
   return charCodes;
+};
+
+export const DOCTYPE_STRING_CHAR_CODE_SEQUENCE = stringToUint16CharCodeArray("DOCTYPE");
+
+export const doCharCodeSequencesMatch = (
+  sequence1: Uint16Array,
+  sequence2: Uint16Array,
+): boolean => {
+  const sequence1Length = sequence1.length;
+  if (sequence1Length !== sequence2.length) {
+    return false;
+  }
+
+  for (let i = 0; i < sequence1Length; i++) {
+    if (sequence1[i] !== sequence2[i]) {
+      return false;
+    }
+  }
+
+  return true;
 };
 
 const VOID_TAG_SET = new Set([
