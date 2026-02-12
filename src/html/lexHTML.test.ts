@@ -27,6 +27,13 @@ describe("lexHTML", () => {
     ] satisfies LexerToken[]);
   });
 
+  test("trims doctype content value as expected", () => {
+    const tokens = Array.from(lexHTML(stringToUint16CharCodeArray("<!DOCTYPE    html   >"), []));
+    assert.deepStrictEqual(tokens, [
+      [TOKEN_TYPE.DOCTYPE, "html"],
+    ] satisfies LexerToken[]);
+  });
+
   test("lexes a single HTML element as expected", () => {
     const tokens = Array.from(lexHTML(stringToUint16CharCodeArray("<div></div>"), []));
     assert.deepStrictEqual(tokens, [

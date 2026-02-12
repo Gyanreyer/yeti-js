@@ -208,7 +208,7 @@ const lexComment: LexerFunction<"COMMENT" | "ERROR"> = function* (ctx) {
 
   let chunkStartIndex = ctx.getIndex();
   let chunkLength = 0;
-  const stringParts: string[] = [];
+  let stringParts: string[] | null = null;
 
   while (!ctx.isAtEnd()) {
     const nextCharCode = ctx.peekCharCode();
@@ -221,6 +221,7 @@ const lexComment: LexerFunction<"COMMENT" | "ERROR"> = function* (ctx) {
 
     const dynamicValue = ctx.peekDynamicValue();
     if (dynamicValue !== NO_DYNAMIC_VALUE) {
+      stringParts ??= [];
       // Flush current chunk before adding dynamic value
       if (chunkLength > 0) {
         stringParts.push(ctx.getSubstring(chunkStartIndex, chunkLength));
@@ -235,12 +236,25 @@ const lexComment: LexerFunction<"COMMENT" | "ERROR"> = function* (ctx) {
     }
   }
 
+  let commentContent: string;
+
   // Flush final chunk
   if (chunkLength > 0) {
-    stringParts.push(ctx.getSubstring(chunkStartIndex, chunkLength));
+    const finalChunk = ctx.getSubstring(chunkStartIndex, chunkLength);
+    if (stringParts === null) {
+      commentContent = finalChunk;
+    } else {
+      stringParts.push(finalChunk);
+      commentContent = stringParts.join('');
+    }
+  } else if (stringParts) {
+    commentContent = stringParts.join('');
+  } else {
+    commentContent = "";
   }
 
-  yield [TOKEN_TYPE.COMMENT, stringParts.join('').trim()];
+  yield [TOKEN_TYPE.COMMENT, commentContent.trim()];
+
   return nextLexerFunction;
 };
 
@@ -249,13 +263,9 @@ const lexDoctype: LexerFunction<"DOCTYPE" | "ERROR"> = function* (ctx) {
   ctx.advance(9);
   let nextLexerFunction: LexerFunction<any> | null = null;
 
-  while (!ctx.isAtEnd() && isWhiteSpaceCharCode(ctx.peekCharCode())) {
-    // Skip any whitespace between "DOCTYPE" and the actual doctype declaration
-    ctx.advance(1);
-  }
-
-  const chunkStartIndex = ctx.getIndex();
+  let chunkStartIndex = ctx.getIndex();
   let chunkLength = 0;
+  let lastNonWhitespaceLength = 0;
 
   while (!ctx.isAtEnd()) {
     const nextCharCode = ctx.peekCharCode();
@@ -271,11 +281,26 @@ const lexDoctype: LexerFunction<"DOCTYPE" | "ERROR"> = function* (ctx) {
       return null;
     }
 
-    chunkLength++;
-    ctx.advance(1);
+    if (isWhiteSpaceCharCode(nextCharCode)) {
+      if (chunkLength === 0) {
+        // Skip leading whitespace and shift up the chunk start index
+        chunkStartIndex = ctx.advance(1);
+      } else {
+        // We already have some content so just keep moving but don't update
+        // lastNonWhitespaceLength until we hit a non-whitespace character
+        chunkLength++;
+        ctx.advance(1);
+      }
+    } else {
+      // We have a non-whitespace character, so we can update lastNonWhitespaceLength
+      // to include any preceding whitespace as well
+      chunkLength++;
+      lastNonWhitespaceLength = chunkLength;
+      ctx.advance(1);
+    }
   }
 
-  yield [TOKEN_TYPE.DOCTYPE, ctx.getSubstring(chunkStartIndex, chunkLength).trimEnd()];
+  yield [TOKEN_TYPE.DOCTYPE, ctx.getSubstring(chunkStartIndex, lastNonWhitespaceLength)];
   return nextLexerFunction;
 }
 
@@ -284,14 +309,14 @@ const lexOpeningTagname: LexerFunction<"OPENING_TAGNAME" | "ERROR"> = function* 
   ctx.advance(1);
 
   let nextLexerFunction: LexerFunction<any> | null = null;
-  let chunkStartIndex = ctx.getIndex();
-  let chunkLength = 0;
-  const stringParts: string[] = [];
+  let currentChunkStartIndex = ctx.getIndex();
+  let currentChunkLength = 0;
+  let stringParts: string[] | null = null;
 
   while (!ctx.isAtEnd()) {
     const dynamicValue = ctx.peekDynamicValue();
     if (dynamicValue !== NO_DYNAMIC_VALUE) {
-      if (chunkLength === 0 && stringParts.length === 0 && typeof dynamicValue === "function") {
+      if (currentChunkLength === 0 && !stringParts && typeof dynamicValue === "function") {
         // If the dynamic value is a function and we haven't consumed any tag name characters yet,
         // we can treat this as a component tag. 
         ctx.advance(DYNAMIC_VALUE_CHARACTER_SEQUENCE_LENGTH);
@@ -301,26 +326,28 @@ const lexOpeningTagname: LexerFunction<"OPENING_TAGNAME" | "ERROR"> = function* 
         return lexAttributeName;
       }
 
-      // Flush current chunk before adding dynamic value
-      if (chunkLength > 0) {
-        stringParts.push(ctx.getSubstring(chunkStartIndex, chunkLength));
+      // If it's not a component function, we'll just coerce to a string and append it to the tag name.
+      stringParts ??= [];
+      if (currentChunkLength > 0) {
+        // Flush current chunk before adding dynamic value
+        stringParts.push(ctx.getSubstring(currentChunkStartIndex, currentChunkLength));
       }
       // If we encounter a dynamic value, we treat it as the entire tag name.
       // The parser can handle it from there.
       stringParts.push(String(dynamicValue));
-      chunkStartIndex = ctx.advance(DYNAMIC_VALUE_CHARACTER_SEQUENCE_LENGTH);
-      chunkLength = 0;
+      currentChunkStartIndex = ctx.advance(DYNAMIC_VALUE_CHARACTER_SEQUENCE_LENGTH);
+      currentChunkLength = 0;
     }
 
     const nextCharCode = ctx.peekCharCode();
 
     if (
       // The first letter of a tagname has to be a letter
-      (chunkLength === 0 && stringParts.length === 0 && isLetterCharCode(nextCharCode)) ||
+      (currentChunkLength === 0 && !stringParts && isLetterCharCode(nextCharCode)) ||
       // All following characters can be letters, digits, hyphens, or colons
       isValidHTMLTagNameCharCode(nextCharCode)
     ) {
-      chunkLength++;
+      currentChunkLength++;
       ctx.advance(1);
     } else if (isWhiteSpaceCharCode(nextCharCode)) {
       // Consume whitespace and transition to attribute lexing
@@ -334,12 +361,24 @@ const lexOpeningTagname: LexerFunction<"OPENING_TAGNAME" | "ERROR"> = function* 
     }
   }
 
+  let tagName: string;
+
   // Flush final chunk
-  if (chunkLength > 0) {
-    stringParts.push(ctx.getSubstring(chunkStartIndex, chunkLength));
+  if (currentChunkLength > 0) {
+    const currentChunk = ctx.getSubstring(currentChunkStartIndex, currentChunkLength);
+    if (!stringParts) {
+      tagName = currentChunk;
+    } else {
+      stringParts.push(currentChunk);
+      tagName = stringParts.join('');
+    }
+  } else if (stringParts) {
+    tagName = stringParts.join('');
+  } else {
+    yield [TOKEN_TYPE.ERROR, new YetiHTMLParsingError(`lexOpeningTagname did not find any valid tag name characters.`)];
+    return null;
   }
 
-  const tagName = stringParts.join('');
   if (!isValidHTMLTagNameString(tagName)) {
     yield [TOKEN_TYPE.ERROR, new YetiHTMLParsingError(`lexOpeningTagname received invalid tag name "${tagName}".`)];
     return null;
@@ -353,13 +392,13 @@ const lexAttributeName: LexerFunction<"ATTR_NAME" | "SPREAD_ATTR" | "ERROR"> = f
   let nextLexerFunction: LexerFunction<any> | null = null;
   let chunkStartIndex = ctx.getIndex();
   let chunkLength = 0;
-  const stringParts: string[] = [];
+  let stringParts: string[] | null = null;
 
   while (!ctx.isAtEnd()) {
     const nextCharCode = ctx.peekCharCode();
 
     // Check for spread attributes (e.g., ...{object})
-    if (chunkLength === 0 && stringParts.length === 0 && nextCharCode === CHAR_CODE_DOT) {
+    if (chunkLength === 0 && !stringParts && nextCharCode === CHAR_CODE_DOT) {
       if (ctx.peekCharCode(1) === CHAR_CODE_DOT && ctx.peekCharCode(2) === CHAR_CODE_DOT) {
         // We have "..." so this could be a spread attribute. We need to check if it's followed by a dynamic value placeholder to confirm.
         // Check for dynamic value after "..."
@@ -377,6 +416,8 @@ const lexAttributeName: LexerFunction<"ATTR_NAME" | "SPREAD_ATTR" | "ERROR"> = f
     const dynamicValue = ctx.peekDynamicValue();
     if (dynamicValue !== NO_DYNAMIC_VALUE) {
       // Flush current chunk before adding dynamic value
+      stringParts ??= [];
+
       if (chunkLength > 0) {
         stringParts.push(ctx.getSubstring(chunkStartIndex, chunkLength));
       }
@@ -391,7 +432,7 @@ const lexAttributeName: LexerFunction<"ATTR_NAME" | "SPREAD_ATTR" | "ERROR"> = f
     // Terminating characters are: whitespace, "=", ">", and "/>"
     if (nextCharCode === CHAR_CODE_EQUAL) {
       // Handle the case where there is no attribute name, just an "="
-      if (chunkLength === 0 && stringParts.length === 0) {
+      if (chunkLength === 0 && !stringParts) {
         yield [TOKEN_TYPE.ERROR, new YetiHTMLParsingError(`lexAttributeName encountered an "=" character before finding a valid attribute name.`)];
         return null;
       }
@@ -408,13 +449,7 @@ const lexAttributeName: LexerFunction<"ATTR_NAME" | "SPREAD_ATTR" | "ERROR"> = f
       nextLexerFunction = lexOpeningTagEnd;
       break;
     } else if (isWhiteSpaceCharCode(nextCharCode)) {
-      // Skip whitespace
-      if (chunkLength > 0) {
-        // Flush current chunk before handling whitespace
-        stringParts.push(ctx.getSubstring(chunkStartIndex, chunkLength));
-        chunkLength = 0;
-      }
-      if (stringParts.length > 0) {
+      if (chunkLength > 0 || stringParts) {
         // If we have an attribute name, the whitespace indicates the end of the name.
         // Transition to a new lexAttributeName instance to look for the next attribute or tag end.
         nextLexerFunction = lexAttributeName;
@@ -428,13 +463,20 @@ const lexAttributeName: LexerFunction<"ATTR_NAME" | "SPREAD_ATTR" | "ERROR"> = f
     }
   }
 
+  let attrName: string | null = null;
   // Flush final chunk
   if (chunkLength > 0) {
-    stringParts.push(ctx.getSubstring(chunkStartIndex, chunkLength));
+    if (!stringParts) {
+      attrName = ctx.getSubstring(chunkStartIndex, chunkLength);
+    } else {
+      stringParts.push(ctx.getSubstring(chunkStartIndex, chunkLength));
+      attrName = stringParts.join('');
+    }
+  } else if (stringParts) {
+    attrName = stringParts.join('');
   }
 
-  if (stringParts.length > 0) {
-    const attrName = stringParts.join('');
+  if (attrName) {
     if (!isValidHTMLAttributeNameString(attrName)) {
       yield [TOKEN_TYPE.ERROR, new YetiHTMLParsingError(`lexAttributeName received invalid attribute name "${attrName}"`)];
       return null;
@@ -467,18 +509,17 @@ const lexAttributeValue: LexerFunction<"ATTR_VALUE" | "ERROR"> = function* (ctx)
     return lexAttributeName;
   }
 
-  const attrValueStringParts = new Array<string>();
-  let currentChunkStartIndex = ctx.getIndex();
-  let currentChunkLength = 0;
-
-  let hasDynamicValue = false;
-  let dynamicAttrValue: unknown = null;
 
   const quoteCharCode = ctx.peekCharCode();
   // Quoted attribute value starting with either " or '
   if (quoteCharCode === CHAR_CODE_DOUBLE_QUOTE || quoteCharCode === CHAR_CODE_SINGLE_QUOTE) {
     // Consume opening quote
-    currentChunkStartIndex = ctx.advance(1);
+    let currentChunkStartIndex = ctx.advance(1);
+    let currentChunkLength = 0;
+    let attrValueStringParts: string[] | null = null;
+
+    let hasDynamicValueOnly = false;
+    let currentDynamicAttrValue: unknown = null;
 
     // Track how many backslashes we've seen in a row to determine if a quote is escaped or not.
     // An even number of backslashes means the quote is not escaped, while an odd number means it is escaped.
@@ -490,22 +531,24 @@ const lexAttributeValue: LexerFunction<"ATTR_VALUE" | "ERROR"> = function* (ctx)
       if (dynamicValue !== NO_DYNAMIC_VALUE) {
         if (currentChunkLength > 0) {
           // Flush current chunk before adding dynamic value
+          attrValueStringParts ??= [];
           attrValueStringParts.push(ctx.getSubstring(currentChunkStartIndex, currentChunkLength));
           currentChunkLength = 0;
         }
 
         // If we haven't accumulated any string parts yet, use the dynamic value directly.
         // Otherwise, concatenate the dynamic value to the accumulated string value.
-        if (attrValueStringParts.length === 0 && !hasDynamicValue) {
-          dynamicAttrValue = dynamicValue;
-          hasDynamicValue = true;
+        if (!attrValueStringParts && !hasDynamicValueOnly) {
+          currentDynamicAttrValue = dynamicValue;
+          hasDynamicValueOnly = true;
         } else {
-          if (hasDynamicValue) {
+          attrValueStringParts ??= [];
+          if (hasDynamicValueOnly) {
             // If we already have a dynamic value, we need to convert it to a string and concatenate
             // it before adding the next dynamic value.
-            attrValueStringParts.push(String(dynamicAttrValue));
-            dynamicAttrValue = null;
-            hasDynamicValue = false;
+            attrValueStringParts.push(String(currentDynamicAttrValue));
+            currentDynamicAttrValue = null;
+            hasDynamicValueOnly = false;
           }
           // Coerce the value to a string and concatenate it with
           // any accumulated string value.
@@ -536,17 +579,40 @@ const lexAttributeValue: LexerFunction<"ATTR_VALUE" | "ERROR"> = function* (ctx)
       // We have a normal character to append to the attribute value.
       // If we previously encountered a dynamic value, we need to convert that into char codes
       // and append it to the char code array before appending any subsequent characters.
-      if (hasDynamicValue) {
-        attrValueStringParts.push(String(dynamicAttrValue))
-        dynamicAttrValue = null;
-        hasDynamicValue = false;
+      if (hasDynamicValueOnly) {
+        attrValueStringParts ??= [];
+        attrValueStringParts.push(String(currentDynamicAttrValue))
+        currentDynamicAttrValue = null;
+        hasDynamicValueOnly = false;
       }
 
       ctx.advance(1);
       currentChunkLength++;
     }
+
+    if (currentChunkLength > 0) {
+      const currentChunk = ctx.getSubstring(currentChunkStartIndex, currentChunkLength);
+      if (attrValueStringParts) {
+        // If we have already accumulated some string parts, we need to append the current chunk to that array.
+        attrValueStringParts.push(currentChunk);
+      } else {
+        yield [TOKEN_TYPE.ATTR_VALUE, currentChunk];
+        return nextLexerFunction;
+      }
+    }
+
+    if (attrValueStringParts) {
+      yield [TOKEN_TYPE.ATTR_VALUE, attrValueStringParts.join('')];
+    } else if (hasDynamicValueOnly) {
+      yield [TOKEN_TYPE.ATTR_VALUE, currentDynamicAttrValue];
+    }
+
+    return nextLexerFunction;
   } else {
     // Unquoted attribute value
+    const unquotedStartIndex = ctx.getIndex();
+    let unquotedLength = 0;
+
     while (!ctx.isAtEnd()) {
       const nextCharCode = ctx.peekCharCode();
       if (
@@ -558,26 +624,24 @@ const lexAttributeValue: LexerFunction<"ATTR_VALUE" | "ERROR"> = function* (ctx)
         // End of unquoted attribute value
         nextLexerFunction = lexAttributeName; // Transition back to attribute name lexing
         break;
+      } else if (ctx.peekDynamicValue() !== NO_DYNAMIC_VALUE) {
+        // Unquoted dynamic value in the middle of an unquoted attribute string value is not valid syntax, yield error
+        yield [TOKEN_TYPE.ERROR, new YetiHTMLParsingError(`Dynamic values are not allowed in the middle of unquoted attribute values.`)];
+        return null;
       } else {
-        currentChunkLength++;
+        unquotedLength++;
         ctx.advance(1);
       }
     }
+
+    if (unquotedLength > 0) {
+      yield [TOKEN_TYPE.ATTR_VALUE, ctx.getSubstring(unquotedStartIndex, unquotedLength)];
+    }
+
+    return nextLexerFunction;
   }
 
-  if (currentChunkLength > 0) {
-    attrValueStringParts.push(
-      ctx.getSubstring(currentChunkStartIndex, currentChunkLength)
-    );
-  }
 
-  if (attrValueStringParts.length > 0) {
-    yield [TOKEN_TYPE.ATTR_VALUE, attrValueStringParts.join('')];
-  } else if (hasDynamicValue) {
-    yield [TOKEN_TYPE.ATTR_VALUE, dynamicAttrValue];
-  }
-
-  return nextLexerFunction;
 }
 
 const lexOpeningTagEnd: LexerFunction<"OPENING_TAG_END" | "ERROR"> = function* (ctx) {
@@ -606,7 +670,7 @@ const lexClosingTag: LexerFunction<"CLOSING_TAGNAME" | "ERROR"> = function* (ctx
   ctx.advance(2);
 
   let nextLexerFunction: LexerFunction<any> | null = null;
-  const stringParts: string[] = [];
+  let stringParts: string[] | null = null;
   let currentChunkStartIndex = ctx.getIndex();
   let currentChunkLength = 0;
   let dynamicComponentTagFunction: Function | null = null;
@@ -630,11 +694,12 @@ const lexClosingTag: LexerFunction<"CLOSING_TAGNAME" | "ERROR"> = function* (ctx
       // Check for dynamic value
       const dynamicValue = ctx.peekDynamicValue();
       if (dynamicValue !== NO_DYNAMIC_VALUE) {
-        if (typeof dynamicValue === "function" && currentChunkLength === 0 && stringParts.length === 0) {
+        if (typeof dynamicValue === "function" && currentChunkLength === 0 && !stringParts) {
           // Component closing tag (only if we haven't started consuming a string tag name)
           dynamicComponentTagFunction = dynamicValue;
           hasFinishedConsumingTagName = true;
         } else {
+          stringParts ??= [];
           // Flush current chunk before adding dynamic value
           if (currentChunkLength > 0) {
             stringParts.push(ctx.getSubstring(currentChunkStartIndex, currentChunkLength));
@@ -651,7 +716,7 @@ const lexClosingTag: LexerFunction<"CLOSING_TAGNAME" | "ERROR"> = function* (ctx
 
       if (
         // First letter of a tagname must be a letter
-        (currentChunkLength === 0 && stringParts.length === 0 && isLetterCharCode(nextCharCode))
+        (currentChunkLength === 0 && !stringParts && isLetterCharCode(nextCharCode))
         || isValidHTMLTagNameCharCode(nextCharCode)
       ) {
         currentChunkLength++;
@@ -666,11 +731,24 @@ const lexClosingTag: LexerFunction<"CLOSING_TAGNAME" | "ERROR"> = function* (ctx
   if (dynamicComponentTagFunction !== null) {
     yield [TOKEN_TYPE.CLOSING_TAGNAME, dynamicComponentTagFunction];
   } else {
+    let closingTagName: string;
+
     // Flush final chunk
     if (currentChunkLength > 0) {
-      stringParts.push(ctx.getSubstring(currentChunkStartIndex, currentChunkLength));
+      const currentChunk = ctx.getSubstring(currentChunkStartIndex, currentChunkLength);
+      if (!stringParts) {
+        closingTagName = currentChunk;
+      } else {
+        stringParts.push(currentChunk);
+        closingTagName = stringParts.join('');
+      }
+    } else if (stringParts) {
+      closingTagName = stringParts.join('');
+    } else {
+      closingTagName = '';
     }
-    yield [TOKEN_TYPE.CLOSING_TAGNAME, stringParts.join('')];
+
+    yield [TOKEN_TYPE.CLOSING_TAGNAME, closingTagName];
   }
 
   return nextLexerFunction;
@@ -705,7 +783,8 @@ export function* lexHTML(htmlStringChars: Uint16Array, dynamicValues: unknown[])
       return htmlStringChars.subarray(startIndex, startIndex + length);
     },
     getSubstring(startIndex: number, length: number) {
-      return String.fromCharCode(...this.getSubarray(startIndex, length));
+      const subarray = this.getSubarray(startIndex, length);
+      return String.fromCharCode.apply(null, subarray as unknown as number[]);
     },
     peekCharCode(peekOffset = 0) {
       return htmlStringChars[charIndex + peekOffset];
