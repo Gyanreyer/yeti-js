@@ -4,31 +4,31 @@ import {
 } from "node:test";
 import assert from "node:assert/strict";
 import { lexHTML, TOKEN_TYPE, type LexerToken } from "./lexHTML.ts";
-import { makeDynamicValuePlaceholder } from "./utils.ts";
+import { makeDynamicValuePlaceholder, stringToUint16CharCodeArray } from "./utils.ts";
 import { YetiHTMLParsingError } from "./error.ts";
 
 describe("lexHTML", () => {
   test("lexes empty string as expected", async () => {
-    const tokens = Array.from(lexHTML("", []));
+    const tokens = Array.from(lexHTML(stringToUint16CharCodeArray(""), []));
     assert.deepStrictEqual(tokens, []);
   });
 
   test("lexes a string with only whitespace as expected", async () => {
-    const tokens = Array.from(lexHTML("   \n", []));
+    const tokens = Array.from(lexHTML(stringToUint16CharCodeArray("   \n"), []));
     assert.deepStrictEqual(tokens, [
       [TOKEN_TYPE.CHILD_CONTENT, "   \n"],
     ] satisfies LexerToken[]);
   });
 
   test("lexes doctype declaration as expected", () => {
-    const tokens = Array.from(lexHTML("<!DOCTYPE html>", []));
+    const tokens = Array.from(lexHTML(stringToUint16CharCodeArray("<!DOCTYPE html>"), []));
     assert.deepStrictEqual(tokens, [
       [TOKEN_TYPE.DOCTYPE, "html"],
     ] satisfies LexerToken[]);
   });
 
   test("lexes a single HTML element as expected", () => {
-    const tokens = Array.from(lexHTML("<div></div>", []));
+    const tokens = Array.from(lexHTML(stringToUint16CharCodeArray("<div></div>"), []));
     assert.deepStrictEqual(tokens, [
       [TOKEN_TYPE.OPENING_TAGNAME, "div"],
       [TOKEN_TYPE.OPENING_TAG_END, false],
@@ -37,7 +37,7 @@ describe("lexHTML", () => {
   });
 
   test("lexes self-closing HTML elements as expected", () => {
-    const tokens = Array.from(lexHTML("<img />", []));
+    const tokens = Array.from(lexHTML(stringToUint16CharCodeArray("<img />"), []));
     assert.deepStrictEqual(tokens, [
       [TOKEN_TYPE.OPENING_TAGNAME, "img"],
       [TOKEN_TYPE.OPENING_TAG_END, true],
@@ -45,7 +45,7 @@ describe("lexHTML", () => {
   });
 
   test("lexes nested HTML elements as expected", () => {
-    const tokens = Array.from(lexHTML("<div><span>Hello, world!</span></div>", []));
+    const tokens = Array.from(lexHTML(stringToUint16CharCodeArray("<div><span>Hello, world!</span></div>"), []));
     assert.deepStrictEqual(tokens, [
       [TOKEN_TYPE.OPENING_TAGNAME, "div"],
       [TOKEN_TYPE.OPENING_TAG_END, false],
@@ -58,7 +58,7 @@ describe("lexHTML", () => {
   });
 
   test("lexes attributes with static values as expected", () => {
-    const tokens = Array.from(lexHTML('<input type="text" disabled>', []));
+    const tokens = Array.from(lexHTML(stringToUint16CharCodeArray('<input type="text" disabled>'), []));
     assert.deepStrictEqual(tokens, [
       [TOKEN_TYPE.OPENING_TAGNAME, "input"],
       [TOKEN_TYPE.ATTR_NAME, "type"],
@@ -70,7 +70,7 @@ describe("lexHTML", () => {
 
   test("lexes self-closing components as expected", () => {
     const MyComponent = () => "hello";
-    const tokens = Array.from(lexHTML(`<${makeDynamicValuePlaceholder(0)} prop1='value1' />`, [MyComponent]));
+    const tokens = Array.from(lexHTML(stringToUint16CharCodeArray(`<${makeDynamicValuePlaceholder(0)} prop1='value1' />`), [MyComponent]));
     assert.deepStrictEqual(tokens, [
       [TOKEN_TYPE.OPENING_TAGNAME, MyComponent],
       [TOKEN_TYPE.ATTR_NAME, "prop1"],
@@ -81,7 +81,7 @@ describe("lexHTML", () => {
 
   test("lexes components with child content as expected", () => {
     const MyComponent = () => "hello";
-    const tokens = Array.from(lexHTML(`<${makeDynamicValuePlaceholder(0)} prop1='value1'>Child content</${makeDynamicValuePlaceholder(1)}>`, [MyComponent, MyComponent]));
+    const tokens = Array.from(lexHTML(stringToUint16CharCodeArray(`<${makeDynamicValuePlaceholder(0)} prop1='value1'>Child content</${makeDynamicValuePlaceholder(1)}>`), [MyComponent, MyComponent]));
     assert.deepStrictEqual(tokens, [
       [TOKEN_TYPE.OPENING_TAGNAME, MyComponent],
       [TOKEN_TYPE.ATTR_NAME, "prop1"],
@@ -94,7 +94,7 @@ describe("lexHTML", () => {
 
   test("lexes components with shorthand closing tags as expected", () => {
     const MyComponent = () => "hello";
-    const tokens = Array.from(lexHTML(`<${makeDynamicValuePlaceholder(0)} prop1='value1'>Child content</>`, [MyComponent]));
+    const tokens = Array.from(lexHTML(stringToUint16CharCodeArray(`<${makeDynamicValuePlaceholder(0)} prop1='value1'>Child content</>`), [MyComponent]));
     assert.deepStrictEqual(tokens, [
       [TOKEN_TYPE.OPENING_TAGNAME, MyComponent],
       [TOKEN_TYPE.ATTR_NAME, "prop1"],
@@ -110,7 +110,14 @@ describe("lexHTML", () => {
     const dynamicValue2 = 0;
     const dynamicValue3 = { foo: "bar" };
 
-    const tokens = Array.from(lexHTML(`<div attr1="${makeDynamicValuePlaceholder(0)}" attr2=${makeDynamicValuePlaceholder(1)} attr3=${makeDynamicValuePlaceholder(2)}>`, [dynamicValue1, dynamicValue2, dynamicValue3]));
+    const tokens = Array.from(lexHTML(
+      stringToUint16CharCodeArray(
+        `<div attr1="${makeDynamicValuePlaceholder(0)
+        }" attr2=${makeDynamicValuePlaceholder(1)
+        } attr3=${makeDynamicValuePlaceholder(2)
+        }>`),
+      [dynamicValue1, dynamicValue2, dynamicValue3],
+    ));
     assert.deepStrictEqual(tokens, [
       [TOKEN_TYPE.OPENING_TAGNAME, "div"],
       [TOKEN_TYPE.ATTR_NAME, "attr1"],
@@ -124,7 +131,11 @@ describe("lexHTML", () => {
   });
 
   test("moves past unescaped characters in text content as expected", () => {
-    const tokens = Array.from(lexHTML("<div>Text with & < > \" ' characters</div>", []));
+    const tokens = Array.from(lexHTML(
+      stringToUint16CharCodeArray(
+        "<div>Text with & < > \" ' characters</div>"
+      ), [],
+    ));
     assert.deepStrictEqual(tokens, [
       [TOKEN_TYPE.OPENING_TAGNAME, "div"],
       [TOKEN_TYPE.OPENING_TAG_END, false],
@@ -140,12 +151,20 @@ describe("lexHTML", () => {
     const dynamicAttrPart1 = "data";
     const dynamicAttrPart2 = 3;
 
-    const tokens = Array.from(lexHTML(`<div
+    const tokens = Array.from(lexHTML(
+      stringToUint16CharCodeArray(
+        `<div
   ${makeDynamicValuePlaceholder(0)}="value1"
   ${makeDynamicValuePlaceholder(1)}="value2"
   ${makeDynamicValuePlaceholder(2)}-part="value3"
   part-${makeDynamicValuePlaceholder(3)}="value4"
->`, [dynamicAttrName1, dynamicAttrName2, dynamicAttrPart1, dynamicAttrPart2]));
+>`,
+      ), [
+      dynamicAttrName1,
+      dynamicAttrName2,
+      dynamicAttrPart1,
+      dynamicAttrPart2,
+    ]));
     assert.deepStrictEqual(tokens, [
       [TOKEN_TYPE.OPENING_TAGNAME, "div"],
       [TOKEN_TYPE.ATTR_NAME, dynamicAttrName1],
@@ -163,7 +182,11 @@ describe("lexHTML", () => {
   test("returns error token for dynamic attribute names which aren't valid attribute names", () => {
     const dynamicAttrName1 = "invalid attribute name";
 
-    const tokens = Array.from(lexHTML(`<div ${makeDynamicValuePlaceholder(0)}="value1">`, [dynamicAttrName1]));
+    const tokens = Array.from(lexHTML(
+      stringToUint16CharCodeArray(
+        `<div ${makeDynamicValuePlaceholder(0)}="value1">`
+      ), [dynamicAttrName1],
+    ));
     assert.deepStrictEqual(tokens, [
       [TOKEN_TYPE.OPENING_TAGNAME, "div"],
       [TOKEN_TYPE.ERROR, new YetiHTMLParsingError(`lexAttributeName received invalid attribute name "${dynamicAttrName1}"`)],
@@ -171,7 +194,11 @@ describe("lexHTML", () => {
 
     const dynamicAttrName2 = { foo: "bar" };
 
-    const tokens2 = Array.from(lexHTML(`<div ${makeDynamicValuePlaceholder(0)}="value1">`, [dynamicAttrName2]));
+    const tokens2 = Array.from(lexHTML(
+      stringToUint16CharCodeArray(
+        `<div ${makeDynamicValuePlaceholder(0)}="value1">`
+      ), [dynamicAttrName2],
+    ));
     assert.deepStrictEqual(tokens2, [
       [TOKEN_TYPE.OPENING_TAGNAME, "div"],
       [TOKEN_TYPE.ERROR, new YetiHTMLParsingError(`lexAttributeName received invalid attribute name "${dynamicAttrName2}"`)],
@@ -181,7 +208,11 @@ describe("lexHTML", () => {
   test("lexes spread attributes as expected", () => {
     const dynamicSpreadValue = { foo: "bar" };
 
-    const tokens = Array.from(lexHTML(`<div attr1="value1" ...="hi" ...${makeDynamicValuePlaceholder(0)} attr2="value2">`, [dynamicSpreadValue]));
+    const tokens = Array.from(lexHTML(
+      stringToUint16CharCodeArray(
+        `<div attr1="value1" ...="hi" ...${makeDynamicValuePlaceholder(0)} attr2="value2">`
+      ), [dynamicSpreadValue],
+    ));
 
     assert.deepStrictEqual(tokens, [
       [TOKEN_TYPE.OPENING_TAGNAME, "div"],
@@ -203,11 +234,11 @@ describe("lexHTML", () => {
     const dynamicTagNamePart1 = "my";
     const dynamicTagNamePart2 = 3;
 
-    const tokens = Array.from(lexHTML(`
+    const tokens = Array.from(lexHTML(stringToUint16CharCodeArray(`
 <${makeDynamicValuePlaceholder(0)}></${makeDynamicValuePlaceholder(1)}>
 <${makeDynamicValuePlaceholder(2)}-tag></${makeDynamicValuePlaceholder(3)}-tag>
 <h${makeDynamicValuePlaceholder(4)}></h${makeDynamicValuePlaceholder(5)}>
-`, [
+`), [
       dynamicTagName1, dynamicTagName1,
       dynamicTagNamePart1, dynamicTagNamePart1,
       dynamicTagNamePart2, dynamicTagNamePart2,
@@ -246,7 +277,7 @@ describe("lexHTML", () => {
 </html>
 `;
 
-    const tokens = Array.from(lexHTML(html, []));
+    const tokens = Array.from(lexHTML(stringToUint16CharCodeArray(html), []));
     assert.deepStrictEqual(tokens, [
       [TOKEN_TYPE.DOCTYPE, "html"],
       [TOKEN_TYPE.CHILD_CONTENT, "\n"],

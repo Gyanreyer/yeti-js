@@ -86,7 +86,7 @@ const appendContentToNode = async (parent: YetiRootNode | YetiElementNode | Open
  * The parser works by first lexing the input HTML string into a stream of tokens using the lexHTML function,
  * and then processing each token to build up the node tree.
  */
-export const parseHTML = async (htmlString: string, dynamicValues: unknown[]): Promise<YetiRootNode> => {
+export const parseHTML = async (htmlStringChars: Uint16Array, dynamicValues: unknown[]): Promise<YetiRootNode> => {
   const rootNode: YetiRootNode = { type: YETI_NODE_TYPE.ROOT, children: [] };
 
   let openParentStack: Array<YetiElementNode | OpenComponentNode> = [];
@@ -124,7 +124,7 @@ export const parseHTML = async (htmlString: string, dynamicValues: unknown[]): P
     return closingParentNode;
   };
 
-  for (const [tokenType, tokenValue] of lexHTML(htmlString, dynamicValues)) {
+  for (const [tokenType, tokenValue] of lexHTML(htmlStringChars, dynamicValues)) {
     switch (tokenType) {
       case TOKEN_TYPE.OPENING_TAGNAME: {
         if (typeof tokenValue === "string") {

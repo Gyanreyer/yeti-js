@@ -114,9 +114,19 @@ export const isValidHTMLAttributeNameCharCodeArray = (attrNameCharCodes: number[
 };
 
 export const appendToCharCodeArray = (charCodes: number[], str: string): void => {
-  for (let i = 0; i < str.length; i++) {
+  const strLen = str.length;
+  for (let i = 0; i < strLen; i++) {
     charCodes.push(str.charCodeAt(i));
   }
+};
+
+export const stringToUint16CharCodeArray = (str: string): Uint16Array => {
+  const strLen = str.length;
+  const charCodes = new Uint16Array(strLen);
+  for (let i = 0; i < strLen; i++) {
+    charCodes[i] = str.charCodeAt(i);
+  }
+  return charCodes;
 };
 
 const VOID_TAG_SET = new Set([

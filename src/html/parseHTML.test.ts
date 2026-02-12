@@ -4,43 +4,43 @@ import assert from "node:assert/strict";
 import { parseHTML } from "./parseHTML.ts";
 import { YETI_NODE_TYPE } from "./types.ts";
 import type { YetiChildNode, YetiNode, YetiRootNode } from "./types.ts";
-import { makeDynamicValuePlaceholder } from "./utils.ts";
+import { makeDynamicValuePlaceholder, stringToUint16CharCodeArray } from "./utils.ts";
 import { YetiHTMLParsingError } from "./error.ts";
 
 describe("parseHTML", () => {
   test("should correctly parse an empty HTML string", async () => {
-    const result = await parseHTML("", []);
-    assert.deepEqual(result, {
+    const result = await parseHTML(stringToUint16CharCodeArray(""), []);
+    assert.deepEqual<YetiRootNode>(result, {
       type: YETI_NODE_TYPE.ROOT,
       children: [],
-    } satisfies YetiRootNode);
+    });
   });
 
   test("should correctly parse a string with only whitespace", async () => {
-    const result = await parseHTML("   \n\t  ", []);
-    assert.deepEqual(result, {
+    const result = await parseHTML(stringToUint16CharCodeArray("   \n\t  "), []);
+    assert.deepEqual<YetiRootNode>(result, {
       type: YETI_NODE_TYPE.ROOT,
       children: [{
         type: YETI_NODE_TYPE.TEXT,
         content: "   \n\t  ",
       }],
-    } satisfies YetiRootNode);
+    });
   });
 
   test("should correctly parse a doctype declaration", async () => {
-    const result = await parseHTML("<!DOCTYPE html>", []);
-    assert.deepEqual(result, {
+    const result = await parseHTML(stringToUint16CharCodeArray("<!DOCTYPE html>"), []);
+    assert.deepEqual<YetiRootNode>(result, {
       type: YETI_NODE_TYPE.ROOT,
       children: [{
         type: YETI_NODE_TYPE.DOCTYPE,
         content: "html",
       }],
-    } satisfies YetiRootNode);
+    });
   });
 
   test("should parse a single HTML element as expected", async () => {
-    const result = await parseHTML("<div></div>", []);
-    assert.deepEqual(result, {
+    const result = await parseHTML(stringToUint16CharCodeArray("<div></div>"), []);
+    assert.deepEqual<YetiRootNode>(result, {
       type: YETI_NODE_TYPE.ROOT,
       children: [{
         type: YETI_NODE_TYPE.ELEMENT,
@@ -48,12 +48,14 @@ describe("parseHTML", () => {
         attributes: {},
         children: [],
       }],
-    } satisfies YetiRootNode);
+    });
   });
 
   test("should parse nested HTML elements correctly", async () => {
-    const result = await parseHTML("<div><span>Text</span></div>", []);
-    assert.deepEqual(result, {
+    const result = await parseHTML(stringToUint16CharCodeArray(
+      "<div><span>Text</span></div>",
+    ), []);
+    assert.deepEqual<YetiRootNode>(result, {
       type: YETI_NODE_TYPE.ROOT,
       children: [{
         type: YETI_NODE_TYPE.ELEMENT,
@@ -69,12 +71,14 @@ describe("parseHTML", () => {
           }],
         }],
       }],
-    } satisfies YetiRootNode);
+    });
   });
 
   test("should parse self-closing tags correctly", async () => {
-    const result = await parseHTML("<div><img src='image.png' /></div>", []);
-    assert.deepEqual(result, {
+    const result = await parseHTML(stringToUint16CharCodeArray(
+      "<div><img src='image.png' /></div>",
+    ), []);
+    assert.deepEqual<YetiRootNode>(result, {
       type: YETI_NODE_TYPE.ROOT,
       children: [{
         type: YETI_NODE_TYPE.ELEMENT,
@@ -87,12 +91,14 @@ describe("parseHTML", () => {
           children: [],
         }],
       }],
-    } satisfies YetiRootNode);
+    });
   });
 
   test("should handle void elements correctly", async () => {
-    const result = await parseHTML("<area><base><br><col><embed><hr><img><input><link><meta><param><source><track><wbr>", []);
-    assert.deepEqual(result, {
+    const result = await parseHTML(stringToUint16CharCodeArray(
+      "<area><base><br><col><embed><hr><img><input><link><meta><param><source><track><wbr>"
+    ), []);
+    assert.deepEqual<YetiRootNode>(result, {
       type: YETI_NODE_TYPE.ROOT,
       children: [
         { type: YETI_NODE_TYPE.ELEMENT, tagName: "area", attributes: {}, children: [] },
@@ -110,12 +116,14 @@ describe("parseHTML", () => {
         { type: YETI_NODE_TYPE.ELEMENT, tagName: "track", attributes: {}, children: [] },
         { type: YETI_NODE_TYPE.ELEMENT, tagName: "wbr", attributes: {}, children: [] },
       ],
-    } satisfies YetiRootNode);
+    });
   });
 
   test("should parse elements with attributes correctly", async () => {
-    const result = await parseHTML("<a href='https://example.com' target='_blank' data-bool>Link</a>", []);
-    assert.deepEqual(result, {
+    const result = await parseHTML(stringToUint16CharCodeArray(
+      "<a href='https://example.com' target='_blank' data-bool>Link</a>"
+    ), []);
+    assert.deepEqual<YetiRootNode>(result, {
       type: YETI_NODE_TYPE.ROOT,
       children: [{
         type: YETI_NODE_TYPE.ELEMENT,
@@ -126,18 +134,20 @@ describe("parseHTML", () => {
           content: "Link",
         }],
       }],
-    } satisfies YetiRootNode);
+    });
   });
 
   test("should parse comments correctly", async () => {
-    const result = await parseHTML("<!-- This is a comment -->", []);
-    assert.deepEqual(result, {
+    const result = await parseHTML(stringToUint16CharCodeArray(
+      "<!-- This is a comment -->",
+    ), []);
+    assert.deepEqual<YetiRootNode>(result, {
       type: YETI_NODE_TYPE.ROOT,
       children: [{
         type: YETI_NODE_TYPE.COMMENT,
         content: "This is a comment",
       }],
-    } satisfies YetiRootNode);
+    });
   });
 
   test("should parse a component correctly", async () => {
@@ -159,12 +169,14 @@ describe("parseHTML", () => {
       ],
     });
 
-    const result = await parseHTML(`<${makeDynamicValuePlaceholder(0)} title='Hello'><p>World</p></${makeDynamicValuePlaceholder(1)}>`, [
+    const result = await parseHTML(stringToUint16CharCodeArray(
+      `<${makeDynamicValuePlaceholder(0)} title='Hello'><p>World</p></${makeDynamicValuePlaceholder(1)}>`,
+    ), [
       component,
       component,
     ]);
 
-    assert.deepEqual(result, {
+    assert.deepEqual<YetiRootNode>(result, {
       type: YETI_NODE_TYPE.ROOT,
       children: [
         {
@@ -190,7 +202,7 @@ describe("parseHTML", () => {
           ],
         },
       ],
-    } satisfies YetiRootNode);
+    });
   });
 
   test("should handle self-closing components", async () => {
@@ -211,11 +223,13 @@ describe("parseHTML", () => {
       ],
     });
 
-    const result = await parseHTML(`<${makeDynamicValuePlaceholder(0)} title='Hello' /><div>Next</div>`, [
+    const result = await parseHTML(stringToUint16CharCodeArray(
+      `<${makeDynamicValuePlaceholder(0)} title='Hello' /><div>Next</div>`,
+    ), [
       component,
     ]);
 
-    assert.deepEqual(result, {
+    assert.deepEqual<YetiRootNode>(result, {
       type: YETI_NODE_TYPE.ROOT,
       children: [
         {
@@ -241,7 +255,7 @@ describe("parseHTML", () => {
           ],
         },
       ],
-    } satisfies YetiRootNode);
+    });
   });
 
   test("should handle async components that return promises as children", async () => {
@@ -265,11 +279,13 @@ describe("parseHTML", () => {
       });
     };
 
-    const result = await parseHTML(`<${makeDynamicValuePlaceholder(0)} title='Async Component' /><div>After</div>`, [
+    const result = await parseHTML(stringToUint16CharCodeArray(
+      `<${makeDynamicValuePlaceholder(0)} title='Async Component' /><div>After</div>`,
+    ), [
       asyncComponent,
     ]);
 
-    assert.deepEqual(result, {
+    assert.deepEqual<YetiRootNode>(result, {
       type: YETI_NODE_TYPE.ROOT,
       children: [
         {
@@ -295,12 +311,14 @@ describe("parseHTML", () => {
           ],
         },
       ],
-    } satisfies YetiRootNode);
+    });
   });
 
   test("should handle unclosed tags gracefully", async () => {
-    const result = await parseHTML("<div><span>Text</div>", []);
-    assert.deepEqual(result, {
+    const result = await parseHTML(stringToUint16CharCodeArray(
+      "<div><span>Text</div>",
+    ), []);
+    assert.deepEqual<YetiRootNode>(result, {
       type: YETI_NODE_TYPE.ROOT,
       children: [{
         type: YETI_NODE_TYPE.ELEMENT,
@@ -316,7 +334,7 @@ describe("parseHTML", () => {
           }],
         }],
       }],
-    } satisfies YetiRootNode);
+    });
   });
 
   test("should handle fragment closing tags correctly", async () => {
@@ -333,11 +351,13 @@ describe("parseHTML", () => {
       ],
     });
 
-    const result = await parseHTML(`<${makeDynamicValuePlaceholder(0)}><p>Paragraph 1</><p>Paragraph 2</></><div>After</>`, [
+    const result = await parseHTML(stringToUint16CharCodeArray(
+      `<${makeDynamicValuePlaceholder(0)}><p>Paragraph 1</><p>Paragraph 2</></><div>After</>`,
+    ), [
       component,
     ]);
 
-    assert.deepEqual(result, {
+    assert.deepEqual<YetiRootNode>(result, {
       type: YETI_NODE_TYPE.ROOT,
       children: [
         {
@@ -381,7 +401,7 @@ describe("parseHTML", () => {
           ],
         },
       ],
-    } satisfies YetiRootNode);
+    });
   });
 
   test("should handle spread attributes correctly", async () => {
@@ -392,8 +412,10 @@ describe("parseHTML", () => {
       "data-value": "123",
     };
 
-    const result = await parseHTML(`<button data-value="abc" ...${makeDynamicValuePlaceholder(0)} disabled=${makeDynamicValuePlaceholder(1)}></button>`, [attrs, false]);
-    assert.deepEqual(result, {
+    const result = await parseHTML(stringToUint16CharCodeArray(
+      `<button data-value="abc" ...${makeDynamicValuePlaceholder(0)} disabled=${makeDynamicValuePlaceholder(1)}></button>`,
+    ), [attrs, false]);
+    assert.deepEqual<YetiRootNode>(result, {
       type: YETI_NODE_TYPE.ROOT,
       children: [{
         type: YETI_NODE_TYPE.ELEMENT,
@@ -408,13 +430,15 @@ describe("parseHTML", () => {
         },
         children: [],
       }],
-    } satisfies YetiRootNode);
+    });
   });
 
   test("should unwrap iterable child content as expected", async () => {
     // An array should be unwrapped
-    let result = await parseHTML(`<div>Items: ${makeDynamicValuePlaceholder(0)}</div>`, [[1, 2, 3]]);
-    assert.deepEqual(result, {
+    let result = await parseHTML(stringToUint16CharCodeArray(
+      `<div>Items: ${makeDynamicValuePlaceholder(0)}</div>`,
+    ), [[1, 2, 3]]);
+    assert.deepEqual<YetiRootNode>(result, {
       type: YETI_NODE_TYPE.ROOT,
       children: [{
         type: YETI_NODE_TYPE.ELEMENT,
@@ -439,11 +463,11 @@ describe("parseHTML", () => {
           },
         ],
       }],
-    } satisfies YetiRootNode);
+    });
 
     // A Set should be unwrapped
-    result = await parseHTML(`<div>Items: ${makeDynamicValuePlaceholder(0)}</div>`, [new Set(["a", "b", "c"])]);
-    assert.deepEqual(result, {
+    result = await parseHTML(stringToUint16CharCodeArray(`<div>Items: ${makeDynamicValuePlaceholder(0)}</div>`), [new Set(["a", "b", "c"])]);
+    assert.deepEqual<YetiRootNode>(result, {
       type: YETI_NODE_TYPE.ROOT,
       children: [{
         type: YETI_NODE_TYPE.ELEMENT,
@@ -468,7 +492,7 @@ describe("parseHTML", () => {
           },
         ],
       }],
-    } satisfies YetiRootNode);
+    });
 
     // A generator should be unwrapped
     function* generator() {
@@ -476,8 +500,8 @@ describe("parseHTML", () => {
       yield "y";
       yield "z";
     }
-    result = await parseHTML(`<div>Items: ${makeDynamicValuePlaceholder(0)}</div>`, [generator]);
-    assert.deepEqual(result, {
+    result = await parseHTML(stringToUint16CharCodeArray(`<div>Items: ${makeDynamicValuePlaceholder(0)}</div>`), [generator]);
+    assert.deepEqual<YetiRootNode>(result, {
       type: YETI_NODE_TYPE.ROOT,
       children: [{
         type: YETI_NODE_TYPE.ELEMENT,
@@ -510,8 +534,8 @@ describe("parseHTML", () => {
       yield "2";
       yield "3";
     }
-    result = await parseHTML(`<div>Items: ${makeDynamicValuePlaceholder(0)}</div>`, [asyncGenerator]);
-    assert.deepEqual(result, {
+    result = await parseHTML(stringToUint16CharCodeArray(`<div>Items: ${makeDynamicValuePlaceholder(0)}</div>`), [asyncGenerator]);
+    assert.deepEqual<YetiRootNode>(result, {
       type: YETI_NODE_TYPE.ROOT,
       children: [{
         type: YETI_NODE_TYPE.ELEMENT,
@@ -536,13 +560,13 @@ describe("parseHTML", () => {
           },
         ],
       }],
-    } satisfies YetiRootNode);
+    });
   });
 
   test("should stringify non-YetiNode object in child content to [object Object] by default", async () => {
     const obj = { a: 1, b: 2 };
-    const result = await parseHTML(`<div>Object: ${makeDynamicValuePlaceholder(0)}</div>`, [obj]);
-    assert.deepEqual(result, {
+    const result = await parseHTML(stringToUint16CharCodeArray(`<div>Object: ${makeDynamicValuePlaceholder(0)}</div>`), [obj]);
+    assert.deepEqual<YetiRootNode>(result, {
       type: YETI_NODE_TYPE.ROOT,
       children: [{
         type: YETI_NODE_TYPE.ELEMENT,
@@ -559,14 +583,14 @@ describe("parseHTML", () => {
           },
         ],
       }],
-    } satisfies YetiRootNode, "Non-YetiNode objects should be stringified to [object Object] by default");
+    }, "Non-YetiNode objects should be stringified to [object Object] by default");
   });
 
   test("should escape special characters in text content", async () => {
-    const result = await parseHTML(`<div>Special chars: & < > ${makeDynamicValuePlaceholder(0)}</div>`, [
+    const result = await parseHTML(stringToUint16CharCodeArray(`<div>Special chars: & < > ${makeDynamicValuePlaceholder(0)}</div>`), [
       "& < > \" '",
     ]);
-    assert.deepEqual(result, {
+    assert.deepEqual<YetiRootNode>(result, {
       type: YETI_NODE_TYPE.ROOT,
       children: [{
         type: YETI_NODE_TYPE.ELEMENT,
@@ -584,14 +608,14 @@ describe("parseHTML", () => {
           }
         ],
       }],
-    } satisfies YetiRootNode, "Special characters in text content should be escaped");
+    }, "Special characters in text content should be escaped");
   });
 
   test("should skip null, undefined, or empty string values in child content", async () => {
-    const result = await parseHTML(`<div>Values: ${makeDynamicValuePlaceholder(0)}</div>`, [
+    const result = await parseHTML(stringToUint16CharCodeArray(`<div>Values: ${makeDynamicValuePlaceholder(0)}</div>`), [
       [null, undefined, "", "Valid String"],
     ]);
-    assert.deepEqual(result, {
+    assert.deepEqual<YetiRootNode>(result, {
       type: YETI_NODE_TYPE.ROOT,
       children: [{
         type: YETI_NODE_TYPE.ELEMENT,
@@ -608,13 +632,13 @@ describe("parseHTML", () => {
           }
         ],
       }],
-    } satisfies YetiRootNode, "Null, undefined, or empty string values in child content should be skipped");
+    }, "Null, undefined, or empty string values in child content should be skipped");
   });
 
   test("should unwrap promises in child content", async () => {
     const promise = Promise.resolve("Resolved Value");
-    const result = await parseHTML(`<div>Promise: ${makeDynamicValuePlaceholder(0)}</div>`, [promise]);
-    assert.deepEqual(result, {
+    const result = await parseHTML(stringToUint16CharCodeArray(`<div>Promise: ${makeDynamicValuePlaceholder(0)}</div>`), [promise]);
+    assert.deepEqual<YetiRootNode>(result, {
       type: YETI_NODE_TYPE.ROOT,
       children: [{
         type: YETI_NODE_TYPE.ELEMENT,
@@ -631,13 +655,13 @@ describe("parseHTML", () => {
           },
         ],
       }],
-    } satisfies YetiRootNode, "Promises in child content should be unwrapped to their resolved values");
+    }, "Promises in child content should be unwrapped to their resolved values");
   });
 
   test("should parse dynamic attribute names correctly", async () => {
     const dynamicAttrName = "data-dynamic";
-    let result = await parseHTML(`<div ${makeDynamicValuePlaceholder(0)}="value"></div>`, [dynamicAttrName]);
-    assert.deepEqual(result, {
+    let result = await parseHTML(stringToUint16CharCodeArray(`<div ${makeDynamicValuePlaceholder(0)}="value"></div>`), [dynamicAttrName]);
+    assert.deepEqual<YetiRootNode>(result, {
       type: YETI_NODE_TYPE.ROOT,
       children: [{
         type: YETI_NODE_TYPE.ELEMENT,
@@ -647,10 +671,10 @@ describe("parseHTML", () => {
         },
         children: [],
       }],
-    } satisfies YetiRootNode, "The attribute should have been parsed with the dynamic 'data-dynamic' name.");
+    }, "The attribute should have been parsed with the dynamic 'data-dynamic' name.");
 
     await assert.rejects(
-      () => parseHTML(`<div ${makeDynamicValuePlaceholder(0)}="value"></div>`, ["invalid attr name"]),
+      () => parseHTML(stringToUint16CharCodeArray(`<div ${makeDynamicValuePlaceholder(0)}="value"></div>`), ["invalid attr name"]),
       new YetiHTMLParsingError(`lexAttributeName received invalid attribute name "invalid attr name"`),
       "Invalid dynamic attribute names should throw a YetiHTMLParsingError",
     );
@@ -658,8 +682,8 @@ describe("parseHTML", () => {
 
   test("should handle dynamic attribute values correctly", async () => {
     const url = "https://example.com";
-    const result = await parseHTML(`<a href=${makeDynamicValuePlaceholder(0)}>Link</a>`, [url]);
-    assert.deepEqual(result, {
+    const result = await parseHTML(stringToUint16CharCodeArray(`<a href=${makeDynamicValuePlaceholder(0)}>Link</a>`), [url]);
+    assert.deepEqual<YetiRootNode>(result, {
       type: YETI_NODE_TYPE.ROOT,
       children: [{
         type: YETI_NODE_TYPE.ELEMENT,
@@ -670,13 +694,13 @@ describe("parseHTML", () => {
           content: "Link",
         }],
       }],
-    } satisfies YetiRootNode);
+    });
   });
 
   test("should handle function-based child content", async () => {
     const fn = () => "Function Result";
-    const result = await parseHTML(`<div>${makeDynamicValuePlaceholder(0)}</div>`, [fn]);
-    assert.deepEqual(result, {
+    const result = await parseHTML(stringToUint16CharCodeArray(`<div>${makeDynamicValuePlaceholder(0)}</div>`), [fn]);
+    assert.deepEqual<YetiRootNode>(result, {
       type: YETI_NODE_TYPE.ROOT,
       children: [{
         type: YETI_NODE_TYPE.ELEMENT,
@@ -687,7 +711,7 @@ describe("parseHTML", () => {
           content: "Function Result",
         }],
       }],
-    } satisfies YetiRootNode);
+    });
   });
 
   test("should handle async function-based child content", async () => {
@@ -695,8 +719,8 @@ describe("parseHTML", () => {
       await new Promise(resolve => setTimeout(resolve, 10));
       return "Async Function Result";
     };
-    const result = await parseHTML(`<div>${makeDynamicValuePlaceholder(0)}</div>`, [asyncFn]);
-    assert.deepEqual(result, {
+    const result = await parseHTML(stringToUint16CharCodeArray(`<div>${makeDynamicValuePlaceholder(0)}</div>`), [asyncFn]);
+    assert.deepEqual<YetiRootNode>(result, {
       type: YETI_NODE_TYPE.ROOT,
       children: [{
         type: YETI_NODE_TYPE.ELEMENT,
@@ -707,7 +731,7 @@ describe("parseHTML", () => {
           content: "Async Function Result",
         }],
       }],
-    } satisfies YetiRootNode);
+    });
   });
 
   test("should throw error when function in child content throws", async () => {
@@ -715,7 +739,7 @@ describe("parseHTML", () => {
       throw new Error("Function error");
     };
     await assert.rejects(
-      () => parseHTML(`<div>${makeDynamicValuePlaceholder(0)}</div>`, [throwingFn]),
+      () => parseHTML(stringToUint16CharCodeArray(`<div>${makeDynamicValuePlaceholder(0)}</div>`), [throwingFn]),
       new YetiHTMLParsingError("An error occurred while executing inlined function in HTML"),
       "Functions that throw should propagate errors wrapped in YetiHTMLParsingError",
     );
@@ -737,8 +761,8 @@ describe("parseHTML", () => {
       },
     ];
 
-    const result = await parseHTML(`<${makeDynamicValuePlaceholder(0)} />`, [component]);
-    assert.deepEqual(result, {
+    const result = await parseHTML(stringToUint16CharCodeArray(`<${makeDynamicValuePlaceholder(0)} />`), [component]);
+    assert.deepEqual<YetiRootNode>(result, {
       type: YETI_NODE_TYPE.ROOT,
       children: [
         {
@@ -754,19 +778,19 @@ describe("parseHTML", () => {
           children: [{ type: YETI_NODE_TYPE.TEXT, content: "Content" }],
         },
       ],
-    } satisfies YetiRootNode);
+    });
   });
 
   test("should handle component that returns a primitive value", async () => {
     const component = () => "Simple String";
-    const result = await parseHTML(`<${makeDynamicValuePlaceholder(0)} />`, [component]);
-    assert.deepEqual(result, {
+    const result = await parseHTML(stringToUint16CharCodeArray(`<${makeDynamicValuePlaceholder(0)} />`), [component]);
+    assert.deepEqual<YetiRootNode>(result, {
       type: YETI_NODE_TYPE.ROOT,
       children: [{
         type: YETI_NODE_TYPE.TEXT,
         content: "Simple String",
       }],
-    } satisfies YetiRootNode);
+    });
   });
 
   test("should handle nested components", async () => {
@@ -794,11 +818,11 @@ describe("parseHTML", () => {
     });
 
     const result = await parseHTML(
-      `<${makeDynamicValuePlaceholder(0)} title='Outer'><${makeDynamicValuePlaceholder(1)} text='Inner' /></>`,
+      stringToUint16CharCodeArray(`<${makeDynamicValuePlaceholder(0)} title='Outer'><${makeDynamicValuePlaceholder(1)} text='Inner' /></>`),
       [OuterComponent, InnerComponent]
     );
 
-    assert.deepEqual(result, {
+    assert.deepEqual<YetiRootNode>(result, {
       type: YETI_NODE_TYPE.ROOT,
       children: [{
         type: YETI_NODE_TYPE.ELEMENT,
@@ -816,12 +840,12 @@ describe("parseHTML", () => {
           },
         ],
       }],
-    } satisfies YetiRootNode);
+    });
   });
 
   test("should handle multiple root-level elements", async () => {
-    const result = await parseHTML("<div>First</div><span>Second</span><p>Third</p>", []);
-    assert.deepEqual(result, {
+    const result = await parseHTML(stringToUint16CharCodeArray("<div>First</div><span>Second</span><p>Third</p>"), []);
+    assert.deepEqual<YetiRootNode>(result, {
       type: YETI_NODE_TYPE.ROOT,
       children: [
         {
@@ -843,15 +867,15 @@ describe("parseHTML", () => {
           children: [{ type: YETI_NODE_TYPE.TEXT, content: "Third" }],
         },
       ],
-    } satisfies YetiRootNode);
+    });
   });
 
   test("should handle deeply nested elements", async () => {
     const result = await parseHTML(
-      "<div><div><div><div><span>Deep</span></div></div></div></div>",
+      stringToUint16CharCodeArray("<div><div><div><div><span>Deep</span></div></div></div></div>"),
       []
     );
-    assert.deepEqual(result, {
+    assert.deepEqual<YetiRootNode>(result, {
       type: YETI_NODE_TYPE.ROOT,
       children: [{
         type: YETI_NODE_TYPE.ELEMENT,
@@ -879,12 +903,12 @@ describe("parseHTML", () => {
           }],
         }],
       }],
-    } satisfies YetiRootNode);
+    });
   });
 
   test("should handle mixed text and element children", async () => {
-    const result = await parseHTML("<div>Before<span>Inside</span>After</div>", []);
-    assert.deepEqual(result, {
+    const result = await parseHTML(stringToUint16CharCodeArray("<div>Before<span>Inside</span>After</div>"), []);
+    assert.deepEqual<YetiRootNode>(result, {
       type: YETI_NODE_TYPE.ROOT,
       children: [{
         type: YETI_NODE_TYPE.ELEMENT,
@@ -901,15 +925,15 @@ describe("parseHTML", () => {
           { type: YETI_NODE_TYPE.TEXT, content: "After" },
         ],
       }],
-    } satisfies YetiRootNode);
+    });
   });
 
   test("should handle numbers and booleans as child content", async () => {
     const result = await parseHTML(
-      `<div>Number: ${makeDynamicValuePlaceholder(0)}, Boolean: ${makeDynamicValuePlaceholder(1)}</div>`,
+      stringToUint16CharCodeArray(`<div>Number: ${makeDynamicValuePlaceholder(0)}, Boolean: ${makeDynamicValuePlaceholder(1)}</div>`),
       [42, true]
     );
-    assert.deepEqual(result, {
+    assert.deepEqual<YetiRootNode>(result, {
       type: YETI_NODE_TYPE.ROOT,
       children: [{
         type: YETI_NODE_TYPE.ELEMENT,
@@ -922,15 +946,15 @@ describe("parseHTML", () => {
           { type: YETI_NODE_TYPE.TEXT, content: "true" },
         ],
       }],
-    } satisfies YetiRootNode);
+    });
   });
 
   test("should handle spread attributes with null and undefined", async () => {
     const result = await parseHTML(
-      `<div ...${makeDynamicValuePlaceholder(0)} ...${makeDynamicValuePlaceholder(1)} class="valid"></div>`,
+      stringToUint16CharCodeArray(`<div ...${makeDynamicValuePlaceholder(0)} ...${makeDynamicValuePlaceholder(1)} class="valid"></div>`),
       [null, undefined]
     );
-    assert.deepEqual(result, {
+    assert.deepEqual<YetiRootNode>(result, {
       type: YETI_NODE_TYPE.ROOT,
       children: [{
         type: YETI_NODE_TYPE.ELEMENT,
@@ -938,18 +962,18 @@ describe("parseHTML", () => {
         attributes: { class: "valid" },
         children: [],
       }],
-    } satisfies YetiRootNode);
+    });
   });
 
   test("should throw error for spread attributes with primitive values", async () => {
     await assert.rejects(
-      () => parseHTML(`<div ...${makeDynamicValuePlaceholder(0)}></div>`, ["string"]),
+      () => parseHTML(stringToUint16CharCodeArray(`<div ...${makeDynamicValuePlaceholder(0)}></div>`), ["string"]),
       new YetiHTMLParsingError("Received invalid SPREAD_ATTR token: Token value must be an object"),
       "Spread attributes must be objects",
     );
 
     await assert.rejects(
-      () => parseHTML(`<div ...${makeDynamicValuePlaceholder(0)}></div>`, [123]),
+      () => parseHTML(stringToUint16CharCodeArray(`<div ...${makeDynamicValuePlaceholder(0)}></div>`), [123]),
       new YetiHTMLParsingError("Received invalid SPREAD_ATTR token: Token value must be an object"),
       "Spread attributes must be objects",
     );
@@ -963,8 +987,8 @@ describe("parseHTML", () => {
       children: [{ type: YETI_NODE_TYPE.TEXT, content: "Dynamic Node" }],
     };
 
-    const result = await parseHTML(`<div>${makeDynamicValuePlaceholder(0)}</div>`, [yetiNode]);
-    assert.deepEqual(result, {
+    const result = await parseHTML(stringToUint16CharCodeArray(`<div>${makeDynamicValuePlaceholder(0)}</div>`), [yetiNode]);
+    assert.deepEqual<YetiRootNode>(result, {
       type: YETI_NODE_TYPE.ROOT,
       children: [{
         type: YETI_NODE_TYPE.ELEMENT,
@@ -977,7 +1001,7 @@ describe("parseHTML", () => {
           children: [{ type: YETI_NODE_TYPE.TEXT, content: "Dynamic Node" }],
         }],
       }],
-    } satisfies YetiRootNode);
+    });
   });
 
   test("should handle YetiRootNode as child content by unwrapping children", async () => {
@@ -989,8 +1013,8 @@ describe("parseHTML", () => {
       ],
     };
 
-    const result = await parseHTML(`<div>${makeDynamicValuePlaceholder(0)}</div>`, [yetiRootNode]);
-    assert.deepEqual(result, {
+    const result = await parseHTML(stringToUint16CharCodeArray(`<div>${makeDynamicValuePlaceholder(0)}</div>`), [yetiRootNode]);
+    assert.deepEqual<YetiRootNode>(result, {
       type: YETI_NODE_TYPE.ROOT,
       children: [{
         type: YETI_NODE_TYPE.ELEMENT,
@@ -1001,15 +1025,15 @@ describe("parseHTML", () => {
           { type: YETI_NODE_TYPE.ELEMENT, tagName: "p", attributes: {}, children: [] },
         ],
       }],
-    } satisfies YetiRootNode);
+    });
   });
 
   test("should handle complex document with DOCTYPE, comments, and elements", async () => {
     const result = await parseHTML(
-      "<!DOCTYPE html><!-- Header comment --><html><head><title>Test</title></head><body><!-- Body comment --><h1>Title</h1></body></html>",
+      stringToUint16CharCodeArray("<!DOCTYPE html><!-- Header comment --><html><head><title>Test</title></head><body><!-- Body comment --><h1>Title</h1></body></html>"),
       []
     );
-    assert.deepEqual(result, {
+    assert.deepEqual<YetiRootNode>(result, {
       type: YETI_NODE_TYPE.ROOT,
       children: [
         { type: YETI_NODE_TYPE.DOCTYPE, content: "html" },
@@ -1047,12 +1071,12 @@ describe("parseHTML", () => {
           ],
         },
       ],
-    } satisfies YetiRootNode);
+    });
   });
 
   test("should handle mismatched closing tags by closing until match found", async () => {
-    const result = await parseHTML("<div><span><p>Text</div><section>After</section>", []);
-    assert.deepEqual(result, {
+    const result = await parseHTML(stringToUint16CharCodeArray("<div><span><p>Text</div><section>After</section>"), []);
+    assert.deepEqual<YetiRootNode>(result, {
       type: YETI_NODE_TYPE.ROOT,
       children: [
         {
@@ -1078,12 +1102,12 @@ describe("parseHTML", () => {
           children: [{ type: YETI_NODE_TYPE.TEXT, content: "After" }],
         },
       ],
-    } satisfies YetiRootNode);
+    });
   });
 
   test("should auto-close all unclosed tags at end of document", async () => {
-    const result = await parseHTML("<div><span><p>Text", []);
-    assert.deepEqual(result, {
+    const result = await parseHTML(stringToUint16CharCodeArray("<div><span><p>Text"), []);
+    assert.deepEqual<YetiRootNode>(result, {
       type: YETI_NODE_TYPE.ROOT,
       children: [{
         type: YETI_NODE_TYPE.ELEMENT,
@@ -1101,7 +1125,7 @@ describe("parseHTML", () => {
           }],
         }],
       }],
-    } satisfies YetiRootNode);
+    });
   });
 
   test("should handle arrays containing YetiNodes in child content", async () => {
@@ -1110,8 +1134,8 @@ describe("parseHTML", () => {
       { type: YETI_NODE_TYPE.ELEMENT, tagName: "li", attributes: {}, children: [{ type: YETI_NODE_TYPE.TEXT, content: "Item 2" }] },
     ];
 
-    const result = await parseHTML(`<ul>${makeDynamicValuePlaceholder(0)}</ul>`, [nodes]);
-    assert.deepEqual(result, {
+    const result = await parseHTML(stringToUint16CharCodeArray(`<ul>${makeDynamicValuePlaceholder(0)}</ul>`), [nodes]);
+    assert.deepEqual<YetiRootNode>(result, {
       type: YETI_NODE_TYPE.ROOT,
       children: [{
         type: YETI_NODE_TYPE.ELEMENT,
@@ -1122,7 +1146,7 @@ describe("parseHTML", () => {
           { type: YETI_NODE_TYPE.ELEMENT, tagName: "li", attributes: {}, children: [{ type: YETI_NODE_TYPE.TEXT, content: "Item 2" }] },
         ],
       }],
-    } satisfies YetiRootNode);
+    });
   });
 
   test("should handle component children being passed correctly", async () => {
@@ -1136,11 +1160,11 @@ describe("parseHTML", () => {
     });
 
     const result = await parseHTML(
-      `<${makeDynamicValuePlaceholder(0)}><p>Child 1</p><p>Child 2</p></${makeDynamicValuePlaceholder(1)}>`,
+      stringToUint16CharCodeArray(`<${makeDynamicValuePlaceholder(0)}><p>Child 1</p><p>Child 2</p></${makeDynamicValuePlaceholder(1)}>`),
       [Wrapper, Wrapper]
     );
 
-    assert.deepEqual(result, {
+    assert.deepEqual<YetiRootNode>(result, {
       type: YETI_NODE_TYPE.ROOT,
       children: [
         { type: YETI_NODE_TYPE.ELEMENT, tagName: "header", attributes: {}, children: [] },
@@ -1148,6 +1172,6 @@ describe("parseHTML", () => {
         { type: YETI_NODE_TYPE.ELEMENT, tagName: "p", attributes: {}, children: [{ type: YETI_NODE_TYPE.TEXT, content: "Child 2" }] },
         { type: YETI_NODE_TYPE.ELEMENT, tagName: "footer", attributes: {}, children: [] },
       ],
-    } satisfies YetiRootNode);
+    });
   });
 });

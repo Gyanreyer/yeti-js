@@ -57,19 +57,16 @@ const NO_DYNAMIC_VALUE = Symbol("NO_DYNAMIC_VALUE");
 
 type LexerContext = {
   /**
-   * Peeks ahead in the input string without advancing the current position.
+   * Peeks ahead to a single char code in the input string without advancing the current position.
    *
-   * @param  {number} [peekLength=1] - The number of characters to peek ahead.
    * @param {number} [peekOffset=0] - The number of characters to offset from the current position for the peek.
    *
    * @example
    * ```ts
-   * ctx.peek(); // Peeks the next character from the current position
-   * ctx.peek(5); // Peeks the next 5 characters from the current position
-   * ctx.peek(2, 3); // Peeks 2 characters starting from 3 characters ahead of the current position
+   * ctx.peekCharCode(); // Peeks the next character from the current position
+   * ctx.peekCharCode(5); // Peeks the character 5 characters from the current position
    * ```
    */
-  peek(peekLength: number, peekOffset?: number): string;
   peekCharCode(peekOffset?: number): number;
   /**
    * Peeks ahead to check for a dynamic value placeholder and returns metadata for the corresponding dynamic value if found.
@@ -78,6 +75,7 @@ type LexerContext = {
    * @returns The dynamic value, or NO_DYNAMIC_VALUE symbol if no dynamic value placeholder is found.
    */
   peekDynamicValue(peekOffset?: number): unknown | typeof NO_DYNAMIC_VALUE;
+  matchSequence(sequence: string, offset?: number): boolean;
   advance(advanceLength?: number): void;
   isAtEnd(): boolean;
 }
@@ -110,7 +108,7 @@ const lexTextContent: LexerFunction<"CHILD_CONTENT" | "ERROR"> = function* (ctx)
             break;
           }
 
-          if (ctx.peek(7, 2) === "DOCTYPE") {
+          if (ctx.matchSequence("DOCTYPE", 2)) {
             // Matches "<!DOCTYPE", transition to doctype
             nextLexerFunction = lexDoctype;
             break;
@@ -506,7 +504,7 @@ const lexOpeningTagEnd: LexerFunction<"OPENING_TAG_END" | "ERROR"> = function* (
     ctx.advance(2); // Consume the "/>"
   } else {
     // We should never get here because lexOpeningTagname should only transition to this lexer function if it sees a ">" or "/>" character, but we'll include an error case just in case.
-    yield [TOKEN_TYPE.ERROR, new YetiHTMLParsingError(`lexOpeningTagEnd expected ">" or "/>" but found "${ctx.peek(2)}"`)];
+    yield [TOKEN_TYPE.ERROR, new YetiHTMLParsingError(`lexOpeningTagEnd expected ">" or "/>" but found "${String.fromCharCode(nextCharCode)}".`)];
     return null;
   }
 
@@ -583,7 +581,7 @@ const lexClosingTag: LexerFunction<"CLOSING_TAGNAME" | "ERROR"> = function* (ctx
  * Yields tuples for tokens as they are parsed, where the first item is the token type
  * and the second item is the token value (e.g., `[TOKEN_TYPE.OPENING_TAGNAME, "div"]`)
  *
- * @param htmlString - The HTML string to lex
+ * @param htmlStringChars - The HTML string to lex
  * @param dynamicValues - Array of dynamic values that can be referenced via placeholder character sequences in the HTML
  *
  * @example
@@ -593,28 +591,36 @@ const lexClosingTag: LexerFunction<"CLOSING_TAGNAME" | "ERROR"> = function* (ctx
  * }
  * ```
  */
-export function* lexHTML(htmlString: string, dynamicValues: unknown[]): Generator<LexerToken, void, void> {
-  const htmlStringLength = htmlString.length;
+export function* lexHTML(htmlStringChars: Uint16Array, dynamicValues: unknown[]): Generator<LexerToken, void, void> {
+  const htmlStringLength = htmlStringChars.length;
 
   let charIndex = 0;
 
   const lexerContext: LexerContext = {
-    peek(peekLength = 1, peekOffset = 0) {
-      const startIndex = charIndex + peekOffset;
-      return htmlString.slice(startIndex, startIndex + peekLength);
-    },
     peekCharCode(peekOffset = 0) {
-      return htmlString.charCodeAt(charIndex + peekOffset);
+      return htmlStringChars[charIndex + peekOffset];
     },
     peekDynamicValue(peekOffset = 0) {
       if (this.peekCharCode(peekOffset) !== CHAR_CODE_DYNAMIC_VALUE_PLACEHOLDER) {
         return NO_DYNAMIC_VALUE;
       }
 
-      const dynamicValueIndex = htmlString.charCodeAt(charIndex + peekOffset + 1);
+      const dynamicValueIndex = htmlStringChars[charIndex + peekOffset + 1];
       const dynamicValue = dynamicValues[dynamicValueIndex];
 
       return dynamicValue;
+    },
+    matchSequence(sequence: string, offset = 0) {
+      const seqLength = sequence.length;
+      const startIndex = charIndex + offset;
+
+      for (let i = 0; i < seqLength; i++) {
+        if (htmlStringChars[startIndex + i] !== sequence.charCodeAt(i)) {
+          return false;
+        }
+      }
+
+      return true;
     },
     advance(advanceLength = 1) {
       charIndex += advanceLength;
