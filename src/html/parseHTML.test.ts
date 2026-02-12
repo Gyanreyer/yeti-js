@@ -447,19 +447,7 @@ describe("parseHTML", () => {
         children: [
           {
             type: YETI_NODE_TYPE.TEXT,
-            content: "Items: ",
-          },
-          {
-            type: YETI_NODE_TYPE.TEXT,
-            content: "1",
-          },
-          {
-            type: YETI_NODE_TYPE.TEXT,
-            content: "2",
-          },
-          {
-            type: YETI_NODE_TYPE.TEXT,
-            content: "3",
+            content: "Items: 123",
           },
         ],
       }],
@@ -476,19 +464,7 @@ describe("parseHTML", () => {
         children: [
           {
             type: YETI_NODE_TYPE.TEXT,
-            content: "Items: ",
-          },
-          {
-            type: YETI_NODE_TYPE.TEXT,
-            content: "a",
-          },
-          {
-            type: YETI_NODE_TYPE.TEXT,
-            content: "b",
-          },
-          {
-            type: YETI_NODE_TYPE.TEXT,
-            content: "c",
+            content: "Items: abc",
           },
         ],
       }],
@@ -510,19 +486,7 @@ describe("parseHTML", () => {
         children: [
           {
             type: YETI_NODE_TYPE.TEXT,
-            content: "Items: ",
-          },
-          {
-            type: YETI_NODE_TYPE.TEXT,
-            content: "x",
-          },
-          {
-            type: YETI_NODE_TYPE.TEXT,
-            content: "y",
-          },
-          {
-            type: YETI_NODE_TYPE.TEXT,
-            content: "z",
+            content: "Items: xyz",
           },
         ],
       }],
@@ -544,19 +508,7 @@ describe("parseHTML", () => {
         children: [
           {
             type: YETI_NODE_TYPE.TEXT,
-            content: "Items: ",
-          },
-          {
-            type: YETI_NODE_TYPE.TEXT,
-            content: "1",
-          },
-          {
-            type: YETI_NODE_TYPE.TEXT,
-            content: "2",
-          },
-          {
-            type: YETI_NODE_TYPE.TEXT,
-            content: "3",
+            content: "Items: 123",
           },
         ],
       }],
@@ -575,11 +527,7 @@ describe("parseHTML", () => {
         children: [
           {
             type: YETI_NODE_TYPE.TEXT,
-            content: "Object: ",
-          },
-          {
-            type: YETI_NODE_TYPE.TEXT,
-            content: "[object Object]",
+            content: "Object: [object Object]",
           },
         ],
       }],
@@ -599,13 +547,8 @@ describe("parseHTML", () => {
         children: [
           {
             type: YETI_NODE_TYPE.TEXT,
-            content: "Special chars: &amp; &lt; &gt; ",
+            content: "Special chars: &amp; &lt; &gt; &amp; &lt; &gt; &quot; &#39;",
           },
-          // The dynamic content gets a separate text node
-          {
-            type: YETI_NODE_TYPE.TEXT,
-            content: "&amp; &lt; &gt; &quot; &#39;",
-          }
         ],
       }],
     }, "Special characters in text content should be escaped");
@@ -624,12 +567,8 @@ describe("parseHTML", () => {
         children: [
           {
             type: YETI_NODE_TYPE.TEXT,
-            content: "Values: ",
+            content: "Values: Valid String",
           },
-          {
-            type: YETI_NODE_TYPE.TEXT,
-            content: "Valid String",
-          }
         ],
       }],
     }, "Null, undefined, or empty string values in child content should be skipped");
@@ -647,11 +586,7 @@ describe("parseHTML", () => {
         children: [
           {
             type: YETI_NODE_TYPE.TEXT,
-            content: "Promise: ",
-          },
-          {
-            type: YETI_NODE_TYPE.TEXT,
-            content: "Resolved Value",
+            content: "Promise: Resolved Value",
           },
         ],
       }],
@@ -940,10 +875,7 @@ describe("parseHTML", () => {
         tagName: "div",
         attributes: {},
         children: [
-          { type: YETI_NODE_TYPE.TEXT, content: "Number: " },
-          { type: YETI_NODE_TYPE.TEXT, content: "42" },
-          { type: YETI_NODE_TYPE.TEXT, content: ", Boolean: " },
-          { type: YETI_NODE_TYPE.TEXT, content: "true" },
+          { type: YETI_NODE_TYPE.TEXT, content: "Number: 42, Boolean: true" },
         ],
       }],
     });

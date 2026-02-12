@@ -4,6 +4,11 @@ import type { YetiNode, YetiRootNode, YetiElementNode, YetiTextNode } from "./ty
 import { YetiHTMLParsingError } from "./error.ts";
 import { isVoidTag, sanitizeHTMLTextContent } from "./utils.ts";
 
+// TODO:
+// - Handle html import objects
+// - Handle inlined bundle content objects
+// - Bundle CSS and JS resources attached to components and include them in parsed output
+
 // Node type to identify a component node
 const COMPONENT_NODE_TYPE = 1000;
 
@@ -62,13 +67,26 @@ const appendContentToNode = async (parent: YetiRootNode | YetiElementNode | Open
     }
 
     if (isYetiNode(unwrappedContent)) {
-      if (unwrappedContent.type === YETI_NODE_TYPE.ROOT) {
-        // Unwrap root nodes' children and insert them directly, since we don't want to nest root nodes inside other nodes.
-        // We may get a root node from dynamic content like the return value from rendering a nested component.
-        parent.children.push(...unwrappedContent.children);
-      } else {
-        // Append any other Yeti nodes directly
-        parent.children.push(unwrappedContent);
+      switch (unwrappedContent.type) {
+        case YETI_NODE_TYPE.ROOT:
+          // Unwrap root nodes' children and insert them directly, since we don't want to nest root nodes inside other nodes.
+          // We may get a root node from dynamic content like the return value from rendering a nested component.
+          parent.children.push(...unwrappedContent.children);
+          break;
+        case YETI_NODE_TYPE.TEXT:
+          // Merge text into a single text node if the last child is also a text node,
+          // to avoid unnecessary fragmentation of text nodes.
+          const lastChild = parent.children[parent.children.length - 1];
+          if (lastChild && lastChild.type === YETI_NODE_TYPE.TEXT) {
+            lastChild.content += unwrappedContent.content;
+          } else {
+            parent.children.push(unwrappedContent);
+          }
+          break;
+        default:
+          // For all other node types, we can just append them directly without any special handling.
+          parent.children.push(unwrappedContent);
+          break;
       }
 
       return;
@@ -76,9 +94,7 @@ const appendContentToNode = async (parent: YetiRootNode | YetiElementNode | Open
   }
 
   // If all else fails, we'll stringify the value and insert it as a text node.
-  parent.children.push(
-    makeTextNode(String(unwrappedContent))
-  );
+  appendContentToNode(parent, makeTextNode(String(unwrappedContent)));
 };
 
 /**
