@@ -9,20 +9,42 @@ export const isPrimitiveValue = (value: unknown): value is null | string | numbe
 };
 
 export const CHAR_CODE_DYNAMIC_VALUE_PLACEHOLDER = 0;
-export const DYNAMIC_VALUE_PLACEHOLDER_PREFIX = "\x00";
-// 1 for the prefix and 1 for the encoded index
-export const DYNAMIC_VALUE_CHARACTER_SEQUENCE_LENGTH = 2;
+// 1 byte for the placeholder char code + 2 bytes for the value index
+export const DYNAMIC_VALUE_CHARACTER_SEQUENCE_BYTE_LENGTH = 3;
 
-export const makeDynamicValuePlaceholder = (index: number): string => {
+export const getDynamicValuePlaceholderByteSequence = (index: number): [number, number, number] => {
+  const highByte = (index >> 8) & 0xFF;
+  const lowByte = index & 0xFF;
+
+  // We use a 3-byte sequence to store the full index so that we can support up to 65536
+  // dynamic values in a single template instead of being limited to 256 by using only 2 bytes.
+  return [CHAR_CODE_DYNAMIC_VALUE_PLACEHOLDER, highByte, lowByte];
+};
+
+export const parseDynamicValueByteSequenceIndex = (byteSequence: Uint8Array): number | null => {
+  if (byteSequence.length !== 3 || byteSequence[0] !== CHAR_CODE_DYNAMIC_VALUE_PLACEHOLDER) {
+    return null;
+  }
+
+  const highByte = byteSequence[1];
+  const lowByte = byteSequence[2];
+
+  return (highByte << 8) | lowByte;
+};
+
+export const createDynamicValuePlaceholderString = (index: number): string => {
   if (index < 0 || index > 0xFFFF) {
     throw new Error("Dynamic value index out of bounds (must be between 0 and 65535)");
   }
 
-  // Packing the index as a single character to keep the placeholder short.
-  // NOTE: This limits us to 65536 dynamic values in a single template.
-  const encodedIndex = String.fromCharCode(index);
-  return `${DYNAMIC_VALUE_PLACEHOLDER_PREFIX}${encodedIndex}`;
-}
+  const byteSequence = getDynamicValuePlaceholderByteSequence(index);
+  return textDecoder.decode(byteSequence);
+};
+
+export const textEncoder = new TextEncoder();
+export const textDecoder = new TextDecoder();
+
+export const DOCTYPE_STRING_CHAR_CODE_SEQUENCE = textEncoder.encode("DOCTYPE");
 
 export const CHAR_CODE_LT = 60; // <
 export const CHAR_CODE_GT = 62; // >
@@ -41,6 +63,32 @@ export const CHAR_CODE_NEWLINE = 10; // newline
 export const CHAR_CODE_CARRIAGE_RETURN = 13; // carriage return
 export const CHAR_CODE_FORM_FEED = 12; // form feed
 export const CHAR_CODE_VERTICAL_TAB = 11; // vertical tab
+
+export const calculateStringByteLength = (str: string): number => {
+  const strLength = str.length;
+  let byteLength = 0;
+
+  for (let i = 0; i < strLength; i++) {
+    const charCode = str.charCodeAt(i);
+    if (charCode < 0x80) {
+      // ASCII characters take 1 byte
+      byteLength += 1;
+    } else if (charCode < 0x800) {
+      // Characters from U+0080 to U+07FF take 2 bytes
+      byteLength += 2;
+    } else if (charCode >= 0xD800 && charCode <= 0xDBFF) {
+      // Surrogate pair of 2 16-bit code units representing a single Unicode code point
+      // takes 4 bytes in UTF-8
+      byteLength += 4;
+      i++; // Skip the next code unit since it's part of the surrogate pair
+    } else {
+      // All other characters take 3 bytes
+      byteLength += 3;
+    }
+  }
+
+  return byteLength;
+}
 
 export const isLetterCharCode = (charCode: number): boolean => {
   // Fancy bitwise trick to check if char is in [A-Za-z].
@@ -116,27 +164,10 @@ export const isValidHTMLAttributeNameString = (attrNameStr: string): boolean => 
   return true;
 };
 
-export const appendToCharCodeArray = (charCodes: number[], str: string): void => {
-  const strLen = str.length;
-  for (let i = 0; i < strLen; i++) {
-    charCodes.push(str.charCodeAt(i));
-  }
-};
-
-export const stringToUint16CharCodeArray = (str: string): Uint16Array => {
-  const strLen = str.length;
-  const charCodes = new Uint16Array(strLen);
-  for (let i = 0; i < strLen; i++) {
-    charCodes[i] = str.charCodeAt(i);
-  }
-  return charCodes;
-};
-
-export const DOCTYPE_STRING_CHAR_CODE_SEQUENCE = stringToUint16CharCodeArray("DOCTYPE");
 
 export const doCharCodeSequencesMatch = (
-  sequence1: Uint16Array,
-  sequence2: Uint16Array,
+  sequence1: Uint8Array,
+  sequence2: Uint8Array,
 ): boolean => {
   const sequence1Length = sequence1.length;
   if (sequence1Length !== sequence2.length) {

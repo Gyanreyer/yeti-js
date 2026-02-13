@@ -21,19 +21,7 @@ describe("html", () => {
           children: [
             {
               type: YETI_NODE_TYPE.TEXT,
-              content: "Name: ",
-            },
-            {
-              type: YETI_NODE_TYPE.TEXT,
-              content: "Alice",
-            },
-            {
-              type: YETI_NODE_TYPE.TEXT,
-              content: ", Age: ",
-            },
-            {
-              type: YETI_NODE_TYPE.TEXT,
-              content: "30",
+              content: "Name: Alice, Age: 30",
             },
           ],
         },
@@ -192,6 +180,26 @@ describe("html", () => {
             {
               type: YETI_NODE_TYPE.TEXT,
               content: "\n",
+            },
+          ],
+        },
+      ],
+    });
+  });
+
+  test("handles multi-byte characters correctly", async () => {
+    const result = await html`<div>Emoji: 😀, Chinese: 你好, Cyrillic: Привет</div>`;
+    assert.deepStrictEqual<YetiRootNode>(result, {
+      type: YETI_NODE_TYPE.ROOT,
+      children: [
+        {
+          type: YETI_NODE_TYPE.ELEMENT,
+          tagName: "div",
+          attributes: {},
+          children: [
+            {
+              type: YETI_NODE_TYPE.TEXT,
+              content: "Emoji: 😀, Chinese: 你好, Cyrillic: Привет",
             },
           ],
         },
