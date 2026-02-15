@@ -105,108 +105,103 @@ const lexTextContent: LexerFunction<"CHILD_CONTENT" | "ERROR"> = function* (ctx)
   let currentChunkStartIndex = ctx.getIndex();
   let currentChunkLength = 0;
 
-  try {
-    while (!ctx.isAtEnd()) {
-      // Check if we need to transition to a new lexer state. Transition options:
-      // 1. Opening tag: "<" + letter
-      // 2. Component tag: "<" + FUNCTION_PLACEHOLDER_PREFIX (3 characters long)
-      // 3. Closing tag: "</"
-      // 4. Comment: "<!--"
-      // 5. Doctype: "<!DOCTYPE"
-      const nextCharCode = ctx.peekCharCode();
-      if (nextCharCode === CHAR_CODE_LT) {
-        const followingCharCode = ctx.peekCharCode(1);
-        // We need to peek up to 8 characters ahead to test if we're matching a doctype tag
-        if (followingCharCode === CHAR_CODE_EXCLAMATION) {
-          if (ctx.peekCharCode(2) === CHAR_CODE_DASH && ctx.peekCharCode(3) === CHAR_CODE_DASH) {
-            // Matches "<!--", transition to comment
-            nextLexerFunction = lexComment;
-            break;
-          }
 
+  while (!ctx.isAtEnd()) {
+    // Check if we need to transition to a new lexer state. Transition options:
+    // 1. Opening tag: "<" + letter
+    // 2. Component tag: "<" + FUNCTION_PLACEHOLDER_PREFIX (3 characters long)
+    // 3. Closing tag: "</"
+    // 4. Comment: "<!--"
+    // 5. Doctype: "<!DOCTYPE"
+    const nextCharCode = ctx.peekCharCode();
+    if (nextCharCode === CHAR_CODE_LT) {
+      const followingCharCode = ctx.peekCharCode(1);
+      // We need to peek up to 8 characters ahead to test if we're matching a doctype tag
+      if (followingCharCode === CHAR_CODE_EXCLAMATION) {
+        if (ctx.peekCharCode(2) === CHAR_CODE_DASH && ctx.peekCharCode(3) === CHAR_CODE_DASH) {
+          // Matches "<!--", transition to comment
+          nextLexerFunction = lexComment;
+          break;
+        }
+        debugger;
+
+        if (
+          // Test if next 6 chars after "<!" match "DOCTYPE"
+          doCharCodeSequencesMatch(ctx.getSubarray(ctx.getIndex() + 2, 7), DOCTYPE_STRING_CHAR_CODE_SEQUENCE)) {
+          // Matches "<!DOCTYPE", transition to doctype
+          nextLexerFunction = lexDoctype;
+          break;
+        }
+      } else {
+        if (followingCharCode === CHAR_CODE_SLASH) {
+          // Matches "</", transition to closing tag
+          nextLexerFunction = lexClosingTag;
+          break;
+        }
+
+        if (isLetterCharCode(followingCharCode)) {
+          // Matches "<" + letter, transition to opening tag
+          nextLexerFunction = lexOpeningTagname;
+          break;
+        }
+
+        if (followingCharCode === CHAR_CODE_DYNAMIC_VALUE_PLACEHOLDER) {
+          // We hit a dynamic value placeholder after "<", which could be either a component tag
+          // (if the dynamic value is a function) or an element tag with a dynamic string tag name
+          // (if the dynamic value is a string that starts with a letter).
+          // In either case, we can transition to lexOpeningTagname and let that lexer function handle it from there.
+          const dynamicValue = ctx.peekDynamicValue(1);
           if (
-            // Test if next 6 chars after "<!" match "DOCTYPE"
-            doCharCodeSequencesMatch(ctx.getSubarray(2, 7), DOCTYPE_STRING_CHAR_CODE_SEQUENCE)) {
-            // Matches "<!DOCTYPE", transition to doctype
-            nextLexerFunction = lexDoctype;
-            break;
-          }
-        } else {
-          if (followingCharCode === CHAR_CODE_SLASH) {
-            // Matches "</", transition to closing tag
-            nextLexerFunction = lexClosingTag;
-            break;
-          }
-
-          if (isLetterCharCode(followingCharCode)) {
-            // Matches "<" + letter, transition to opening tag
+            // `<${function}` => component tag
+            typeof dynamicValue === "function" ||
+            // `<${string}` => element tag with dynamic string tag name (unless the string is empty or starts with a non-letter,
+            // in which case we can just proceed and treat it as text content)
+            (typeof dynamicValue === "string" && dynamicValue.length > 0 && isLetterCharCode(dynamicValue.charCodeAt(0)))
+          ) {
+            // Transition to lex opening tagname; the lexer will consume the dynamic value.
+            // If the dynamic value is a function, the token will just be `{ ty: OPENING_TAGNAME, v: [Function] }`,
+            // and the parser can handle it from there.
             nextLexerFunction = lexOpeningTagname;
             break;
           }
-
-          if (followingCharCode === CHAR_CODE_DYNAMIC_VALUE_PLACEHOLDER) {
-            // We hit a dynamic value placeholder after "<", which could be either a component tag
-            // (if the dynamic value is a function) or an element tag with a dynamic string tag name
-            // (if the dynamic value is a string that starts with a letter).
-            // In either case, we can transition to lexOpeningTagname and let that lexer function handle it from there.
-            const dynamicValue = ctx.peekDynamicValue(1);
-            if (
-              // `<${function}` => component tag
-              typeof dynamicValue === "function" ||
-              // `<${string}` => element tag with dynamic string tag name (unless the string is empty or starts with a non-letter,
-              // in which case we can just proceed and treat it as text content)
-              (typeof dynamicValue === "string" && dynamicValue.length > 0 && isLetterCharCode(dynamicValue.charCodeAt(0)))
-            ) {
-              // Transition to lex opening tagname; the lexer will consume the dynamic value.
-              // If the dynamic value is a function, the token will just be `{ ty: OPENING_TAGNAME, v: [Function] }`,
-              // and the parser can handle it from there.
-              nextLexerFunction = lexOpeningTagname;
-              break;
-            }
-          }
-        }
-      } else {
-        const dynamicValue = ctx.peekDynamicValue();
-        if (dynamicValue !== NO_DYNAMIC_VALUE) {
-          if (currentChunkLength > 0) {
-            // If we have accumulated any text content before this dynamic value,
-            // we need to resolve that character chunk and yield it before yielding the dynamic value.
-            yield [TOKEN_TYPE.CHILD_CONTENT, ctx.getSubstring(
-              currentChunkStartIndex,
-              currentChunkLength,
-            )];
-          }
-          // Emit the raw dynamic value as a child content token; the parser can handle it from there
-          // if we want to unwrap iterables, promises, inlined functions, etc
-          yield [TOKEN_TYPE.CHILD_CONTENT, dynamicValue];
-
-          // Advance past the dynamic value character sequence
-          currentChunkStartIndex = ctx.advance(DYNAMIC_VALUE_CHARACTER_SEQUENCE_BYTE_LENGTH);
-          currentChunkLength = 0;
-          continue;
         }
       }
+    } else {
+      const dynamicValue = ctx.peekDynamicValue();
+      if (dynamicValue !== NO_DYNAMIC_VALUE) {
+        if (currentChunkLength > 0) {
+          // If we have accumulated any text content before this dynamic value,
+          // we need to resolve that character chunk and yield it before yielding the dynamic value.
+          yield [TOKEN_TYPE.CHILD_CONTENT, ctx.getSubstring(
+            currentChunkStartIndex,
+            currentChunkLength,
+          )];
+        }
+        // Emit the raw dynamic value as a child content token; the parser can handle it from there
+        // if we want to unwrap iterables, promises, inlined functions, etc
+        yield [TOKEN_TYPE.CHILD_CONTENT, dynamicValue];
 
-      // We didn't find a transition point, so just consume the next character as text content
-      currentChunkLength++;
-      ctx.advance(1);
+        // Advance past the dynamic value character sequence
+        currentChunkStartIndex = ctx.advance(DYNAMIC_VALUE_CHARACTER_SEQUENCE_BYTE_LENGTH);
+        currentChunkLength = 0;
+        continue;
+      }
     }
 
-    if (currentChunkLength > 0) {
-      // Skip text content token if empty
-      yield [TOKEN_TYPE.CHILD_CONTENT, ctx.getSubstring(
-        currentChunkStartIndex,
-        currentChunkLength,
-      )];
-    }
-
-    return nextLexerFunction;
-  } catch (e) {
-    yield [TOKEN_TYPE.ERROR, new YetiHTMLParsingError("Encountered an unexpected error while parsing html", e instanceof Error ? {
-      cause: e,
-    } : undefined)];
-    return null;
+    // We didn't find a transition point, so just consume the next character as text content
+    currentChunkLength++;
+    ctx.advance(1);
   }
+
+  if (currentChunkLength > 0) {
+    // Skip text content token if empty
+    yield [TOKEN_TYPE.CHILD_CONTENT, ctx.getSubstring(
+      currentChunkStartIndex,
+      currentChunkLength,
+    )];
+  }
+
+  return nextLexerFunction;
 }
 
 const lexComment: LexerFunction<"COMMENT" | "ERROR"> = function* (ctx) {
@@ -273,7 +268,7 @@ const lexDoctype: LexerFunction<"DOCTYPE" | "ERROR"> = function* (ctx) {
 
   let chunkStartIndex = ctx.getIndex();
   let chunkLength = 0;
-  let lastNonWhitespaceLength = 0;
+  let stringParts: string[] | null = null;
 
   while (!ctx.isAtEnd()) {
     const nextCharCode = ctx.peekCharCode();
@@ -284,9 +279,18 @@ const lexDoctype: LexerFunction<"DOCTYPE" | "ERROR"> = function* (ctx) {
       break;
     }
 
-    if (ctx.peekDynamicValue() !== NO_DYNAMIC_VALUE) {
-      yield [TOKEN_TYPE.ERROR, new YetiHTMLParsingError(`Dynamic values are not allowed inside DOCTYPE declarations.`)];
-      return null;
+    const dynamicValue = ctx.peekDynamicValue();
+    if (dynamicValue !== NO_DYNAMIC_VALUE) {
+      stringParts ??= [];
+      // Flush current chunk before adding dynamic value
+      if (chunkLength > 0) {
+        stringParts.push(ctx.getSubstring(chunkStartIndex, chunkLength));
+      }
+      // Just stringify the dynamic value and include it in the doctype content
+      stringParts.push(String(dynamicValue));
+      chunkStartIndex = ctx.advance(DYNAMIC_VALUE_CHARACTER_SEQUENCE_BYTE_LENGTH);
+      chunkLength = 0;
+      continue;
     }
 
     if (isWhiteSpaceCharCode(nextCharCode)) {
@@ -303,12 +307,27 @@ const lexDoctype: LexerFunction<"DOCTYPE" | "ERROR"> = function* (ctx) {
       // We have a non-whitespace character, so we can update lastNonWhitespaceLength
       // to include any preceding whitespace as well
       chunkLength++;
-      lastNonWhitespaceLength = chunkLength;
       ctx.advance(1);
     }
   }
 
-  yield [TOKEN_TYPE.DOCTYPE, ctx.getSubstring(chunkStartIndex, lastNonWhitespaceLength)];
+  let doctypeContent: string;
+  // Flush final chunk, but only include content up to the last non-whitespace character to trim trailing whitespace
+  if (chunkLength > 0) {
+    const finalChunk = ctx.getSubstring(chunkStartIndex, chunkLength);
+    if (stringParts === null) {
+      doctypeContent = finalChunk;
+    } else {
+      stringParts.push(finalChunk);
+      doctypeContent = stringParts.join('');
+    }
+  } else if (stringParts) {
+    doctypeContent = stringParts.join('');
+  } else {
+    doctypeContent = "";
+  }
+
+  yield [TOKEN_TYPE.DOCTYPE, doctypeContent.trim()];
   return nextLexerFunction;
 }
 
@@ -366,6 +385,9 @@ const lexOpeningTagname: LexerFunction<"OPENING_TAGNAME" | "ERROR"> = function* 
       // Lex the end of the opening tag and transition back to text content lexing
       nextLexerFunction = lexOpeningTagEnd;
       break;
+    } else {
+      yield [TOKEN_TYPE.ERROR, new YetiHTMLParsingError(`lexOpeningTagname encountered unexpected character "${String.fromCharCode(nextCharCode)}". This is not a valid character for an HTML tag name.`)];
+      return null;
     }
   }
 
@@ -404,9 +426,25 @@ const lexOpeningTagname: LexerFunction<"OPENING_TAGNAME" | "ERROR"> = function* 
 
 const lexAttributeName: LexerFunction<"ATTR_NAME" | "SPREAD_ATTR" | "ERROR"> = function* (ctx) {
   let nextLexerFunction: LexerFunction<any> | null = null;
+
+  while (!ctx.isAtEnd() && isWhiteSpaceCharCode(ctx.peekCharCode())) {
+    // Skip any leading whitespace before the attribute name
+    ctx.advance(1);
+  }
+
   let chunkStartIndex = ctx.getIndex();
   let chunkLength = 0;
   let stringParts: string[] | null = null;
+
+  // When we encounter whitespace after an attribute name, we still need
+  // to wait until we find the next non-whitespace character to determine
+  // what to do next.
+  // - If it's an equals sign, then we transition to lexing an attribute value
+  // - If it's a ">" or "/>" then we transition to lexing the end of the opening tag and then back to text content lexing
+  // - If it's another letter, then this is just whitespace between attributes 
+  //   and we can transition to lexing the next attribute name, ignoring the whitespace in between.
+  let hasWhitespaceTerminatedAttributeName = false;
+
 
   while (!ctx.isAtEnd()) {
     const nextCharCode = ctx.peekCharCode();
@@ -444,13 +482,7 @@ const lexAttributeName: LexerFunction<"ATTR_NAME" | "SPREAD_ATTR" | "ERROR"> = f
 
     // Attribute names can contain any non-terminating character.
     // Terminating characters are: whitespace, "=", ">", and "/>"
-    if (nextCharCode === CHAR_CODE_EQUAL) {
-      // Handle the case where there is no attribute name, just an "="
-      if (chunkLength === 0 && !stringParts) {
-        yield [TOKEN_TYPE.ERROR, new YetiHTMLParsingError(`lexAttributeName encountered an "=" character before finding a valid attribute name.`)];
-        return null;
-      }
-
+    if (nextCharCode === CHAR_CODE_EQUAL && (chunkLength > 0 || stringParts !== null)) {
       nextLexerFunction = lexAttributeValue;
       break;
     } else if (
@@ -463,13 +495,11 @@ const lexAttributeName: LexerFunction<"ATTR_NAME" | "SPREAD_ATTR" | "ERROR"> = f
       nextLexerFunction = lexOpeningTagEnd;
       break;
     } else if (isWhiteSpaceCharCode(nextCharCode)) {
-      if (chunkLength > 0 || stringParts) {
-        // If we have an attribute name, the whitespace indicates the end of the name.
-        // Transition to a new lexAttributeName instance to look for the next attribute or tag end.
-        nextLexerFunction = lexAttributeName;
-        break;
-      }
-      chunkStartIndex = ctx.advance(1);
+      hasWhitespaceTerminatedAttributeName = true;
+      ctx.advance(1);
+    } else if (hasWhitespaceTerminatedAttributeName) {
+      nextLexerFunction = lexAttributeName;
+      break;
     } else {
       // Any non-terminating character is part of the attribute name
       chunkLength++;

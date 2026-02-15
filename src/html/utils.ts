@@ -157,6 +157,10 @@ export const isValidHTMLAttributeNameString = (attrNameStr: string): boolean => 
   }
 
   for (let i = 0; i < strLen; i++) {
+    if (i === 0 && attrNameStr.charCodeAt(i) === CHAR_CODE_EQUAL) {
+      // Special case to allow "=" as the first letter in an attribute name because this is technically in the HTML spec
+      continue;
+    }
     if (!isValidHTMLAttributeNameCharCode(attrNameStr.charCodeAt(i))) {
       return false;
     }
@@ -170,6 +174,7 @@ export const doCharCodeSequencesMatch = (
   sequence1: Uint8Array,
   sequence2: Uint8Array,
 ): boolean => {
+  debugger;
   const sequence1Length = sequence1.length;
   if (sequence1Length !== sequence2.length) {
     return false;
