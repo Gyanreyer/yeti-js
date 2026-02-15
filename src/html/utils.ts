@@ -38,7 +38,7 @@ export const createDynamicValuePlaceholderString = (index: number): string => {
   }
 
   const byteSequence = getDynamicValuePlaceholderByteSequence(index);
-  return textDecoder.decode(byteSequence);
+  return textDecoder.decode(new Uint8Array(byteSequence));
 };
 
 export const textEncoder = new TextEncoder();
@@ -55,6 +55,7 @@ export const CHAR_CODE_DASH = 45; // -
 export const CHAR_CODE_EQUAL = 61; // =
 export const CHAR_CODE_DOUBLE_QUOTE = 34; // "
 export const CHAR_CODE_SINGLE_QUOTE = 39; // '
+export const CHAR_CODE_BACKTICK = 96; // `
 export const CHAR_CODE_DOT = 46; // .
 export const CHAR_CODE_COLON = 58; // :
 export const CHAR_CODE_SPACE = 32; // space
@@ -201,6 +202,17 @@ const VOID_TAG_SET = new Set([
 ]);
 
 export const isVoidTag = (tagName: string) => VOID_TAG_SET.has(tagName.toLowerCase());
+
+export type RawStringContentTagName = "script" | "style" | "textarea" | "title";
+
+const RAW_STRING_CONTENTS_HTML_TAG_SET = new Set([
+  "script",
+  "style",
+  "textarea",
+  "title",
+]);
+
+export const isRawStringContentTag = (tagName: string): tagName is RawStringContentTagName => RAW_STRING_CONTENTS_HTML_TAG_SET.has(tagName.toLowerCase());
 
 const sanitizedHTMLEscapeCharMap: Record<string, string> = {
   "&": "&amp;",

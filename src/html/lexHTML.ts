@@ -20,6 +20,9 @@ import {
   textDecoder,
   parseDynamicValueByteSequenceIndex,
   DYNAMIC_VALUE_CHARACTER_SEQUENCE_BYTE_LENGTH,
+  isRawStringContentTag,
+  type RawStringContentTagName,
+  CHAR_CODE_BACKTICK,
 } from "./utils.ts";
 import { YetiHTMLParsingError } from "./error.ts";
 
@@ -87,6 +90,9 @@ type LexerContext = {
    */
   advance(advanceLength?: number): number;
   isAtEnd(): boolean;
+  // We need to track whether we're lexing inside a raw text element (e.g., <script>, <style>, <textarea>) so that we know to ignore tag-like syntax and just treat everything as text content until we reach the closing tag for that element.
+  setCurrentRawTextElementTagName(value: RawStringContentTagName | null): void;
+  getCurrentRawTextElementTagName(): RawStringContentTagName | null;
 }
 
 /**
@@ -386,6 +392,12 @@ const lexOpeningTagname: LexerFunction<"OPENING_TAGNAME" | "ERROR"> = function* 
     return null;
   }
 
+  if (isRawStringContentTag(tagName)) {
+    // If this tagname indicates we have an element which contains raw string content (e.g., <script>, <style>, <textarea>),
+    // we need to set that in the context so we don't try to parse any child content of this element for tags.
+    ctx.setCurrentRawTextElementTagName(tagName);
+  }
+
   yield [TOKEN_TYPE.OPENING_TAGNAME, tagName];
   return nextLexerFunction;
 }
@@ -664,7 +676,75 @@ const lexOpeningTagEnd: LexerFunction<"OPENING_TAG_END" | "ERROR"> = function* (
     return null;
   }
 
+  if (ctx.getCurrentRawTextElementTagName()) {
+    // If we're lexing the opening tag of a raw text element (e.g., <script>, <style>, <textarea>), we need to transition to a special lexer function that will just consume everything as text content until it finds the closing tag for that element, at which point it can transition back to the normal lexTextContent lexer function.
+    return lexRawTextElementContent;
+  }
+
   return lexTextContent;
+}
+
+const lexRawTextElementContent: LexerFunction<"CHILD_CONTENT" | "ERROR"> = function* (ctx) {
+  let nextLexerFunction: LexerFunction<any> | null = null;
+  const currentChunkStartIndex = ctx.getIndex();
+  let currentChunkLength = 0;
+
+  const rawTextElementTagName = ctx.getCurrentRawTextElementTagName();
+  if (!rawTextElementTagName) {
+    yield [TOKEN_TYPE.ERROR, new YetiHTMLParsingError(`lexRawTextElementContent was entered without a current raw text element tag name set in the context.`)];
+    return null;
+  }
+
+  // Script and style tags can have quoted strings inside them that may potentially contain a closing tag that shouldn't be treated
+  // as an actual closing tag. In those cases, we'll need to track whether we're currently inside a quoted string and ignore any
+  // closing tags until the string is closed.
+  const doesRawContentHaveQuotedValues = rawTextElementTagName === "script" || rawTextElementTagName === "style";
+  let currentOpenQuoteStartCharCode: number | null = null;
+
+  while (!ctx.isAtEnd()) {
+    const nextCharCode = ctx.peekCharCode();
+
+    if (doesRawContentHaveQuotedValues) {
+      if (currentOpenQuoteStartCharCode !== null) {
+        // We're currently inside a quoted string, so we need to look for the closing quote character that matches the one that opened this string.
+        if (nextCharCode === currentOpenQuoteStartCharCode) {
+          // We found the closing quote for the current string, so we can exit out of string mode and continue lexing for the raw text element closing tag.
+          currentOpenQuoteStartCharCode = null;
+        }
+      } else if (
+        nextCharCode === CHAR_CODE_DOUBLE_QUOTE || nextCharCode === CHAR_CODE_SINGLE_QUOTE ||
+        // Scripts also have backtick-quoted template literals, so we need to check for backticks as well if this is a script tag
+        (rawTextElementTagName === "script" && nextCharCode === CHAR_CODE_BACKTICK)
+      ) {
+        // We found an opening quote character, so we need to enter string mode and ignore any tag-like syntax until we find the matching closing quote.
+        currentOpenQuoteStartCharCode = nextCharCode;
+      }
+    }
+
+    if (currentOpenQuoteStartCharCode === null && nextCharCode === CHAR_CODE_LT) {
+      if (ctx.peekCharCode(1) === CHAR_CODE_SLASH) {
+        // We may have found the closing tag for this raw text element. We need to peek ahead to see if the tag name matches the raw text element we're currently in.
+        if (rawTextElementTagName === ctx.getSubstring(ctx.getIndex() + 2, rawTextElementTagName.length)) {
+          // We have found the closing tag for this raw text element, so we should transition back to
+          // lexing normal text content after we yield any remaining text content before the closing tag.
+          nextLexerFunction = lexClosingTag;
+          break;
+        }
+      }
+    }
+
+    ctx.advance();
+    currentChunkLength++;
+  }
+
+  if (currentChunkLength > 0) {
+    yield [TOKEN_TYPE.CHILD_CONTENT, ctx.getSubstring(currentChunkStartIndex, currentChunkLength)];
+  }
+
+  // Clear the current raw text element tag name from the context since we're exiting that element after this lexer function
+  ctx.setCurrentRawTextElementTagName(null);
+
+  return nextLexerFunction;
 }
 
 const lexClosingTag: LexerFunction<"CLOSING_TAGNAME" | "ERROR"> = function* (ctx) {
@@ -776,6 +856,7 @@ export function* lexHTML(htmlStringChars: Uint8Array, dynamicValues: unknown[]):
   const htmlStringLength = htmlStringChars.length;
 
   let charIndex = 0;
+  let currentRawTextElementTagName: RawStringContentTagName | null = null;
 
   const lexerContext: LexerContext = {
     getIndex() {
@@ -810,6 +891,12 @@ export function* lexHTML(htmlStringChars: Uint8Array, dynamicValues: unknown[]):
     },
     isAtEnd() {
       return charIndex >= htmlStringLength;
+    },
+    getCurrentRawTextElementTagName() {
+      return currentRawTextElementTagName;
+    },
+    setCurrentRawTextElementTagName(value) {
+      currentRawTextElementTagName = value;
     },
   };
 

@@ -281,6 +281,54 @@ describe("lexHTML", () => {
     ] satisfies LexerToken[]);
   });
 
+  test("handles attribute values with a combination of static and dynamic parts correctly", () => {
+    const dynamicValuePart1 = "dynamic";
+    const dynamicValuePart2 = 123;
+
+    const tokens = Array.from(lexHTML(textEncoder.encode(`<div attr="${createDynamicValuePlaceholderString(0)}-static-${createDynamicValuePlaceholderString(1)}">`), [dynamicValuePart1, dynamicValuePart2]));
+    assert.deepStrictEqual(tokens, [
+      [TOKEN_TYPE.OPENING_TAGNAME, "div"],
+      [TOKEN_TYPE.ATTR_NAME, "attr"],
+      [TOKEN_TYPE.ATTR_VALUE, `${dynamicValuePart1}-static-${dynamicValuePart2}`],
+      [TOKEN_TYPE.OPENING_TAG_END, false],
+    ] satisfies LexerToken[]);
+  });
+
+  test("handles script and style tags correctly", () => {
+    const html = `<script>
+  const x = "<div>Not a tag</div>";
+  const y = \`<script>This is not a real script</script>\`;
+</script>
+<style>
+  .class { content: "<div>Not a tag</div>"; }
+  .class2 { content: '<style>This is not a real style</style>'; }
+</style>
+<title>This is a title with <div>what looks like a tag</div> inside it</title>
+<textarea>This is some text content with <div>what looks like a tag</div> inside it</textarea>`;
+    const tokens = Array.from(lexHTML(textEncoder.encode(html), []));
+    assert.deepStrictEqual(tokens, [
+      [TOKEN_TYPE.OPENING_TAGNAME, "script"],
+      [TOKEN_TYPE.OPENING_TAG_END, false],
+      [TOKEN_TYPE.CHILD_CONTENT, '\n  const x = "<div>Not a tag</div>";\n  const y = `<script>This is not a real script</script>`;\n'],
+      [TOKEN_TYPE.CLOSING_TAGNAME, "script"],
+      [TOKEN_TYPE.CHILD_CONTENT, "\n"],
+      [TOKEN_TYPE.OPENING_TAGNAME, "style"],
+      [TOKEN_TYPE.OPENING_TAG_END, false],
+      [TOKEN_TYPE.CHILD_CONTENT, `\n  .class { content: "<div>Not a tag</div>"; }\n  .class2 { content: '<style>This is not a real style</style>'; }\n`],
+      [TOKEN_TYPE.CLOSING_TAGNAME, "style"],
+      [TOKEN_TYPE.CHILD_CONTENT, "\n"],
+      [TOKEN_TYPE.OPENING_TAGNAME, "title"],
+      [TOKEN_TYPE.OPENING_TAG_END, false],
+      [TOKEN_TYPE.CHILD_CONTENT, "This is a title with <div>what looks like a tag</div> inside it"],
+      [TOKEN_TYPE.CLOSING_TAGNAME, "title"],
+      [TOKEN_TYPE.CHILD_CONTENT, "\n"],
+      [TOKEN_TYPE.OPENING_TAGNAME, "textarea"],
+      [TOKEN_TYPE.OPENING_TAG_END, false],
+      [TOKEN_TYPE.CHILD_CONTENT, "This is some text content with <div>what looks like a tag</div> inside it"],
+      [TOKEN_TYPE.CLOSING_TAGNAME, "textarea"],
+    ] satisfies LexerToken[]);
+  });
+
   test("lexes a standard static HTML page as expected", () => {
     const html = `<!DOCTYPE html>
 <html lang="en">
