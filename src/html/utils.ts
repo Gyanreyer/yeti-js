@@ -174,19 +174,8 @@ export const doCharCodeSequencesMatch = (
   sequence1: Uint8Array,
   sequence2: Uint8Array,
 ): boolean => {
-  debugger;
-  const sequence1Length = sequence1.length;
-  if (sequence1Length !== sequence2.length) {
-    return false;
-  }
-
-  for (let i = 0; i < sequence1Length; i++) {
-    if (sequence1[i] !== sequence2[i]) {
-      return false;
-    }
-  }
-
-  return true;
+  // Buffer.compare returns 0 if the sequences are equal
+  return Buffer.compare(sequence1, sequence2) === 0;
 };
 
 const VOID_TAG_SET = new Set([

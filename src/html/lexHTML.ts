@@ -405,6 +405,7 @@ const lexOpeningTagname: LexerFunction<"OPENING_TAGNAME" | "ERROR"> = function* 
   } else if (stringParts) {
     tagName = stringParts.join('');
   } else {
+    // Shouldn't be possible to reach this state, throw an error if we do
     yield [TOKEN_TYPE.ERROR, new YetiHTMLParsingError(`lexOpeningTagname did not find any valid tag name characters.`)];
     return null;
   }
@@ -670,7 +671,7 @@ const lexAttributeValue: LexerFunction<"ATTR_VALUE" | "ERROR"> = function* (ctx)
         break;
       } else if (ctx.peekDynamicValue() !== NO_DYNAMIC_VALUE) {
         // Unquoted dynamic value in the middle of an unquoted attribute string value is not valid syntax, yield error
-        yield [TOKEN_TYPE.ERROR, new YetiHTMLParsingError(`Dynamic values are not allowed in the middle of unquoted attribute values.`)];
+        yield [TOKEN_TYPE.ERROR, new YetiHTMLParsingError(`Unquoted attribute value received mixed static content "${ctx.getSubstring(unquotedStartIndex, unquotedLength)}" with dynamic content "${ctx.peekDynamicValue()}". If you want these values to be concatenated together, please wrap them in quotes.`)];
         return null;
       } else {
         unquotedLength++;
@@ -701,7 +702,8 @@ const lexOpeningTagEnd: LexerFunction<"OPENING_TAG_END" | "ERROR"> = function* (
     yield [TOKEN_TYPE.OPENING_TAG_END, true];
     ctx.advance(2); // Consume the "/>"
   } else {
-    // We should never get here because lexOpeningTagname should only transition to this lexer function if it sees a ">" or "/>" character, but we'll include an error case just in case.
+    // We should never get here because lexOpeningTagname should only transition to this lexer function if it sees a ">" or "/>" character,
+    // but we'll include an error case just in case.
     yield [TOKEN_TYPE.ERROR, new YetiHTMLParsingError(`lexOpeningTagEnd expected ">" or "/>" but found "${String.fromCharCode(nextCharCode)}".`)];
     return null;
   }
@@ -716,11 +718,13 @@ const lexOpeningTagEnd: LexerFunction<"OPENING_TAG_END" | "ERROR"> = function* (
 
 const lexRawTextElementContent: LexerFunction<"CHILD_CONTENT" | "ERROR"> = function* (ctx) {
   let nextLexerFunction: LexerFunction<any> | null = null;
-  const currentChunkStartIndex = ctx.getIndex();
+  let currentChunkStartIndex = ctx.getIndex();
   let currentChunkLength = 0;
 
   const rawTextElementTagName = ctx.getCurrentRawTextElementTagName();
   if (!rawTextElementTagName) {
+    // We should never get here because we should only transition to this lexer function if we
+    // have a current raw text element tag name set in the context, but we'll include an error case just in case.
     yield [TOKEN_TYPE.ERROR, new YetiHTMLParsingError(`lexRawTextElementContent was entered without a current raw text element tag name set in the context.`)];
     return null;
   }
@@ -763,6 +767,19 @@ const lexRawTextElementContent: LexerFunction<"CHILD_CONTENT" | "ERROR"> = funct
       }
     }
 
+    const dynamicValue = ctx.peekDynamicValue();
+    if (dynamicValue !== NO_DYNAMIC_VALUE) {
+      // If we have a dynamic value in raw text content, we should just include it as part of the text content. The parser can handle it from there.
+      if (currentChunkLength > 0) {
+        // Flush any accumulated chunk before yielding the dynamic value
+        yield [TOKEN_TYPE.CHILD_CONTENT, ctx.getSubstring(currentChunkStartIndex, currentChunkLength)];
+      }
+      yield [TOKEN_TYPE.CHILD_CONTENT, dynamicValue];
+      currentChunkStartIndex = ctx.advance(DYNAMIC_VALUE_CHARACTER_SEQUENCE_BYTE_LENGTH);
+      currentChunkLength = 0;
+      continue;
+    }
+
     ctx.advance();
     currentChunkLength++;
   }
@@ -775,7 +792,7 @@ const lexRawTextElementContent: LexerFunction<"CHILD_CONTENT" | "ERROR"> = funct
   ctx.setCurrentRawTextElementTagName(null);
 
   return nextLexerFunction;
-}
+};
 
 const lexClosingTag: LexerFunction<"CLOSING_TAGNAME" | "ERROR"> = function* (ctx) {
   // Skip the opening "</"
