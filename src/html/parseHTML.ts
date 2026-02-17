@@ -1,6 +1,6 @@
 import { lexHTML, TOKEN_TYPE } from "./lexHTML.ts";
 import { YETI_NODE_TYPE } from "./types.ts";
-import type { YetiNode, YetiRootNode, YetiElementNode, YetiTextNode } from "./types.ts";
+import type { YetiNode, YetiRootNode, YetiElementNode, YetiCommentNode, YetiDoctypeNode } from "./types.ts";
 import { YetiHTMLParsingError } from "./error.ts";
 import { isVoidTag } from "./utils.ts";
 
@@ -110,6 +110,8 @@ export const parseHTML = async (htmlStringChars: Uint8Array, dynamicValues: unkn
   };
 
   let openAttributeName: string | null = null;
+  let openCommentNode: YetiCommentNode | null = null;
+  let openDoctypeNode: YetiDoctypeNode | null = null;
 
   const finalizeOpenAttribute = () => {
     if (!openAttributeName) {
@@ -155,7 +157,7 @@ export const parseHTML = async (htmlStringChars: Uint8Array, dynamicValues: unkn
     return closingParentNode;
   };
 
-  for (const [tokenType, tokenValue] of lexHTML(htmlStringChars, dynamicValues)) {
+  await lexHTML(htmlStringChars, dynamicValues, async (tokenType, tokenValue) => {
     switch (tokenType) {
       case TOKEN_TYPE.OPENING_TAGNAME: {
         if (typeof tokenValue === "string") {
@@ -185,6 +187,7 @@ export const parseHTML = async (htmlStringChars: Uint8Array, dynamicValues: unkn
         // Empty string = element closing tag shorthand (</>), this will close the current element or component regardless of tag name.
         // String = move up the tree until we find a matching tag name (or the root), then move up one more level to set the current parent.
         // Function = component closing tag, closes the open component with the matching function reference.
+        // const tokenValue = tokens[i + 1] as LexerTokenValueTypeMap[typeof tokenType];
 
         if (tokenValue === "") {
           // Just move up one level to close the current element/component
@@ -272,20 +275,58 @@ export const parseHTML = async (htmlStringChars: Uint8Array, dynamicValues: unkn
         await appendContentToNode(getCurrentOpenParent(), tokenValue);
         break;
       }
-      case TOKEN_TYPE.COMMENT: {
-        const currentParent = getCurrentOpenParent();
-        currentParent.children.push({
-          type: YETI_NODE_TYPE.COMMENT,
-          content: tokenValue,
-        });
+      case TOKEN_TYPE.COMMENT_PART: {
+        if (openCommentNode) {
+          openCommentNode.content += String(tokenValue);
+        } else {
+          openCommentNode = {
+            type: YETI_NODE_TYPE.COMMENT,
+            content: String(tokenValue),
+          };
+        }
         break;
       }
-      case TOKEN_TYPE.DOCTYPE: {
+      case TOKEN_TYPE.COMMENT_END: {
         const currentParent = getCurrentOpenParent();
-        currentParent.children.push({
-          type: YETI_NODE_TYPE.DOCTYPE,
-          content: tokenValue,
-        });
+        if (openCommentNode) {
+          // Trim whitespace from comment content
+          openCommentNode.content = openCommentNode.content.trim();
+          currentParent.children.push(openCommentNode);
+          openCommentNode = null;
+        } else {
+          currentParent.children.push({
+            type: YETI_NODE_TYPE.COMMENT,
+            // Empty comment with no content
+            content: "",
+          });
+        }
+        break;
+      }
+      case TOKEN_TYPE.DOCTYPE_PART: {
+        if (openDoctypeNode) {
+          openDoctypeNode.content += String(tokenValue);
+        } else {
+          openDoctypeNode = {
+            type: YETI_NODE_TYPE.DOCTYPE,
+            content: String(tokenValue),
+          };
+        }
+        break;
+      }
+      case TOKEN_TYPE.DOCTYPE_END: {
+        const currentParent = getCurrentOpenParent();
+        if (openDoctypeNode) {
+          // Trim leading and trailing whitespace from the doctype content
+          openDoctypeNode.content = openDoctypeNode.content.trim();
+          currentParent.children.push(openDoctypeNode);
+          openDoctypeNode = null;
+        } else {
+          currentParent.children.push({
+            type: YETI_NODE_TYPE.DOCTYPE,
+            // Empty doctype with no content
+            content: "",
+          });
+        }
         break;
       }
       case TOKEN_TYPE.SPREAD_ATTR: {
@@ -317,7 +358,7 @@ export const parseHTML = async (htmlStringChars: Uint8Array, dynamicValues: unkn
         throw tokenValue;
       }
     }
-  }
+  });
 
   while (await closeCurrentParent() !== null) {
     // Keep closing any open nodes until we reach the root. This will ensure that all nodes are properly closed and appended to the tree, 

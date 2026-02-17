@@ -35,14 +35,16 @@ export const TOKEN_TYPE = {
   ATTR_NAME: 30,
   ATTR_VALUE: 31,
   SPREAD_ATTR: 32,
-  COMMENT: 40,
-  DOCTYPE: 50,
+  COMMENT_PART: 40,
+  COMMENT_END: 41,
+  DOCTYPE_PART: 50,
+  DOCTYPE_END: 51,
 } as const satisfies Record<string, number>;
 
 type LexerTokenName = keyof typeof TOKEN_TYPE;
-type LexerTokenType = typeof TOKEN_TYPE[LexerTokenName];
+export type LexerTokenType = typeof TOKEN_TYPE[LexerTokenName];
 
-type LexerTokenValueTypeMap = {
+export type LexerTokenValueTypeMap = {
   [TOKEN_TYPE.ERROR]: YetiHTMLParsingError;
   [TOKEN_TYPE.CHILD_CONTENT]: unknown; // Can be a string or a raw dynamic value
   [TOKEN_TYPE.OPENING_TAG_END]: boolean; // Whether the opening tag is self-closing or not (i.e., whether we lexed a "/>" or a ">")
@@ -51,17 +53,19 @@ type LexerTokenValueTypeMap = {
   [TOKEN_TYPE.ATTR_NAME]: string; // Should be a string, but we allow dynamic values that resolve to strings
   [TOKEN_TYPE.ATTR_VALUE]: unknown; // Can be a string or a raw dynamic value
   [TOKEN_TYPE.SPREAD_ATTR]: unknown; // A raw dynamic value representing the object to spread
-  [TOKEN_TYPE.COMMENT]: string; // Should be a string, but we allow dynamic values that resolve to strings
-  [TOKEN_TYPE.DOCTYPE]: string;
+  [TOKEN_TYPE.COMMENT_PART]: unknown; // Should be a string, but we allow dynamic values that resolve to strings
+  [TOKEN_TYPE.COMMENT_END]: null; // No value, just indicates the end of a comment
+  [TOKEN_TYPE.DOCTYPE_PART]: unknown;
+  [TOKEN_TYPE.DOCTYPE_END]: null; // No value, just indicates the end of a doctype
 };
 
 // Using a distributive conditional type to create a union of properly typed tuples where the
 // first item is a token type and the second item is the corresponding value type for that token.
-export type LexerToken<T extends LexerTokenType = LexerTokenType> = T extends T ? [T, LexerTokenValueTypeMap[T]] : never;
+export type LexerToken<T extends LexerTokenType = LexerTokenType> = T extends T ? [tokenType: T, tokenValue: LexerTokenValueTypeMap[T]] : never;
 
 const NO_DYNAMIC_VALUE = Symbol("NO_DYNAMIC_VALUE");
 
-type LexerContext = {
+type LexerContext<TTokenNames extends LexerTokenName = LexerTokenName> = {
   /**
    * Peeks ahead to a single char code in the input string without advancing the current position.
    *
@@ -93,14 +97,15 @@ type LexerContext = {
   // We need to track whether we're lexing inside a raw text element (e.g., <script>, <style>, <textarea>) so that we know to ignore tag-like syntax and just treat everything as text content until we reach the closing tag for that element.
   setCurrentRawTextElementTagName(value: RawStringContentTagName | null): void;
   getCurrentRawTextElementTagName(): RawStringContentTagName | null;
+  emitToken<TToken extends LexerToken<typeof TOKEN_TYPE[TTokenNames]>>(...token: TToken): Promise<void>;
 }
 
 /**
  * A generator function that performs lexing and yields the next lexer function to execute, or null if lexing is complete.
  */
-type LexerFunction<TTokenNames extends LexerTokenName> = (ctx: LexerContext) => Generator<LexerToken<typeof TOKEN_TYPE[TTokenNames]>, LexerFunction<any> | null, void>;
+type LexerFunction<TTokenNames extends LexerTokenName> = (ctx: LexerContext<TTokenNames>) => Promise<LexerFunction<any> | null>;
 
-const lexTextContent: LexerFunction<"CHILD_CONTENT" | "ERROR"> = function* (ctx) {
+const lexTextContent: LexerFunction<"CHILD_CONTENT" | "ERROR"> = async (ctx) => {
   let nextLexerFunction: LexerFunction<any> | null = null;
   let currentChunkStartIndex = ctx.getIndex();
   let currentChunkLength = 0;
@@ -171,14 +176,14 @@ const lexTextContent: LexerFunction<"CHILD_CONTENT" | "ERROR"> = function* (ctx)
         if (currentChunkLength > 0) {
           // If we have accumulated any text content before this dynamic value,
           // we need to resolve that character chunk and yield it before yielding the dynamic value.
-          yield [TOKEN_TYPE.CHILD_CONTENT, ctx.getSubstring(
+          await ctx.emitToken(TOKEN_TYPE.CHILD_CONTENT, ctx.getSubstring(
             currentChunkStartIndex,
             currentChunkLength,
-          )];
+          ));
         }
         // Emit the raw dynamic value as a child content token; the parser can handle it from there
         // if we want to unwrap iterables, promises, inlined functions, etc
-        yield [TOKEN_TYPE.CHILD_CONTENT, dynamicValue];
+        await ctx.emitToken(TOKEN_TYPE.CHILD_CONTENT, dynamicValue);
 
         // Advance past the dynamic value character sequence
         currentChunkStartIndex = ctx.advance(DYNAMIC_VALUE_CHARACTER_SEQUENCE_BYTE_LENGTH);
@@ -194,23 +199,22 @@ const lexTextContent: LexerFunction<"CHILD_CONTENT" | "ERROR"> = function* (ctx)
 
   if (currentChunkLength > 0) {
     // Skip text content token if empty
-    yield [TOKEN_TYPE.CHILD_CONTENT, ctx.getSubstring(
+    await ctx.emitToken(TOKEN_TYPE.CHILD_CONTENT, ctx.getSubstring(
       currentChunkStartIndex,
       currentChunkLength,
-    )];
+    ));
   }
 
   return nextLexerFunction;
 }
 
-const lexComment: LexerFunction<"COMMENT" | "ERROR"> = function* (ctx) {
+const lexComment: LexerFunction<"COMMENT_PART" | "COMMENT_END" | "ERROR"> = async (ctx) => {
   // Skip the opening "<!--"
   ctx.advance(4);
   let nextLexerFunction: LexerFunction<any> | null = null;
 
   let chunkStartIndex = ctx.getIndex();
   let chunkLength = 0;
-  let stringParts: string[] | null = null;
 
   while (!ctx.isAtEnd()) {
     const nextCharCode = ctx.peekCharCode();
@@ -223,51 +227,37 @@ const lexComment: LexerFunction<"COMMENT" | "ERROR"> = function* (ctx) {
 
     const dynamicValue = ctx.peekDynamicValue();
     if (dynamicValue !== NO_DYNAMIC_VALUE) {
-      stringParts ??= [];
-      // Flush current chunk before adding dynamic value
       if (chunkLength > 0) {
-        stringParts.push(ctx.getSubstring(chunkStartIndex, chunkLength));
+        // Flush current chunk before adding dynamic value
+        await ctx.emitToken(TOKEN_TYPE.COMMENT_PART, ctx.getSubstring(chunkStartIndex, chunkLength));
+        chunkLength = 0;
       }
-      // Just stringify the dynamic value and include it in the comment content
-      stringParts.push(String(dynamicValue));
+
+      await ctx.emitToken(TOKEN_TYPE.COMMENT_PART, dynamicValue);
       chunkStartIndex = ctx.advance(DYNAMIC_VALUE_CHARACTER_SEQUENCE_BYTE_LENGTH);
-      chunkLength = 0;
     } else {
       chunkLength++;
       ctx.advance(1);
     }
   }
 
-  let commentContent: string;
-
   // Flush final chunk
   if (chunkLength > 0) {
-    const finalChunk = ctx.getSubstring(chunkStartIndex, chunkLength);
-    if (stringParts === null) {
-      commentContent = finalChunk;
-    } else {
-      stringParts.push(finalChunk);
-      commentContent = stringParts.join('');
-    }
-  } else if (stringParts) {
-    commentContent = stringParts.join('');
-  } else {
-    commentContent = "";
+    await ctx.emitToken(TOKEN_TYPE.COMMENT_PART, ctx.getSubstring(chunkStartIndex, chunkLength));
   }
 
-  yield [TOKEN_TYPE.COMMENT, commentContent.trim()];
+  await ctx.emitToken(TOKEN_TYPE.COMMENT_END, null);
 
   return nextLexerFunction;
 };
 
-const lexDoctype: LexerFunction<"DOCTYPE" | "ERROR"> = function* (ctx) {
+const lexDoctype: LexerFunction<"DOCTYPE_PART" | "DOCTYPE_END" | "ERROR"> = async (ctx) => {
   // Skip the opening "<!DOCTYPE"
   ctx.advance(9);
   let nextLexerFunction: LexerFunction<any> | null = null;
 
   let chunkStartIndex = ctx.getIndex();
   let chunkLength = 0;
-  let stringParts: string[] | null = null;
 
   while (!ctx.isAtEnd()) {
     const nextCharCode = ctx.peekCharCode();
@@ -280,57 +270,36 @@ const lexDoctype: LexerFunction<"DOCTYPE" | "ERROR"> = function* (ctx) {
 
     const dynamicValue = ctx.peekDynamicValue();
     if (dynamicValue !== NO_DYNAMIC_VALUE) {
-      stringParts ??= [];
-      // Flush current chunk before adding dynamic value
       if (chunkLength > 0) {
-        stringParts.push(ctx.getSubstring(chunkStartIndex, chunkLength));
+        // Flush current chunk before adding dynamic value
+        await ctx.emitToken(TOKEN_TYPE.DOCTYPE_PART, ctx.getSubstring(chunkStartIndex, chunkLength));
+        chunkLength = 0;
       }
       // Just stringify the dynamic value and include it in the doctype content
-      stringParts.push(String(dynamicValue));
+      await ctx.emitToken(TOKEN_TYPE.DOCTYPE_PART, dynamicValue);
       chunkStartIndex = ctx.advance(DYNAMIC_VALUE_CHARACTER_SEQUENCE_BYTE_LENGTH);
-      chunkLength = 0;
       continue;
     }
 
-    if (isWhiteSpaceCharCode(nextCharCode)) {
-      if (chunkLength === 0) {
-        // Skip leading whitespace and shift up the chunk start index
-        chunkStartIndex = ctx.advance(1);
-      } else {
-        // We already have some content so just keep moving but don't update
-        // lastNonWhitespaceLength until we hit a non-whitespace character
-        chunkLength++;
-        ctx.advance(1);
-      }
+    if (isWhiteSpaceCharCode(nextCharCode) && chunkLength === 0) {
+      // Skip leading whitespace and shift up the chunk start index
+      chunkStartIndex = ctx.advance(1);
     } else {
-      // We have a non-whitespace character, so we can update lastNonWhitespaceLength
-      // to include any preceding whitespace as well
       chunkLength++;
       ctx.advance(1);
     }
   }
 
-  let doctypeContent: string;
-  // Flush final chunk, but only include content up to the last non-whitespace character to trim trailing whitespace
+  // Flush final chunk
   if (chunkLength > 0) {
-    const finalChunk = ctx.getSubstring(chunkStartIndex, chunkLength);
-    if (stringParts === null) {
-      doctypeContent = finalChunk;
-    } else {
-      stringParts.push(finalChunk);
-      doctypeContent = stringParts.join('');
-    }
-  } else if (stringParts) {
-    doctypeContent = stringParts.join('');
-  } else {
-    doctypeContent = "";
+    await ctx.emitToken(TOKEN_TYPE.DOCTYPE_PART, ctx.getSubstring(chunkStartIndex, chunkLength));
   }
 
-  yield [TOKEN_TYPE.DOCTYPE, doctypeContent.trim()];
+  await ctx.emitToken(TOKEN_TYPE.DOCTYPE_END, null);
   return nextLexerFunction;
 }
 
-const lexOpeningTagname: LexerFunction<"OPENING_TAGNAME" | "ERROR"> = function* (ctx) {
+const lexOpeningTagname: LexerFunction<"OPENING_TAGNAME" | "ERROR"> = async (ctx) => {
   // Skip the opening "<"
   ctx.advance(1);
 
@@ -348,7 +317,7 @@ const lexOpeningTagname: LexerFunction<"OPENING_TAGNAME" | "ERROR"> = function* 
         ctx.advance(DYNAMIC_VALUE_CHARACTER_SEQUENCE_BYTE_LENGTH);
         // We yield the function as the tag name and transition to lexing attributes and
         // the rest of the tag as normal.
-        yield [TOKEN_TYPE.OPENING_TAGNAME, dynamicValue];
+        await ctx.emitToken(TOKEN_TYPE.OPENING_TAGNAME, dynamicValue);
         return lexAttributeName;
       }
 
@@ -385,7 +354,10 @@ const lexOpeningTagname: LexerFunction<"OPENING_TAGNAME" | "ERROR"> = function* 
       nextLexerFunction = lexOpeningTagEnd;
       break;
     } else {
-      yield [TOKEN_TYPE.ERROR, new YetiHTMLParsingError(`lexOpeningTagname encountered unexpected character "${String.fromCharCode(nextCharCode)}". This is not a valid character for an HTML tag name.`)];
+      await ctx.emitToken(
+        TOKEN_TYPE.ERROR,
+        new YetiHTMLParsingError(`lexOpeningTagname encountered unexpected character "${String.fromCharCode(nextCharCode)}". This is not a valid character for an HTML tag name.`),
+      );
       return null;
     }
   }
@@ -405,12 +377,18 @@ const lexOpeningTagname: LexerFunction<"OPENING_TAGNAME" | "ERROR"> = function* 
     tagName = stringParts.join('');
   } else {
     // Shouldn't be possible to reach this state, throw an error if we do
-    yield [TOKEN_TYPE.ERROR, new YetiHTMLParsingError(`lexOpeningTagname did not find any valid tag name characters.`)];
+    await ctx.emitToken(
+      TOKEN_TYPE.ERROR,
+      new YetiHTMLParsingError(`lexOpeningTagname did not find any valid tag name characters.`),
+    );
     return null;
   }
 
   if (!isValidHTMLTagNameString(tagName)) {
-    yield [TOKEN_TYPE.ERROR, new YetiHTMLParsingError(`lexOpeningTagname received invalid tag name "${tagName}".`)];
+    await ctx.emitToken(
+      TOKEN_TYPE.ERROR,
+      new YetiHTMLParsingError(`lexOpeningTagname received invalid tag name "${tagName}".`),
+    );
     return null;
   }
 
@@ -420,11 +398,11 @@ const lexOpeningTagname: LexerFunction<"OPENING_TAGNAME" | "ERROR"> = function* 
     ctx.setCurrentRawTextElementTagName(tagName);
   }
 
-  yield [TOKEN_TYPE.OPENING_TAGNAME, tagName];
+  await ctx.emitToken(TOKEN_TYPE.OPENING_TAGNAME, tagName);
   return nextLexerFunction;
 }
 
-const lexAttributeName: LexerFunction<"ATTR_NAME" | "SPREAD_ATTR" | "ERROR"> = function* (ctx) {
+const lexAttributeName: LexerFunction<"ATTR_NAME" | "SPREAD_ATTR" | "ERROR"> = async (ctx) => {
   let nextLexerFunction: LexerFunction<any> | null = null;
 
   while (!ctx.isAtEnd() && isWhiteSpaceCharCode(ctx.peekCharCode())) {
@@ -445,7 +423,6 @@ const lexAttributeName: LexerFunction<"ATTR_NAME" | "SPREAD_ATTR" | "ERROR"> = f
   //   and we can transition to lexing the next attribute name, ignoring the whitespace in between.
   let hasWhitespaceTerminatedAttributeName = false;
 
-
   while (!ctx.isAtEnd()) {
     const nextCharCode = ctx.peekCharCode();
 
@@ -456,7 +433,7 @@ const lexAttributeName: LexerFunction<"ATTR_NAME" | "SPREAD_ATTR" | "ERROR"> = f
         // Check for dynamic value after "..."
         const dynamicValue = ctx.peekDynamicValue(3);
         if (dynamicValue !== NO_DYNAMIC_VALUE) {
-          yield [TOKEN_TYPE.SPREAD_ATTR, dynamicValue];
+          await ctx.emitToken(TOKEN_TYPE.SPREAD_ATTR, dynamicValue);
           // Consume the "..." + dynamic value char sequence
           chunkStartIndex = ctx.advance(3 + DYNAMIC_VALUE_CHARACTER_SEQUENCE_BYTE_LENGTH);
           continue;
@@ -522,18 +499,21 @@ const lexAttributeName: LexerFunction<"ATTR_NAME" | "SPREAD_ATTR" | "ERROR"> = f
 
   if (attrName) {
     if (!isValidHTMLAttributeNameString(attrName)) {
-      yield [TOKEN_TYPE.ERROR, new YetiHTMLParsingError(`lexAttributeName received invalid attribute name "${attrName}"`)];
+      await ctx.emitToken(
+        TOKEN_TYPE.ERROR,
+        new YetiHTMLParsingError(`lexAttributeName received invalid attribute name "${attrName}"`),
+      );
       return null;
     }
     // Only add attribute name token if we found a valid name.
     // It's okay if we didn't as long as we're not transitioning to attribute value lexing.
-    yield [TOKEN_TYPE.ATTR_NAME, attrName];
+    await ctx.emitToken(TOKEN_TYPE.ATTR_NAME, attrName);
   }
 
   return nextLexerFunction;
 }
 
-const lexAttributeValue: LexerFunction<"ATTR_VALUE" | "ERROR"> = function* (ctx) {
+const lexAttributeValue: LexerFunction<"ATTR_VALUE" | "ERROR"> = async (ctx) => {
   // Skip the equals sign
   ctx.advance(1);
 
@@ -543,8 +523,6 @@ const lexAttributeValue: LexerFunction<"ATTR_VALUE" | "ERROR"> = function* (ctx)
   while (!ctx.isAtEnd() && isWhiteSpaceCharCode(ctx.peekCharCode())) {
     ctx.advance(1);
   }
-
-
 
   const quoteCharCode = ctx.peekCharCode();
   // Quoted attribute value starting with either " or '
@@ -564,11 +542,11 @@ const lexAttributeValue: LexerFunction<"ATTR_VALUE" | "ERROR"> = function* (ctx)
       if (dynamicValue !== NO_DYNAMIC_VALUE) {
         if (currentChunkLength > 0) {
           // Flush current chunk before adding dynamic value
-          yield [TOKEN_TYPE.ATTR_VALUE, ctx.getSubstring(currentChunkStartIndex, currentChunkLength)];
+          await ctx.emitToken(TOKEN_TYPE.ATTR_VALUE, ctx.getSubstring(currentChunkStartIndex, currentChunkLength));
           currentChunkLength = 0;
         }
 
-        yield [TOKEN_TYPE.ATTR_VALUE, dynamicValue];
+        await ctx.emitToken(TOKEN_TYPE.ATTR_VALUE, dynamicValue);
 
         currentChunkStartIndex = ctx.advance(DYNAMIC_VALUE_CHARACTER_SEQUENCE_BYTE_LENGTH);
         continue;
@@ -596,7 +574,7 @@ const lexAttributeValue: LexerFunction<"ATTR_VALUE" | "ERROR"> = function* (ctx)
     }
 
     if (currentChunkLength > 0) {
-      yield [TOKEN_TYPE.ATTR_VALUE, ctx.getSubstring(currentChunkStartIndex, currentChunkLength)];
+      await ctx.emitToken(TOKEN_TYPE.ATTR_VALUE, ctx.getSubstring(currentChunkStartIndex, currentChunkLength));
     }
 
     return nextLexerFunction;
@@ -611,11 +589,11 @@ const lexAttributeValue: LexerFunction<"ATTR_VALUE" | "ERROR"> = function* (ctx)
       if (dynamicValue !== NO_DYNAMIC_VALUE) {
         if (unquotedLength > 0) {
           // Flush current chunk before adding dynamic value
-          yield [TOKEN_TYPE.ATTR_VALUE, ctx.getSubstring(unquotedStartIndex, unquotedLength)];
+          await ctx.emitToken(TOKEN_TYPE.ATTR_VALUE, ctx.getSubstring(unquotedStartIndex, unquotedLength));
           unquotedLength = 0;
         }
 
-        yield [TOKEN_TYPE.ATTR_VALUE, dynamicValue];
+        await ctx.emitToken(TOKEN_TYPE.ATTR_VALUE, dynamicValue);
         unquotedStartIndex = ctx.advance(DYNAMIC_VALUE_CHARACTER_SEQUENCE_BYTE_LENGTH);
         continue;
       }
@@ -637,29 +615,32 @@ const lexAttributeValue: LexerFunction<"ATTR_VALUE" | "ERROR"> = function* (ctx)
     }
 
     if (unquotedLength > 0) {
-      yield [TOKEN_TYPE.ATTR_VALUE, ctx.getSubstring(unquotedStartIndex, unquotedLength)];
+      await ctx.emitToken(TOKEN_TYPE.ATTR_VALUE, ctx.getSubstring(unquotedStartIndex, unquotedLength));
     }
 
     return nextLexerFunction;
   }
 }
 
-const lexOpeningTagEnd: LexerFunction<"OPENING_TAG_END" | "ERROR"> = function* (ctx) {
+const lexOpeningTagEnd: LexerFunction<"OPENING_TAG_END" | "ERROR"> = async (ctx) => {
   // This lexer function is just responsible for consuming the closing ">" or "/>" of an opening tag and yielding the appropriate token.
   const nextCharCode = ctx.peekCharCode();
   if (nextCharCode === CHAR_CODE_GT) {
     // Normal opening tag end
-    yield [TOKEN_TYPE.OPENING_TAG_END, false];
+    await ctx.emitToken(TOKEN_TYPE.OPENING_TAG_END, false);
     ctx.advance(1);
   } else if (nextCharCode === CHAR_CODE_SLASH && ctx.peekCharCode(1) === CHAR_CODE_GT) {
     // If we see a "/>" here, it means we have a self-closing tag. We should yield an OPENING_TAG_END token with a value of true to indicate this,
     // and then transition to lexSelfClosingTagEnd to consume the "/>" and transition back to text content lexing.
-    yield [TOKEN_TYPE.OPENING_TAG_END, true];
+    await ctx.emitToken(TOKEN_TYPE.OPENING_TAG_END, true);
     ctx.advance(2); // Consume the "/>"
   } else {
     // We should never get here because lexOpeningTagname should only transition to this lexer function if it sees a ">" or "/>" character,
     // but we'll include an error case just in case.
-    yield [TOKEN_TYPE.ERROR, new YetiHTMLParsingError(`lexOpeningTagEnd expected ">" or "/>" but found "${String.fromCharCode(nextCharCode)}".`)];
+    await ctx.emitToken(
+      TOKEN_TYPE.ERROR,
+      new YetiHTMLParsingError(`lexOpeningTagEnd expected ">" or "/>" but found "${String.fromCharCode(nextCharCode)}".`),
+    );
     return null;
   }
 
@@ -671,7 +652,7 @@ const lexOpeningTagEnd: LexerFunction<"OPENING_TAG_END" | "ERROR"> = function* (
   return lexTextContent;
 }
 
-const lexRawTextElementContent: LexerFunction<"CHILD_CONTENT" | "ERROR"> = function* (ctx) {
+const lexRawTextElementContent: LexerFunction<"CHILD_CONTENT" | "ERROR"> = async (ctx) => {
   let nextLexerFunction: LexerFunction<any> | null = null;
   let currentChunkStartIndex = ctx.getIndex();
   let currentChunkLength = 0;
@@ -680,7 +661,10 @@ const lexRawTextElementContent: LexerFunction<"CHILD_CONTENT" | "ERROR"> = funct
   if (!rawTextElementTagName) {
     // We should never get here because we should only transition to this lexer function if we
     // have a current raw text element tag name set in the context, but we'll include an error case just in case.
-    yield [TOKEN_TYPE.ERROR, new YetiHTMLParsingError(`lexRawTextElementContent was entered without a current raw text element tag name set in the context.`)];
+    await ctx.emitToken(
+      TOKEN_TYPE.ERROR,
+      new YetiHTMLParsingError(`lexRawTextElementContent was entered without a current raw text element tag name set in the context.`),
+    );
     return null;
   }
 
@@ -727,9 +711,9 @@ const lexRawTextElementContent: LexerFunction<"CHILD_CONTENT" | "ERROR"> = funct
       // If we have a dynamic value in raw text content, we should just include it as part of the text content. The parser can handle it from there.
       if (currentChunkLength > 0) {
         // Flush any accumulated chunk before yielding the dynamic value
-        yield [TOKEN_TYPE.CHILD_CONTENT, ctx.getSubstring(currentChunkStartIndex, currentChunkLength)];
+        await ctx.emitToken(TOKEN_TYPE.CHILD_CONTENT, ctx.getSubstring(currentChunkStartIndex, currentChunkLength));
       }
-      yield [TOKEN_TYPE.CHILD_CONTENT, dynamicValue];
+      await ctx.emitToken(TOKEN_TYPE.CHILD_CONTENT, dynamicValue);
       currentChunkStartIndex = ctx.advance(DYNAMIC_VALUE_CHARACTER_SEQUENCE_BYTE_LENGTH);
       currentChunkLength = 0;
       continue;
@@ -740,7 +724,7 @@ const lexRawTextElementContent: LexerFunction<"CHILD_CONTENT" | "ERROR"> = funct
   }
 
   if (currentChunkLength > 0) {
-    yield [TOKEN_TYPE.CHILD_CONTENT, ctx.getSubstring(currentChunkStartIndex, currentChunkLength)];
+    await ctx.emitToken(TOKEN_TYPE.CHILD_CONTENT, ctx.getSubstring(currentChunkStartIndex, currentChunkLength));
   }
 
   // Clear the current raw text element tag name from the context since we're exiting that element after this lexer function
@@ -749,7 +733,7 @@ const lexRawTextElementContent: LexerFunction<"CHILD_CONTENT" | "ERROR"> = funct
   return nextLexerFunction;
 };
 
-const lexClosingTag: LexerFunction<"CLOSING_TAGNAME" | "ERROR"> = function* (ctx) {
+const lexClosingTag: LexerFunction<"CLOSING_TAGNAME" | "ERROR"> = async (ctx) => {
   // Skip the opening "</"
   ctx.advance(2);
 
@@ -813,7 +797,7 @@ const lexClosingTag: LexerFunction<"CLOSING_TAGNAME" | "ERROR"> = function* (ctx
   }
 
   if (dynamicComponentTagFunction !== null) {
-    yield [TOKEN_TYPE.CLOSING_TAGNAME, dynamicComponentTagFunction];
+    await ctx.emitToken(TOKEN_TYPE.CLOSING_TAGNAME, dynamicComponentTagFunction);
   } else {
     let closingTagName: string;
 
@@ -832,29 +816,35 @@ const lexClosingTag: LexerFunction<"CLOSING_TAGNAME" | "ERROR"> = function* (ctx
       closingTagName = '';
     }
 
-    yield [TOKEN_TYPE.CLOSING_TAGNAME, closingTagName];
+    await ctx.emitToken(TOKEN_TYPE.CLOSING_TAGNAME, closingTagName);
   }
 
   return nextLexerFunction;
 };
 
 /**
- * Lexes HTML strings into tokens using a generator-based approach.
- *
- * Yields tuples for tokens as they are parsed, where the first item is the token type
- * and the second item is the token value (e.g., `[TOKEN_TYPE.OPENING_TAGNAME, "div"]`)
+ * Lexes HTML strings into tokens which can be used to construct a node tree.
  *
  * @param htmlStringChars - The HTML string to lex
  * @param dynamicValues - Array of dynamic values that can be referenced via placeholder character sequences in the HTML
  *
+ * @returns A flat array of lexer tokens and values, where every even numbered index is a token type and every odd numbered index is the value
+ *          for the preceding token type.
  * @example
  * ```ts
- * for (const [tokenType, tokenValue] of lexHTML('<div>Hello</div>', [])) {
+ * const tokens = lexHTML('<div>Hello</div>', []);
+ * for (let i = 0; i < tokens.length; i += 2) {
+ *   const tokenType = tokens[i];
+ *   const tokenValue = tokens[i + 1];
  *   console.log('Token type:', tokenType, 'Value:', tokenValue);
  * }
  * ```
  */
-export function* lexHTML(htmlStringChars: Uint8Array, dynamicValues: unknown[]): Generator<LexerToken, void, void> {
+export const lexHTML = async (
+  htmlStringChars: Uint8Array,
+  dynamicValues: unknown[],
+  onToken: (...token: LexerToken) => Promise<void>,
+): Promise<void> => {
   const htmlStringLength = htmlStringChars.length;
 
   let charIndex = 0;
@@ -900,10 +890,11 @@ export function* lexHTML(htmlStringChars: Uint8Array, dynamicValues: unknown[]):
     setCurrentRawTextElementTagName(value) {
       currentRawTextElementTagName = value;
     },
+    emitToken: onToken,
   };
 
   let lexerFunction: LexerFunction<any> | null = lexTextContent;
   while (lexerFunction !== null) {
-    lexerFunction = yield* lexerFunction(lexerContext);
+    lexerFunction = await lexerFunction(lexerContext);
   }
-}
+};

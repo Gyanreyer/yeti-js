@@ -3,11 +3,12 @@ import {
   test,
 } from "node:test";
 import assert from "node:assert/strict";
-import { lexHTML, TOKEN_TYPE, type LexerToken } from "./lexHTML.ts";
+import { lexHTML, TOKEN_TYPE } from "./lexHTML.ts";
+import type { LexerToken } from "./lexHTML.ts";
 import { calculateStringByteLength, createDynamicValuePlaceholderString, DYNAMIC_VALUE_CHARACTER_SEQUENCE_BYTE_LENGTH, getDynamicValuePlaceholderByteSequence, textEncoder } from "./utils.ts";
 import { YetiHTMLParsingError } from "./error.ts";
 
-const htmlTokens = (strings: TemplateStringsArray, ...values: unknown[]): LexerToken[] => {
+const htmlTokens = async (strings: TemplateStringsArray, ...values: unknown[]): Promise<LexerToken[]> => {
   const stringsCount = strings.length;
   const valuesCount = values.length;
 
@@ -54,127 +55,149 @@ const htmlTokens = (strings: TemplateStringsArray, ...values: unknown[]): LexerT
     throw new Error(`Unexpected error while encoding template strings. Expected to write ${totalByteLength} bytes, but wrote ${offset} bytes.`);
   }
 
-  return Array.from(lexHTML(textCharBuffer, dynamicValues));
+  const tokens: LexerToken[] = [];
+  await lexHTML(textCharBuffer, dynamicValues, async (...token) => { tokens.push(token) });
+  return tokens;
 };
 
 describe("lexHTML", () => {
   describe("DOCTYPE declaration", () => {
-    test("lexes doctype declaration as expected", () => {
-      const tokens = htmlTokens`<!DOCTYPE html>`;
-      assert.deepStrictEqual(tokens, [
-        [TOKEN_TYPE.DOCTYPE, "html"],
-      ] satisfies LexerToken[]);
+    test("lexes doctype declaration as expected", async () => {
+      const tokens = await htmlTokens`<!DOCTYPE html>`;
+      assert.deepStrictEqual<LexerToken[]>(tokens, [
+        [TOKEN_TYPE.DOCTYPE_PART, "html"],
+        [TOKEN_TYPE.DOCTYPE_END, null],
+      ]);
     });
 
-    test("trims doctype content value as expected", () => {
-      const tokens = htmlTokens`<!DOCTYPE    html   >`;
-      assert.deepStrictEqual(tokens, [
-        [TOKEN_TYPE.DOCTYPE, "html"],
-      ] satisfies LexerToken[]);
+    test("trims doctype content value as expected", async () => {
+      const tokens = await htmlTokens`<!DOCTYPE    html   >`;
+      assert.deepStrictEqual<LexerToken[]>(tokens, [
+        [TOKEN_TYPE.DOCTYPE_PART, "html   "],
+        [TOKEN_TYPE.DOCTYPE_END, null],
+      ]);
     });
 
-    test("handles doctype declarations with no content as expected", () => {
-      const tokens = htmlTokens`<!DOCTYPE>`;
-      assert.deepStrictEqual(tokens, [
-        [TOKEN_TYPE.DOCTYPE, ""],
-      ] satisfies LexerToken[]);
+    test("handles doctype declarations with no content as expected", async () => {
+      const tokens = await htmlTokens`<!DOCTYPE>`;
+      assert.deepStrictEqual<LexerToken[]>(tokens, [
+        [TOKEN_TYPE.DOCTYPE_END, null],
+      ]);
     });
 
-    test("handles doctype declarations with dynamic content as expected", () => {
+    test("handles doctype declarations with dynamic content as expected", async () => {
       const dynamicValue = "html";
-      const tokens = htmlTokens`<!DOCTYPE ${dynamicValue}>`;
-      assert.deepStrictEqual(tokens, [
-        [TOKEN_TYPE.DOCTYPE, "html"],
-      ] satisfies LexerToken[]);
+      const tokens = await htmlTokens`<!DOCTYPE ${dynamicValue}>`;
+      assert.deepStrictEqual<LexerToken[]>(tokens, [
+        [TOKEN_TYPE.DOCTYPE_PART, "html"],
+        [TOKEN_TYPE.DOCTYPE_END, null],
+      ]);
     });
 
-    test("handles doctype declarations with mixed dynamic and static content", () => {
+    test("handles doctype declarations with mixed dynamic and static content", async () => {
       const dynamicValue = "tm";
-      const tokens = htmlTokens`
+      const tokens = await htmlTokens`
 <!DOCTYPE h${dynamicValue}>
 <!DOCTYPE h${dynamicValue}l>
 `;
-      assert.deepStrictEqual(tokens, [
+      assert.deepStrictEqual<LexerToken[]>(tokens, [
         [TOKEN_TYPE.CHILD_CONTENT, "\n"],
-        [TOKEN_TYPE.DOCTYPE, "htm"],
+        [TOKEN_TYPE.DOCTYPE_PART, "h"],
+        [TOKEN_TYPE.DOCTYPE_PART, "tm"],
+        [TOKEN_TYPE.DOCTYPE_END, null],
         [TOKEN_TYPE.CHILD_CONTENT, "\n"],
-        [TOKEN_TYPE.DOCTYPE, "html"],
+        [TOKEN_TYPE.DOCTYPE_PART, "h"],
+        [TOKEN_TYPE.DOCTYPE_PART, "tm"],
+        [TOKEN_TYPE.DOCTYPE_PART, "l"],
+        [TOKEN_TYPE.DOCTYPE_END, null],
         [TOKEN_TYPE.CHILD_CONTENT, "\n"],
-      ] satisfies LexerToken[]);
+      ]);
     });
   });
 
   describe("HTML comments", () => {
-    test("handles simple HTML comments as expected", () => {
-      const tokens = htmlTokens`<!-- This is a comment -->`;
-      assert.deepStrictEqual(tokens, [
-        [TOKEN_TYPE.COMMENT, "This is a comment"],
-      ] satisfies LexerToken[]);
+    test("handles simple HTML comments as expected", async () => {
+      const tokens = await htmlTokens`<!-- This is a comment -->`;
+      assert.deepStrictEqual<LexerToken[]>(tokens, [
+        [TOKEN_TYPE.COMMENT_PART, " This is a comment "],
+        [TOKEN_TYPE.COMMENT_END, null],
+      ]);
     });
 
-    test("handles comments with mixed dynamic values and static content as expected", () => {
+    test("handles comments with mixed dynamic values and static content as expected", async () => {
       const dynamicValue1 = "hello";
       const dynamicValue2 = 52;
       const dynamicValue3 = { foo: "bar" };
-      const tokens = htmlTokens`<!-- Comment with ${dynamicValue1}, ${dynamicValue2}, and ${dynamicValue3} -->`;
-      assert.deepStrictEqual(tokens, [
-        [TOKEN_TYPE.COMMENT, `Comment with hello, 52, and [object Object]`],
-      ] satisfies LexerToken[]);
+      const tokens = await htmlTokens`<!-- Comment with ${dynamicValue1}, ${dynamicValue2}, and ${dynamicValue3} -->`;
+      assert.deepStrictEqual<LexerToken[]>(tokens, [
+        [TOKEN_TYPE.COMMENT_PART, ` Comment with `],
+        [TOKEN_TYPE.COMMENT_PART, dynamicValue1],
+        [TOKEN_TYPE.COMMENT_PART, `, `],
+        [TOKEN_TYPE.COMMENT_PART, dynamicValue2],
+        [TOKEN_TYPE.COMMENT_PART, `, and `],
+        [TOKEN_TYPE.COMMENT_PART, dynamicValue3],
+        [TOKEN_TYPE.COMMENT_PART, ` `],
+        [TOKEN_TYPE.COMMENT_END, null],
+      ]);
     });
 
-    test("handles comments with only one dynamic value as expected", () => {
+    test("handles comments with only one dynamic value as expected", async () => {
       const dynamicValue1 = "hello";
       const dynamicValue2 = 52;
-      const tokens = htmlTokens`<!--${dynamicValue1}-->
+      const tokens = await htmlTokens`<!--${dynamicValue1}-->
 <!-- ${dynamicValue2} -->`;
-      assert.deepStrictEqual(tokens, [
-        [TOKEN_TYPE.COMMENT, `hello`],
+      assert.deepStrictEqual<LexerToken[]>(tokens, [
+        [TOKEN_TYPE.COMMENT_PART, `hello`],
+        [TOKEN_TYPE.COMMENT_END, null],
         [TOKEN_TYPE.CHILD_CONTENT, "\n"],
-        [TOKEN_TYPE.COMMENT, `52`],
-      ] satisfies LexerToken[]);
+        [TOKEN_TYPE.COMMENT_PART, ` `],
+        [TOKEN_TYPE.COMMENT_PART, 52],
+        [TOKEN_TYPE.COMMENT_PART, ` `],
+        [TOKEN_TYPE.COMMENT_END, null],
+      ]);
     });
 
-    test("handles empty comments as expected", () => {
-      const tokens = htmlTokens`<!---->`;
-      assert.deepStrictEqual(tokens, [
-        [TOKEN_TYPE.COMMENT, ""],
-      ] satisfies LexerToken[]);
+    test("handles empty comments as expected", async () => {
+      const tokens = await htmlTokens`<!---->`;
+      assert.deepStrictEqual<LexerToken[]>(tokens, [
+        [TOKEN_TYPE.COMMENT_END, null],
+      ]);
     });
   });
 
   describe("HTML content", () => {
     test("lexes empty string as expected", async () => {
-      const tokens = htmlTokens``;
-      assert.deepStrictEqual(tokens, []);
+      const tokens = await htmlTokens``;
+      assert.deepStrictEqual<LexerToken[]>(tokens, []);
     });
 
     test("lexes a string with only whitespace as expected", async () => {
-      const tokens = htmlTokens`   \n`;
-      assert.deepStrictEqual(tokens, [
+      const tokens = await htmlTokens`   \n`;
+      assert.deepStrictEqual<LexerToken[]>(tokens, [
         [TOKEN_TYPE.CHILD_CONTENT, "   \n"],
-      ] satisfies LexerToken[]);
+      ]);
     });
 
-    test("lexes a single HTML element as expected", () => {
-      const tokens = htmlTokens`<div></div>`;
-      assert.deepStrictEqual(tokens, [
+    test("lexes a single HTML element as expected", async () => {
+      const tokens = await htmlTokens`<div></div>`;
+      assert.deepStrictEqual<LexerToken[]>(tokens, [
         [TOKEN_TYPE.OPENING_TAGNAME, "div"],
         [TOKEN_TYPE.OPENING_TAG_END, false],
         [TOKEN_TYPE.CLOSING_TAGNAME, "div"],
-      ] satisfies LexerToken[]);
+      ]);
     });
 
-    test("lexes self-closing HTML elements as expected", () => {
-      const tokens = htmlTokens`<img />`;
-      assert.deepStrictEqual(tokens, [
+    test("lexes self-closing HTML elements as expected", async () => {
+      const tokens = await htmlTokens`<img />`;
+      assert.deepStrictEqual<LexerToken[]>(tokens, [
         [TOKEN_TYPE.OPENING_TAGNAME, "img"],
         [TOKEN_TYPE.OPENING_TAG_END, true],
-      ] satisfies LexerToken[]);
+      ]);
     });
 
-    test("lexes nested HTML elements as expected", () => {
-      const tokens = htmlTokens`<div><span>Hello, world!</span></div>`;
-      assert.deepStrictEqual(tokens, [
+    test("lexes nested HTML elements as expected", async () => {
+      const tokens = await htmlTokens`<div><span>Hello, world!</span></div>`;
+      assert.deepStrictEqual<LexerToken[]>(tokens, [
         [TOKEN_TYPE.OPENING_TAGNAME, "div"],
         [TOKEN_TYPE.OPENING_TAG_END, false],
         [TOKEN_TYPE.OPENING_TAGNAME, "span"],
@@ -182,24 +205,24 @@ describe("lexHTML", () => {
         [TOKEN_TYPE.CHILD_CONTENT, "Hello, world!"],
         [TOKEN_TYPE.CLOSING_TAGNAME, "span"],
         [TOKEN_TYPE.CLOSING_TAGNAME, "div"],
-      ] satisfies LexerToken[]);
+      ]);
     });
 
-    test("moves past unescaped characters in text content as expected", () => {
-      const tokens = htmlTokens`<div>Text with & < > " ' characters</div>`;
-      assert.deepStrictEqual(tokens, [
+    test("moves past unescaped characters in text content as expected", async () => {
+      const tokens = await htmlTokens`<div>Text with & < > " ' characters</div>`;
+      assert.deepStrictEqual<LexerToken[]>(tokens, [
         [TOKEN_TYPE.OPENING_TAGNAME, "div"],
         [TOKEN_TYPE.OPENING_TAG_END, false],
         [TOKEN_TYPE.CHILD_CONTENT, "Text with & < > \" ' characters"],
         [TOKEN_TYPE.CLOSING_TAGNAME, "div"],
-      ] satisfies LexerToken[]);
+      ]);
     });
 
-    test("handles dynamic values in text content as expected", () => {
+    test("handles dynamic values in text content as expected", async () => {
       const dynamicValue1 = "dynamicValue";
       const dynamicValue2 = 123;
 
-      const tokens = htmlTokens`<div>Text with ${dynamicValue1} and ${dynamicValue2} in it</div>`;
+      const tokens = await htmlTokens`<div>Text with ${dynamicValue1} and ${dynamicValue2} in it</div>`;
       assert.deepStrictEqual<LexerToken[]>(tokens, [
         [TOKEN_TYPE.OPENING_TAGNAME, "div"],
         [TOKEN_TYPE.OPENING_TAG_END, false],
@@ -212,8 +235,8 @@ describe("lexHTML", () => {
       ]);
     });
 
-    test("handles multi-byte characters correctly", () => {
-      const tokens = htmlTokens`<div>Emoji: 😀, Chinese: 你好, Cyrillic: Привет</div>`;
+    test("handles multi-byte characters correctly", async () => {
+      const tokens = await htmlTokens`<div>Emoji: 😀, Chinese: 你好, Cyrillic: Привет</div>`;
       assert.deepStrictEqual<LexerToken[]>(tokens, [
         [TOKEN_TYPE.OPENING_TAGNAME, "div"],
         [TOKEN_TYPE.OPENING_TAG_END, false],
@@ -222,8 +245,8 @@ describe("lexHTML", () => {
       ]);
     });
 
-    test("handles tags with raw text content correctly", () => {
-      const tokens = htmlTokens`<script>
+    test("handles tags with raw text content correctly", async () => {
+      const tokens = await htmlTokens`<script>
   const x = "<div>Not a tag</div>";
   const y = \`<script>This is not a real script</script>\`;
 </script>
@@ -257,25 +280,25 @@ describe("lexHTML", () => {
       ]);
     });
 
-    test("resolves dynamic values in raw text content correctly", () => {
+    test("resolves dynamic values in raw text content correctly", async () => {
       const dynamicValue1 = "dynamicValue";
-      const tokens = htmlTokens`<script>const x = "${dynamicValue1}";</script>`;
+      const tokens = await htmlTokens`<script>const x = "${dynamicValue1}";</script>`;
       assert.deepStrictEqual<LexerToken[]>(tokens, [
         [TOKEN_TYPE.OPENING_TAGNAME, "script"],
         [TOKEN_TYPE.OPENING_TAG_END, false],
         [TOKEN_TYPE.CHILD_CONTENT, 'const x = "'],
-        [TOKEN_TYPE.CHILD_CONTENT, 'dynamicValue'],
+        [TOKEN_TYPE.CHILD_CONTENT, dynamicValue1],
         [TOKEN_TYPE.CHILD_CONTENT, '";'],
         [TOKEN_TYPE.CLOSING_TAGNAME, "script"],
       ]);
     });
 
-    test("handles dynamic string tagnames as expected", () => {
+    test("handles dynamic string tagnames as expected", async () => {
       const dynamicTagName1 = "my-dynamic-tag";
       const dynamicTagNamePart1 = "my";
       const dynamicTagNamePart2 = 3;
 
-      const tokens = htmlTokens`
+      const tokens = await htmlTokens`
 <${dynamicTagName1}></${dynamicTagName1}>
 <${dynamicTagNamePart1}-tag></${dynamicTagNamePart1}-tag>
 <h${dynamicTagNamePart2}></h${dynamicTagNamePart2}>
@@ -298,22 +321,22 @@ describe("lexHTML", () => {
       ]);
     });
 
-    test("yields an error token for invalid tagnames", () => {
+    test("yields an error token for invalid tagnames", async () => {
       const invalidDynamicTagName = "invalid tag name";
-      let tokens = htmlTokens`<${invalidDynamicTagName}></${invalidDynamicTagName}>`;
+      let tokens = await htmlTokens`<${invalidDynamicTagName}></${invalidDynamicTagName}>`;
 
       assert.deepStrictEqual<LexerToken[]>(tokens, [
         [TOKEN_TYPE.ERROR, new YetiHTMLParsingError(`lexOpeningTagname received invalid tag name "${invalidDynamicTagName}".`)],
       ]);
 
-      tokens = htmlTokens`<ab#$^E%><ab#$^E%>`;
+      tokens = await htmlTokens`<ab#$^E%><ab#$^E%>`;
       assert.deepStrictEqual<LexerToken[]>(tokens, [
         [TOKEN_TYPE.ERROR, new YetiHTMLParsingError(`lexOpeningTagname encountered unexpected character "#". This is not a valid character for an HTML tag name.`)],
       ]);
     });
 
-    test("lexes a standard static HTML page as expected", () => {
-      const tokens = htmlTokens`<!DOCTYPE html>
+    test("lexes a standard static HTML page as expected", async () => {
+      const tokens = await htmlTokens`<!DOCTYPE html>
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
@@ -327,8 +350,9 @@ describe("lexHTML", () => {
 </html>
 `;
 
-      assert.deepStrictEqual(tokens, [
-        [TOKEN_TYPE.DOCTYPE, "html"],
+      assert.deepStrictEqual<LexerToken[]>(tokens, [
+        [TOKEN_TYPE.DOCTYPE_PART, "html"],
+        [TOKEN_TYPE.DOCTYPE_END, null],
         [TOKEN_TYPE.CHILD_CONTENT, "\n"],
         [TOKEN_TYPE.OPENING_TAGNAME, "html"],
         [TOKEN_TYPE.ATTR_NAME, "lang"],
@@ -374,43 +398,43 @@ describe("lexHTML", () => {
         [TOKEN_TYPE.CHILD_CONTENT, "\n"],
         [TOKEN_TYPE.CLOSING_TAGNAME, "html"],
         [TOKEN_TYPE.CHILD_CONTENT, "\n"],
-      ] satisfies LexerToken[]);
+      ]);
     });
   });
 
   describe("HTML attributes", () => {
-    test("lexes attributes with static values as expected", () => {
-      const tokens = htmlTokens`<input type="text" disabled>`;
-      assert.deepStrictEqual(tokens, [
+    test("lexes attributes with static values as expected", async () => {
+      const tokens = await htmlTokens`<input type="text" disabled>`;
+      assert.deepStrictEqual<LexerToken[]>(tokens, [
         [TOKEN_TYPE.OPENING_TAGNAME, "input"],
         [TOKEN_TYPE.ATTR_NAME, "type"],
         [TOKEN_TYPE.ATTR_VALUE, "text"],
         [TOKEN_TYPE.ATTR_NAME, "disabled"],
         [TOKEN_TYPE.OPENING_TAG_END, false],
-      ] satisfies LexerToken[]);
+      ]);
     });
 
-    test("handles attribute values with a combination of static and dynamic parts correctly", () => {
+    test("handles attribute values with a combination of static and dynamic parts correctly", async () => {
       const dynamicValuePart1 = "dynamic";
       const dynamicValuePart2 = 123;
 
-      const tokens = htmlTokens`<div attr="${dynamicValuePart1}-static-${dynamicValuePart2}">`;
-      assert.deepStrictEqual(tokens, [
+      const tokens = await htmlTokens`<div attr="${dynamicValuePart1}-static-${dynamicValuePart2}">`;
+      assert.deepStrictEqual<LexerToken[]>(tokens, [
         [TOKEN_TYPE.OPENING_TAGNAME, "div"],
         [TOKEN_TYPE.ATTR_NAME, "attr"],
         [TOKEN_TYPE.ATTR_VALUE, "dynamic"],
         [TOKEN_TYPE.ATTR_VALUE, "-static-"],
         [TOKEN_TYPE.ATTR_VALUE, 123],
         [TOKEN_TYPE.OPENING_TAG_END, false],
-      ] satisfies LexerToken[]);
+      ]);
     });
 
-    test("lexes dynamic values in attributes as expected", () => {
+    test("lexes dynamic values in attributes as expected", async () => {
       const dynamicValue1 = "dynamicValue";
       const dynamicValue2 = 0;
       const dynamicValue3 = { foo: "bar" };
 
-      const tokens = htmlTokens`<div attr1="${dynamicValue1}" attr2=${dynamicValue2} attr3=${dynamicValue3} attr4="${dynamicValue2}${dynamicValue3}" attr5="${dynamicValue2}-static">`;
+      const tokens = await htmlTokens`<div attr1="${dynamicValue1}" attr2=${dynamicValue2} attr3=${dynamicValue3} attr4="${dynamicValue2}${dynamicValue3}" attr5="${dynamicValue2}-static">`;
       assert.deepStrictEqual<LexerToken[]>(tokens, [
         [TOKEN_TYPE.OPENING_TAGNAME, "div"],
         [TOKEN_TYPE.ATTR_NAME, "attr1"],
@@ -429,8 +453,8 @@ describe("lexHTML", () => {
       ]);
     });
 
-    test("handles escaped quote characters in attribute values as expected", () => {
-      const tokens = htmlTokens`<div attr="This is a \\"quoted\\" value" attr2='This \\'too\\''>`;
+    test("handles escaped quote characters in attribute values as expected", async () => {
+      const tokens = await htmlTokens`<div attr="This is a \\"quoted\\" value" attr2='This \\'too\\''>`;
 
       assert.deepStrictEqual<LexerToken[]>(tokens, [
         [TOKEN_TYPE.OPENING_TAGNAME, "div"],
@@ -442,20 +466,20 @@ describe("lexHTML", () => {
       ]);
     });
 
-    test("lexes dynamic attribute names as expected", () => {
+    test("lexes dynamic attribute names as expected", async () => {
       const dynamicAttrName1 = "data-attr1";
       // Numbers are allowed as attribute names in HTML (eg, <div 1="value"> is valid HTML), so we should support them as dynamic attribute names as well.
       const dynamicAttrName2 = 1;
       const dynamicAttrPart1 = "data";
       const dynamicAttrPart2 = 3;
 
-      const tokens = htmlTokens`<div
+      const tokens = await htmlTokens`<div
   ${dynamicAttrName1}="value1"
   ${dynamicAttrName2}="value2"
   ${dynamicAttrPart1}-part="value3"
   part-${dynamicAttrPart2}="value4"
 >`;
-      assert.deepStrictEqual(tokens, [
+      assert.deepStrictEqual<LexerToken[]>(tokens, [
         [TOKEN_TYPE.OPENING_TAGNAME, "div"],
         [TOKEN_TYPE.ATTR_NAME, dynamicAttrName1],
         [TOKEN_TYPE.ATTR_VALUE, "value1"],
@@ -466,13 +490,13 @@ describe("lexHTML", () => {
         [TOKEN_TYPE.ATTR_NAME, `part-${dynamicAttrPart2}`],
         [TOKEN_TYPE.ATTR_VALUE, "value4"],
         [TOKEN_TYPE.OPENING_TAG_END, false],
-      ] satisfies LexerToken[]);
+      ]);
     });
 
-    test("returns error token for dynamic attribute names which aren't valid attribute names", () => {
+    test("returns error token for dynamic attribute names which aren't valid attribute names", async () => {
       const dynamicAttrName1 = "invalid attribute name";
 
-      const tokens = htmlTokens`<div ${dynamicAttrName1}="value1">`;
+      const tokens = await htmlTokens`<div ${dynamicAttrName1}="value1">`;
       assert.deepStrictEqual<LexerToken[]>(tokens, [
         [TOKEN_TYPE.OPENING_TAGNAME, "div"],
         [TOKEN_TYPE.ERROR, new YetiHTMLParsingError(`lexAttributeName received invalid attribute name "${dynamicAttrName1}"`)],
@@ -480,17 +504,17 @@ describe("lexHTML", () => {
 
       const dynamicAttrName2 = { foo: "bar" };
 
-      const tokens2 = htmlTokens`<div ${dynamicAttrName2}="value1">`;
+      const tokens2 = await htmlTokens`<div ${dynamicAttrName2}="value1">`;
       assert.deepStrictEqual<LexerToken[]>(tokens2, [
         [TOKEN_TYPE.OPENING_TAGNAME, "div"],
         [TOKEN_TYPE.ERROR, new YetiHTMLParsingError(`lexAttributeName received invalid attribute name "${dynamicAttrName2}"`)],
       ]);
     });
 
-    test("lexes spread attributes as expected", () => {
+    test("lexes spread attributes as expected", async () => {
       const dynamicSpreadValue = { foo: "bar" };
 
-      const tokens = htmlTokens`<div attr1="value1" ...="hi" ...${dynamicSpreadValue} attr2="value2">`;
+      const tokens = await htmlTokens`<div attr1="value1" ...="hi" ...${dynamicSpreadValue} attr2="value2">`;
 
       assert.deepStrictEqual<LexerToken[]>(tokens, [
         [TOKEN_TYPE.OPENING_TAGNAME, "div"],
@@ -507,8 +531,8 @@ describe("lexHTML", () => {
       ]);
     });
 
-    test("handles boolean attributes with no value as expected", () => {
-      const tokens = htmlTokens`<input type>`;
+    test("handles boolean attributes with no value as expected", async () => {
+      const tokens = await htmlTokens`<input type>`;
       assert.deepStrictEqual<LexerToken[]>(tokens, [
         [TOKEN_TYPE.OPENING_TAGNAME, "input"],
         [TOKEN_TYPE.ATTR_NAME, "type"],
@@ -516,8 +540,8 @@ describe("lexHTML", () => {
       ]);
     });
 
-    test("handles attributes with unquoted values as expected", () => {
-      const tokens = htmlTokens`<input type=text disabled=true>`;
+    test("handles attributes with unquoted values as expected", async () => {
+      const tokens = await htmlTokens`<input type=text disabled=true>`;
       assert.deepStrictEqual<LexerToken[]>(tokens, [
         [TOKEN_TYPE.OPENING_TAGNAME, "input"],
         [TOKEN_TYPE.ATTR_NAME, "type"],
@@ -528,8 +552,8 @@ describe("lexHTML", () => {
       ]);
     });
 
-    test("handles attibutes with spaces around the equals sign as expected", () => {
-      const tokens = htmlTokens`<input type = "text" disabled = 
+    test("handles attibutes with spaces around the equals sign as expected", async () => {
+      const tokens = await htmlTokens`<input type = "text" disabled = 
         true>`;
       assert.deepStrictEqual<LexerToken[]>(tokens, [
         [TOKEN_TYPE.OPENING_TAGNAME, "input"],
@@ -541,14 +565,14 @@ describe("lexHTML", () => {
       ]);
     });
 
-    test("handles an equals sign as an attribute name", () => {
+    test("handles an equals sign as an attribute name", async () => {
       // The HTML spec allows an equals sign to be the first character of an attribute name,
       // so we will allow this edge case
-      const tokens = htmlTokens`<div = ="value" =data-test=true></div>`;
+      const tokens = await htmlTokens`<div = ="value" =data-test=true></div>`;
       assert.deepStrictEqual<LexerToken[]>(tokens, [
         [TOKEN_TYPE.OPENING_TAGNAME, "div"],
         [TOKEN_TYPE.ATTR_NAME, "="],
-        [TOKEN_TYPE.ATTR_VALUE, 'value'],
+        [TOKEN_TYPE.ATTR_VALUE, "value"],
         [TOKEN_TYPE.ATTR_NAME, "=data-test"],
         [TOKEN_TYPE.ATTR_VALUE, "true"],
         [TOKEN_TYPE.OPENING_TAG_END, false],
@@ -556,10 +580,10 @@ describe("lexHTML", () => {
       ]);
     });
 
-    test("handles unquoted attribute value which mixes dynamic and static content", () => {
+    test("handles unquoted attribute value which mixes dynamic and static content", async () => {
       const dynamicValue = "dynamic";
 
-      const tokens = htmlTokens`<div attr=static-${dynamicValue} attr2=${dynamicValue}-static>`;
+      const tokens = await htmlTokens`<div attr=static-${dynamicValue} attr2=${dynamicValue}-static>`;
       assert.deepStrictEqual<LexerToken[]>(tokens, [
         [TOKEN_TYPE.OPENING_TAGNAME, "div"],
         [TOKEN_TYPE.ATTR_NAME, "attr"],
@@ -574,9 +598,9 @@ describe("lexHTML", () => {
   });
 
   describe("components", () => {
-    test("lexes self-closing components as expected", () => {
+    test("lexes self-closing components as expected", async () => {
       const MyComponent = () => "hello";
-      const tokens = htmlTokens`<${MyComponent} prop1='value1' />`;
+      const tokens = await htmlTokens`<${MyComponent} prop1='value1' />`;
       assert.deepStrictEqual<LexerToken[]>(tokens, [
         [TOKEN_TYPE.OPENING_TAGNAME, MyComponent],
         [TOKEN_TYPE.ATTR_NAME, "prop1"],
@@ -585,9 +609,9 @@ describe("lexHTML", () => {
       ]);
     });
 
-    test("lexes components with child content as expected", () => {
+    test("lexes components with child content as expected", async () => {
       const MyComponent = () => "hello";
-      const tokens = htmlTokens`<${MyComponent} prop1='value1'>Child content</${MyComponent}>`;
+      const tokens = await htmlTokens`<${MyComponent} prop1='value1'>Child content</${MyComponent}>`;
       assert.deepStrictEqual<LexerToken[]>(tokens, [
         [TOKEN_TYPE.OPENING_TAGNAME, MyComponent],
         [TOKEN_TYPE.ATTR_NAME, "prop1"],
@@ -598,9 +622,9 @@ describe("lexHTML", () => {
       ]);
     });
 
-    test("lexes components with shorthand closing tags as expected", () => {
+    test("lexes components with shorthand closing tags as expected", async () => {
       const MyComponent = () => "hello";
-      const tokens = htmlTokens`<${MyComponent} prop1='value1'>Child content</>`;
+      const tokens = await htmlTokens`<${MyComponent} prop1='value1'>Child content</>`;
       assert.deepStrictEqual<LexerToken[]>(tokens, [
         [TOKEN_TYPE.OPENING_TAGNAME, MyComponent],
         [TOKEN_TYPE.ATTR_NAME, "prop1"],
@@ -613,8 +637,8 @@ describe("lexHTML", () => {
   });
 
   describe("closing tags", () => {
-    test("handles closing tags with trailing whitespace as expected", () => {
-      const tokens = htmlTokens`<div>Content</div   >`;
+    test("handles closing tags with trailing whitespace as expected", async () => {
+      const tokens = await htmlTokens`<div>Content</div   >`;
       assert.deepStrictEqual<LexerToken[]>(tokens, [
         [TOKEN_TYPE.OPENING_TAGNAME, "div"],
         [TOKEN_TYPE.OPENING_TAG_END, false],
@@ -623,9 +647,9 @@ describe("lexHTML", () => {
       ]);
     });
 
-    test("handles closing tags with dynamic tag names as expected", () => {
+    test("handles closing tags with dynamic tag names as expected", async () => {
       const dynamicTagName = "div";
-      const tokens = htmlTokens`<div>Content</${dynamicTagName}>`;
+      const tokens = await htmlTokens`<div>Content</${dynamicTagName}>`;
       assert.deepStrictEqual<LexerToken[]>(tokens, [
         [TOKEN_TYPE.OPENING_TAGNAME, "div"],
         [TOKEN_TYPE.OPENING_TAG_END, false],
@@ -634,8 +658,8 @@ describe("lexHTML", () => {
       ]);
     });
 
-    test("handles closing tags with shorthand syntax as expected", () => {
-      const tokens = htmlTokens`<div>Content</>`;
+    test("handles closing tags with shorthand syntax as expected", async () => {
+      const tokens = await htmlTokens`<div>Content</>`;
       assert.deepStrictEqual<LexerToken[]>(tokens, [
         [TOKEN_TYPE.OPENING_TAGNAME, "div"],
         [TOKEN_TYPE.OPENING_TAG_END, false],
@@ -646,10 +670,10 @@ describe("lexHTML", () => {
   });
 
   describe("error handling", () => {
-    test("throws an error if a dynamic value placeholder index doesn't map to a value in the dynamic values array", () => {
-      assert.throws(() => {
-        Array.from(lexHTML(textEncoder.encode(`<div>${createDynamicValuePlaceholderString(0)}</div>`), []));
-      }, new YetiHTMLParsingError(`Invalid dynamic value index 0 encoded at position 5.`));
+    test("throws an error if a dynamic value placeholder index doesn't map to a value in the dynamic values array", async () => {
+      await assert.rejects(() =>
+        lexHTML(textEncoder.encode(`<div>${createDynamicValuePlaceholderString(0)}</div>`), [], async () => { }),
+        new YetiHTMLParsingError(`Invalid dynamic value index 0 encoded at position 5.`));
     });
   });
 });
