@@ -58,6 +58,7 @@ export const CHAR_CODE_SINGLE_QUOTE = 39; // '
 export const CHAR_CODE_BACKTICK = 96; // `
 export const CHAR_CODE_DOT = 46; // .
 export const CHAR_CODE_COLON = 58; // :
+export const CHAR_CODE_AMPERSAND = 38; // &
 export const CHAR_CODE_SPACE = 32; // space
 export const CHAR_CODE_TAB = 9; // tab
 export const CHAR_CODE_NEWLINE = 10; // newline
@@ -208,22 +209,31 @@ const RAW_STRING_CONTENTS_HTML_TAG_SET = new Set([
 
 export const isRawStringContentTag = (tagName: string): tagName is RawStringContentTagName => RAW_STRING_CONTENTS_HTML_TAG_SET.has(tagName.toLowerCase());
 
-const sanitizedHTMLEscapeCharMap: Record<string, string> = {
-  "&": "&amp;",
-  "<": "&lt;",
-  ">": "&gt;",
-  '"': "&quot;",
-  "'": "&#39;",
+const sanitizedHTMLEscapeCharMap: Record<number, string> = {
+  [CHAR_CODE_AMPERSAND]: "&amp;",
+  [CHAR_CODE_LT]: "&lt;",
+  [CHAR_CODE_GT]: "&gt;",
+  [CHAR_CODE_DOUBLE_QUOTE]: "&quot;",
+  [CHAR_CODE_SINGLE_QUOTE]: "&#39;",
 };
 
 export const sanitizeHTMLTextContent = (text: string): string => {
   let sanitizedText = "";
+  let lastIndex = 0;
 
   for (let i = 0; i < text.length; i++) {
     const char = text[i];
-    sanitizedText += sanitizedHTMLEscapeCharMap[char] ?? char;
+    const charCode = char.charCodeAt(0);
+    if (charCode in sanitizedHTMLEscapeCharMap) {
+      sanitizedText += text.slice(lastIndex, i) + sanitizedHTMLEscapeCharMap[charCode];
+      lastIndex = i + 1;
+    }
   }
-  return sanitizedText;
+  if (lastIndex === 0) {
+    return text;
+  }
+
+  return `${sanitizedText}${text.slice(lastIndex)}`;
 };
 
 const yetiNodeTypes = new Set<number>(Object.values(YETI_NODE_TYPE));

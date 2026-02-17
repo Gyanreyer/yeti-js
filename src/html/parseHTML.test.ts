@@ -121,14 +121,19 @@ describe("parseHTML", () => {
 
   test("should parse elements with attributes correctly", async () => {
     const result = await parseHTML(textEncoder.encode(
-      "<a href='https://example.com' target='_blank' data-bool>Link</a>"
+      "<a href='https://example.com' target='_blank' data-bool data-bool2>Link</a>"
     ), []);
     assert.deepEqual<YetiRootNode>(result, {
       type: YETI_NODE_TYPE.ROOT,
       children: [{
         type: YETI_NODE_TYPE.ELEMENT,
         tagName: "a",
-        attributes: { href: "https://example.com", target: "_blank", "data-bool": true },
+        attributes: {
+          href: "https://example.com",
+          target: "_blank",
+          "data-bool": true,
+          "data-bool2": true,
+        },
         children: [{
           type: YETI_NODE_TYPE.TEXT,
           content: "Link",
@@ -532,26 +537,6 @@ describe("parseHTML", () => {
         ],
       }],
     }, "Non-YetiNode objects should be stringified to [object Object] by default");
-  });
-
-  test("should escape special characters in text content", async () => {
-    const result = await parseHTML(textEncoder.encode(`<div>Special chars: & < > ${createDynamicValuePlaceholderString(0)}</div>`), [
-      "& < > \" '",
-    ]);
-    assert.deepEqual<YetiRootNode>(result, {
-      type: YETI_NODE_TYPE.ROOT,
-      children: [{
-        type: YETI_NODE_TYPE.ELEMENT,
-        tagName: "div",
-        attributes: {},
-        children: [
-          {
-            type: YETI_NODE_TYPE.TEXT,
-            content: "Special chars: &amp; &lt; &gt; &amp; &lt; &gt; &quot; &#39;",
-          },
-        ],
-      }],
-    }, "Special characters in text content should be escaped");
   });
 
   test("should skip null, undefined, or empty string values in child content", async () => {
@@ -1103,6 +1088,34 @@ describe("parseHTML", () => {
         { type: YETI_NODE_TYPE.ELEMENT, tagName: "p", attributes: {}, children: [{ type: YETI_NODE_TYPE.TEXT, content: "Child 1" }] },
         { type: YETI_NODE_TYPE.ELEMENT, tagName: "p", attributes: {}, children: [{ type: YETI_NODE_TYPE.TEXT, content: "Child 2" }] },
         { type: YETI_NODE_TYPE.ELEMENT, tagName: "footer", attributes: {}, children: [] },
+      ],
+    });
+  });
+
+  test("should skip sanitization for script and style tag contents", async () => {
+    const result = await parseHTML(textEncoder.encode("<style>body { color: red; content: '<p>Fake p</p>'; }</style><script>console.log('Hello <div>fake div</div>');</script>"), []);
+
+    assert.deepEqual<YetiRootNode>(result, {
+      type: YETI_NODE_TYPE.ROOT,
+      children: [
+        {
+          type: YETI_NODE_TYPE.ELEMENT,
+          tagName: "style",
+          attributes: {},
+          children: [{
+            type: YETI_NODE_TYPE.TEXT,
+            content: "body { color: red; content: '<p>Fake p</p>'; }",
+          }],
+        },
+        {
+          type: YETI_NODE_TYPE.ELEMENT,
+          tagName: "script",
+          attributes: {},
+          children: [{
+            type: YETI_NODE_TYPE.TEXT,
+            content: "console.log('Hello <div>fake div</div>');",
+          }],
+        },
       ],
     });
   });

@@ -2,7 +2,7 @@ import { lexHTML, TOKEN_TYPE } from "./lexHTML.ts";
 import { YETI_NODE_TYPE } from "./types.ts";
 import type { YetiNode, YetiRootNode, YetiElementNode, YetiTextNode } from "./types.ts";
 import { YetiHTMLParsingError } from "./error.ts";
-import { isVoidTag, sanitizeHTMLTextContent } from "./utils.ts";
+import { isVoidTag } from "./utils.ts";
 
 // TODO:
 // - Handle html import objects
@@ -21,11 +21,6 @@ type OpenComponentNode = {
   attributes: Record<string, unknown>;
   children: YetiNode[];
 };
-
-const makeTextNode = (content: string): YetiTextNode => ({
-  type: YETI_NODE_TYPE.TEXT,
-  content: sanitizeHTMLTextContent(content),
-});
 
 const isYetiNode = (value: unknown): value is YetiNode => {
   return typeof value === "object" && value !== null && "type" in value;
@@ -94,7 +89,10 @@ const appendContentToNode = async (parent: YetiRootNode | YetiElementNode | Open
   }
 
   // If all else fails, we'll stringify the value and insert it as a text node.
-  appendContentToNode(parent, makeTextNode(String(unwrappedContent)));
+  appendContentToNode(parent, {
+    type: YETI_NODE_TYPE.TEXT,
+    content: String(unwrappedContent),
+  });
 };
 
 /**
@@ -112,6 +110,23 @@ export const parseHTML = async (htmlStringChars: Uint8Array, dynamicValues: unkn
   };
 
   let openAttributeName: string | null = null;
+
+  const finalizeOpenAttribute = () => {
+    if (!openAttributeName) {
+      return;
+    }
+    const currentParent = getCurrentOpenParent();
+    if (currentParent.type === YETI_NODE_TYPE.ROOT) {
+      throw new YetiHTMLParsingError("Cannot finalize open attribute: Cannot set attributes on the root node");
+    }
+
+    if (!(openAttributeName in currentParent.attributes)) {
+      // If the open attribute name is not already in the current parent's attributes,
+      // we will treat it as a boolean attribute with a value of true.
+      currentParent.attributes[openAttributeName] = true;
+    }
+    openAttributeName = null;
+  };
 
   /**
    * Closes the current open parent node and appends it to its parent's children array.
@@ -193,15 +208,12 @@ export const parseHTML = async (htmlStringChars: Uint8Array, dynamicValues: unkn
         const currentOpenParent = getCurrentOpenParent();
 
         if (currentOpenParent.type === YETI_NODE_TYPE.ROOT) {
+          // This state shouldn't be possible, throw an error
           throw new YetiHTMLParsingError("Received invalid OPENING_TAG_END token: Cannot self-close the root node");
         }
 
-        if (openAttributeName) {
-          // If we're terminating an opening tag but still have an open attribute name, that means we received an attribute name without a value.
-          // We will treat this as a boolean attribute with a value of true.
-          currentOpenParent.attributes[openAttributeName] = true;
-          openAttributeName = null;
-        }
+        // Finalize any open attribute before we close the tag
+        finalizeOpenAttribute();
 
         // Token value is a boolean indicating whether the opening tag was terminated with a self-closing slash (/>) or not (>)
         const isSelfClosing = tokenValue === true;
@@ -216,34 +228,44 @@ export const parseHTML = async (htmlStringChars: Uint8Array, dynamicValues: unkn
         const currentParent = getCurrentOpenParent();
 
         if (currentParent.type === YETI_NODE_TYPE.ROOT) {
+          // This state shouldn't be possible, throw an error
           throw new YetiHTMLParsingError("Received invalid ATTR_NAME token: Cannot set attributes on the root node");
         }
 
-        if (openAttributeName) {
-          // If we already have an open attribute name, that means we received an attribute name without a value.
-          // We will treat this as a boolean attribute with a value of true.
-          currentParent.attributes[openAttributeName] = true;
-          openAttributeName = null;
-        }
+        // Finalize any previous open attribute before we start another one
+        finalizeOpenAttribute();
 
         // The next token should be either an attribute value or an equals sign followed by an attribute value.
         // For simplicity, we'll assume that attributes are always in the form name="value" for now, and we'll handle the other cases later.
         openAttributeName = tokenValue;
+
+        if (openAttributeName in currentParent.attributes) {
+          delete currentParent.attributes[openAttributeName];
+        }
+
         break;
       }
       case TOKEN_TYPE.ATTR_VALUE: {
         const currentParent = getCurrentOpenParent();
 
         if (currentParent.type === YETI_NODE_TYPE.ROOT) {
+          // This state shouldn't be possible unless the lexer is broken, throw an error
           throw new YetiHTMLParsingError("Received invalid ATTR_VALUE token: Cannot set attributes on the root node");
         }
 
         if (!openAttributeName) {
+          // This state shouldn't be possible unless the lexer is broken, throw an error
           throw new YetiHTMLParsingError("Received ATTR_VALUE token without an open attribute name");
         }
 
-        currentParent.attributes[openAttributeName] = tokenValue;
-        openAttributeName = null;
+        if (openAttributeName in currentParent.attributes) {
+          const currentAttrValue = currentParent.attributes[openAttributeName];
+          // Concatenate the new value with the existing value. ATTR_VALUE tokens can represent multiple parts of the
+          // same attribute value if there is a mix of dynamic and static content
+          currentParent.attributes[openAttributeName] = String(currentAttrValue) + String(tokenValue);
+        } else {
+          currentParent.attributes[openAttributeName] = tokenValue;
+        }
         break;
       }
       case TOKEN_TYPE.CHILD_CONTENT: {
@@ -269,8 +291,12 @@ export const parseHTML = async (htmlStringChars: Uint8Array, dynamicValues: unkn
       case TOKEN_TYPE.SPREAD_ATTR: {
         const currentParent = getCurrentOpenParent();
         if (currentParent.type === YETI_NODE_TYPE.ROOT) {
+          // This state shouldn't be possible unless the lexer is broken, throw an error
           throw new YetiHTMLParsingError("Received invalid SPREAD_ATTR token: Cannot set attributes on the root node");
         }
+
+        // Finalize any previous open attribute before we process the spread attribute
+        finalizeOpenAttribute();
 
         if (tokenValue === null || tokenValue === undefined) {
           // Ignore null or undefined spread values

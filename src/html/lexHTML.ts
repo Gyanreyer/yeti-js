@@ -123,7 +123,6 @@ const lexTextContent: LexerFunction<"CHILD_CONTENT" | "ERROR"> = function* (ctx)
           nextLexerFunction = lexComment;
           break;
         }
-        debugger;
 
         if (
           // Test if next 6 chars after "<!" match "DOCTYPE"
@@ -545,14 +544,6 @@ const lexAttributeValue: LexerFunction<"ATTR_VALUE" | "ERROR"> = function* (ctx)
     ctx.advance(1);
   }
 
-  // Check for unquoted dynamic value
-  const dynamicValueBeforeQuote = ctx.peekDynamicValue();
-  if (dynamicValueBeforeQuote !== NO_DYNAMIC_VALUE) {
-    // This is an unquoted dynamic value (e.g., attr={value})
-    ctx.advance(DYNAMIC_VALUE_CHARACTER_SEQUENCE_BYTE_LENGTH);
-    yield [TOKEN_TYPE.ATTR_VALUE, dynamicValueBeforeQuote];
-    return lexAttributeName;
-  }
 
 
   const quoteCharCode = ctx.peekCharCode();
@@ -561,44 +552,23 @@ const lexAttributeValue: LexerFunction<"ATTR_VALUE" | "ERROR"> = function* (ctx)
     // Consume opening quote
     let currentChunkStartIndex = ctx.advance(1);
     let currentChunkLength = 0;
-    let attrValueStringParts: string[] | null = null;
-
-    let hasDynamicValueOnly = false;
-    let currentDynamicAttrValue: unknown = null;
 
     // Track how many backslashes we've seen in a row to determine if a quote is escaped or not.
     // An even number of backslashes means the quote is not escaped, while an odd number means it is escaped.
     let escapeDepth = 0;
 
     while (!ctx.isAtEnd()) {
+
       // Check for dynamic value inside quotes
       const dynamicValue = ctx.peekDynamicValue();
       if (dynamicValue !== NO_DYNAMIC_VALUE) {
         if (currentChunkLength > 0) {
           // Flush current chunk before adding dynamic value
-          attrValueStringParts ??= [];
-          attrValueStringParts.push(ctx.getSubstring(currentChunkStartIndex, currentChunkLength));
+          yield [TOKEN_TYPE.ATTR_VALUE, ctx.getSubstring(currentChunkStartIndex, currentChunkLength)];
           currentChunkLength = 0;
         }
 
-        // If we haven't accumulated any string parts yet, use the dynamic value directly.
-        // Otherwise, concatenate the dynamic value to the accumulated string value.
-        if (!attrValueStringParts && !hasDynamicValueOnly) {
-          currentDynamicAttrValue = dynamicValue;
-          hasDynamicValueOnly = true;
-        } else {
-          attrValueStringParts ??= [];
-          if (hasDynamicValueOnly) {
-            // If we already have a dynamic value, we need to convert it to a string and concatenate
-            // it before adding the next dynamic value.
-            attrValueStringParts.push(String(currentDynamicAttrValue));
-            currentDynamicAttrValue = null;
-            hasDynamicValueOnly = false;
-          }
-          // Coerce the value to a string and concatenate it with
-          // any accumulated string value.
-          attrValueStringParts.push(String(dynamicValue));
-        }
+        yield [TOKEN_TYPE.ATTR_VALUE, dynamicValue];
 
         currentChunkStartIndex = ctx.advance(DYNAMIC_VALUE_CHARACTER_SEQUENCE_BYTE_LENGTH);
         continue;
@@ -621,44 +591,35 @@ const lexAttributeValue: LexerFunction<"ATTR_VALUE" | "ERROR"> = function* (ctx)
         escapeDepth = 0;
       }
 
-      // We have a normal character to append to the attribute value.
-      // If we previously encountered a dynamic value, we need to convert that into char codes
-      // and append it to the char code array before appending any subsequent characters.
-      if (hasDynamicValueOnly) {
-        attrValueStringParts ??= [];
-        attrValueStringParts.push(String(currentDynamicAttrValue))
-        currentDynamicAttrValue = null;
-        hasDynamicValueOnly = false;
-      }
-
       ctx.advance(1);
       currentChunkLength++;
     }
 
     if (currentChunkLength > 0) {
-      const currentChunk = ctx.getSubstring(currentChunkStartIndex, currentChunkLength);
-      if (attrValueStringParts) {
-        // If we have already accumulated some string parts, we need to append the current chunk to that array.
-        attrValueStringParts.push(currentChunk);
-      } else {
-        yield [TOKEN_TYPE.ATTR_VALUE, currentChunk];
-        return nextLexerFunction;
-      }
-    }
-
-    if (attrValueStringParts) {
-      yield [TOKEN_TYPE.ATTR_VALUE, attrValueStringParts.join('')];
-    } else if (hasDynamicValueOnly) {
-      yield [TOKEN_TYPE.ATTR_VALUE, currentDynamicAttrValue];
+      yield [TOKEN_TYPE.ATTR_VALUE, ctx.getSubstring(currentChunkStartIndex, currentChunkLength)];
     }
 
     return nextLexerFunction;
   } else {
     // Unquoted attribute value
-    const unquotedStartIndex = ctx.getIndex();
+    let unquotedStartIndex = ctx.getIndex();
     let unquotedLength = 0;
 
     while (!ctx.isAtEnd()) {
+      // Check for unquoted dynamic value
+      const dynamicValue = ctx.peekDynamicValue();
+      if (dynamicValue !== NO_DYNAMIC_VALUE) {
+        if (unquotedLength > 0) {
+          // Flush current chunk before adding dynamic value
+          yield [TOKEN_TYPE.ATTR_VALUE, ctx.getSubstring(unquotedStartIndex, unquotedLength)];
+          unquotedLength = 0;
+        }
+
+        yield [TOKEN_TYPE.ATTR_VALUE, dynamicValue];
+        unquotedStartIndex = ctx.advance(DYNAMIC_VALUE_CHARACTER_SEQUENCE_BYTE_LENGTH);
+        continue;
+      }
+
       const nextCharCode = ctx.peekCharCode();
       if (
         // Unquoted attribute values are terminated by whitespace, ">", or "/>".
@@ -669,10 +630,6 @@ const lexAttributeValue: LexerFunction<"ATTR_VALUE" | "ERROR"> = function* (ctx)
         // End of unquoted attribute value
         nextLexerFunction = lexAttributeName; // Transition back to attribute name lexing
         break;
-      } else if (ctx.peekDynamicValue() !== NO_DYNAMIC_VALUE) {
-        // Unquoted dynamic value in the middle of an unquoted attribute string value is not valid syntax, yield error
-        yield [TOKEN_TYPE.ERROR, new YetiHTMLParsingError(`Unquoted attribute value received mixed static content "${ctx.getSubstring(unquotedStartIndex, unquotedLength)}" with dynamic content "${ctx.peekDynamicValue()}". If you want these values to be concatenated together, please wrap them in quotes.`)];
-        return null;
       } else {
         unquotedLength++;
         ctx.advance(1);
@@ -685,8 +642,6 @@ const lexAttributeValue: LexerFunction<"ATTR_VALUE" | "ERROR"> = function* (ctx)
 
     return nextLexerFunction;
   }
-
-
 }
 
 const lexOpeningTagEnd: LexerFunction<"OPENING_TAG_END" | "ERROR"> = function* (ctx) {

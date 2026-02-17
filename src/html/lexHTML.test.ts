@@ -398,7 +398,9 @@ describe("lexHTML", () => {
       assert.deepStrictEqual(tokens, [
         [TOKEN_TYPE.OPENING_TAGNAME, "div"],
         [TOKEN_TYPE.ATTR_NAME, "attr"],
-        [TOKEN_TYPE.ATTR_VALUE, `${dynamicValuePart1}-static-${dynamicValuePart2}`],
+        [TOKEN_TYPE.ATTR_VALUE, "dynamic"],
+        [TOKEN_TYPE.ATTR_VALUE, "-static-"],
+        [TOKEN_TYPE.ATTR_VALUE, 123],
         [TOKEN_TYPE.OPENING_TAG_END, false],
       ] satisfies LexerToken[]);
     });
@@ -418,9 +420,11 @@ describe("lexHTML", () => {
         [TOKEN_TYPE.ATTR_NAME, "attr3"],
         [TOKEN_TYPE.ATTR_VALUE, dynamicValue3],
         [TOKEN_TYPE.ATTR_NAME, "attr4"],
-        [TOKEN_TYPE.ATTR_VALUE, `${dynamicValue2}[object Object]`],
+        [TOKEN_TYPE.ATTR_VALUE, dynamicValue2],
+        [TOKEN_TYPE.ATTR_VALUE, dynamicValue3],
         [TOKEN_TYPE.ATTR_NAME, "attr5"],
-        [TOKEN_TYPE.ATTR_VALUE, `0-static`],
+        [TOKEN_TYPE.ATTR_VALUE, dynamicValue2],
+        [TOKEN_TYPE.ATTR_VALUE, "-static"],
         [TOKEN_TYPE.OPENING_TAG_END, false],
       ]);
     });
@@ -552,14 +556,19 @@ describe("lexHTML", () => {
       ]);
     });
 
-    test("yields an error token for an unquoted attribute value which mixes dynamic and static content", () => {
+    test("handles unquoted attribute value which mixes dynamic and static content", () => {
       const dynamicValue = "dynamic";
 
-      const tokens = htmlTokens`<div attr=static-${dynamicValue}>`;
+      const tokens = htmlTokens`<div attr=static-${dynamicValue} attr2=${dynamicValue}-static>`;
       assert.deepStrictEqual<LexerToken[]>(tokens, [
         [TOKEN_TYPE.OPENING_TAGNAME, "div"],
         [TOKEN_TYPE.ATTR_NAME, "attr"],
-        [TOKEN_TYPE.ERROR, new YetiHTMLParsingError(`Unquoted attribute value received mixed static content "static-" with dynamic content "dynamic". If you want these values to be concatenated together, please wrap them in quotes.`)]
+        [TOKEN_TYPE.ATTR_VALUE, "static-"],
+        [TOKEN_TYPE.ATTR_VALUE, dynamicValue],
+        [TOKEN_TYPE.ATTR_NAME, "attr2"],
+        [TOKEN_TYPE.ATTR_VALUE, dynamicValue],
+        [TOKEN_TYPE.ATTR_VALUE, "-static"],
+        [TOKEN_TYPE.OPENING_TAG_END, false],
       ]);
     });
   });
