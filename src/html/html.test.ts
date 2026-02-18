@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { html } from "./html.ts";
 import { YETI_NODE_TYPE, } from "./types.ts";
 import type { YetiChildNode, YetiRootNode } from './types.ts';
-import { YetiHTMLParsingError } from "./error.ts";
+import { YetiHTMLParsingError } from "../error.ts";
 
 describe("html", () => {
   describe("HTML attributes", async () => {

@@ -24,7 +24,7 @@ import {
   type RawStringContentTagName,
   CHAR_CODE_BACKTICK,
 } from "./utils.ts";
-import { YetiHTMLParsingError } from "./error.ts";
+import { YetiHTMLParsingError } from "../error.ts";
 
 export const TOKEN_TYPE = {
   ERROR: 0,

@@ -1,17 +1,8 @@
 import { parseHTML } from './parseHTML.ts';
 import { calculateStringByteLength, DYNAMIC_VALUE_CHARACTER_SEQUENCE_BYTE_LENGTH, getDynamicValuePlaceholderByteSequence, textEncoder } from './utils.ts';
 import type { YetiRootNode } from './types.ts';
-import {
-  assetTypeSymbol,
-  bundleNameSymbol,
-  bundleTypeSymbol,
-  importFilePathSymbol,
-  inlinedBundleContentTypeSymbol,
-  resolveImportPath,
-  shouldEscapeHTMLSymbol,
-  WILDCARD_BUNDLE_NAME,
-} from '../bundle.js';
-import type { HTMLImportObject, InlinedHTMLBundleContentObject } from '../types.ts';
+import { makeBundleInlineObject, makeBundleImportObject, WILDCARD_BUNDLE_NAME, type HTMLBundleImportObject } from '../bundle/bundle.ts';
+import { resolveImportPath } from '../bundle/import.ts';
 
 export const html = async (strings: TemplateStringsArray, ...values: unknown[]): Promise<YetiRootNode> => {
   const stringsCount = strings.length;
@@ -60,10 +51,10 @@ export const html = async (strings: TemplateStringsArray, ...values: unknown[]):
 };
 
 html.import = (importPath: string, options: {
-  escape?: boolean | undefined;
+  shouldEscape?: boolean | undefined;
   bundleName?: string | undefined;
-} = {}): HTMLImportObject => {
-  const { escape = false, bundleName } = options;
+} = {}): HTMLBundleImportObject => {
+  const { shouldEscape = false, bundleName } = options;
 
   if (bundleName !== undefined && typeof bundleName !== "string") {
     throw new Error(`html.import() expected bundleName option to be a string if provided. Received type "${typeof bundleName}".`);
@@ -73,21 +64,12 @@ html.import = (importPath: string, options: {
 
   try {
     const resolvedFilePath = resolveImportPath(importPath);
-    return {
-      [importFilePathSymbol]: resolvedFilePath,
-      [shouldEscapeHTMLSymbol]: escape,
-      [assetTypeSymbol]: "html",
-      [bundleTypeSymbol]: "import",
-      [bundleNameSymbol]: bundleName,
-    };
+    return makeBundleImportObject("html", resolvedFilePath, bundleName, { shouldEscape });
   } catch (err) {
     throw new Error(`html.import() failed to resolve path to file at "${importPath}"`, {
       cause: err,
     });
   }
-}
+};
 
-html.inline = <TBundleName extends string>(bundleName: TBundleName): InlinedHTMLBundleContentObject<TBundleName> => ({
-  [inlinedBundleContentTypeSymbol]: "html",
-  [bundleNameSymbol]: bundleName,
-});
+html.inline = <TBundleName extends string>(bundleName: TBundleName) => makeBundleInlineObject("html", bundleName);
