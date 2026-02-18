@@ -35,8 +35,8 @@ export interface YetiDoctypeNode extends BaseYetiNode {
 export interface YetiElementNode extends BaseYetiNode {
   type: typeof YETI_NODE_TYPE.ELEMENT;
   tagName: string;
-  attributes: Record<string, unknown>;
-  children: YetiChildNode[];
+  attributes?: Record<string, unknown>;
+  children?: YetiChildNode[];
 }
 
 export type YetiChildNode = YetiElementNode | YetiTextNode | YetiCommentNode | YetiDoctypeNode;

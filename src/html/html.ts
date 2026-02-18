@@ -56,10 +56,6 @@ export const html = async (strings: TemplateStringsArray, ...values: unknown[]):
     }
   }
 
-  if (offset !== totalByteLength) {
-    throw new Error(`Unexpected error while encoding template strings. Expected to write ${totalByteLength} bytes, but wrote ${offset} bytes.`);
-  }
-
   return parseHTML(textCharBuffer, dynamicValues);
 };
 

@@ -1,12 +1,7 @@
 import { YETI_NODE_TYPE, type YetiNode } from "./types.ts";
 
-export const isPrimitiveValue = (value: unknown): value is null | string | number | boolean | bigint | symbol | undefined => {
-  return (
-    value === null ||
-    (typeof value !== "object" &&
-      typeof value !== "function")
-  );
-};
+export const textEncoder = new TextEncoder();
+export const textDecoder = new TextDecoder();
 
 export const CHAR_CODE_DYNAMIC_VALUE_PLACEHOLDER = 0;
 // 1 byte for the placeholder char code + 2 bytes for the value index
@@ -32,17 +27,6 @@ export const parseDynamicValueByteSequenceIndex = (byteSequence: Uint8Array): nu
   return (highByte << 8) | lowByte;
 };
 
-export const createDynamicValuePlaceholderString = (index: number): string => {
-  if (index < 0 || index > 0xFFFF) {
-    throw new Error("Dynamic value index out of bounds (must be between 0 and 65535)");
-  }
-
-  const byteSequence = getDynamicValuePlaceholderByteSequence(index);
-  return textDecoder.decode(new Uint8Array(byteSequence));
-};
-
-export const textEncoder = new TextEncoder();
-export const textDecoder = new TextDecoder();
 
 export const DOCTYPE_STRING_CHAR_CODE_SEQUENCE = textEncoder.encode("DOCTYPE");
 
@@ -104,10 +88,6 @@ export const isLetterCharCode = (charCode: number): boolean => {
   return (((charCode | 32) - 97) & 0xFF) < 26;
 };
 
-export const isDigitCharCode = (charCode: number): boolean => {
-  return ((charCode - 48) & 0xFF) < 10; // '0' to '9'
-};
-
 export const isWhiteSpaceCharCode = (charCode: number): boolean => {
   // Check for space, tab, newline, carriage return, form feed, or vertical tab
   return (
@@ -127,15 +107,10 @@ export const isValidHTMLTagNameCharCode = (charCode: number): boolean => {
 export const isValidHTMLTagNameString = (tagNameStr: string): boolean => {
   const strLen = tagNameStr.length;
 
-  if (strLen === 0) {
+  // Must be at least one character and the first character must be a letter
+  if (strLen === 0 || !isLetterCharCode(tagNameStr.charCodeAt(0))) {
     return false;
   }
-
-  // First character must be a letter
-  if (!isLetterCharCode(tagNameStr.charCodeAt(0))) {
-    return false;
-  }
-
 
   // Subsequent characters can be letters, digits, "-", or ":"
   for (let i = 1; i < strLen; i++) {

@@ -5,7 +5,7 @@ import {
 import assert from "node:assert/strict";
 import { lexHTML, TOKEN_TYPE } from "./lexHTML.ts";
 import type { LexerToken } from "./lexHTML.ts";
-import { calculateStringByteLength, createDynamicValuePlaceholderString, DYNAMIC_VALUE_CHARACTER_SEQUENCE_BYTE_LENGTH, getDynamicValuePlaceholderByteSequence, textEncoder } from "./utils.ts";
+import { calculateStringByteLength, DYNAMIC_VALUE_CHARACTER_SEQUENCE_BYTE_LENGTH, getDynamicValuePlaceholderByteSequence, textDecoder, textEncoder } from "./utils.ts";
 import { YetiHTMLParsingError } from "./error.ts";
 
 const htmlTokens = async (strings: TemplateStringsArray, ...values: unknown[]): Promise<LexerToken[]> => {
@@ -671,6 +671,10 @@ describe("lexHTML", () => {
 
   describe("error handling", () => {
     test("throws an error if a dynamic value placeholder index doesn't map to a value in the dynamic values array", async () => {
+      const createDynamicValuePlaceholderString = (index: number): string => {
+        const byteSequence = getDynamicValuePlaceholderByteSequence(index);
+        return textDecoder.decode(new Uint8Array(byteSequence));
+      };
       await assert.rejects(() =>
         lexHTML(textEncoder.encode(`<div>${createDynamicValuePlaceholderString(0)}</div>`), [], async () => { }),
         new YetiHTMLParsingError(`Invalid dynamic value index 0 encoded at position 5.`));
