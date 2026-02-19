@@ -2,8 +2,9 @@ import { lexHTML, TOKEN_TYPE } from "./lexHTML.ts";
 import { YETI_NODE_TYPE } from "./types.ts";
 import type { YetiNode, YetiRootNode, YetiElementNode, YetiCommentNode, YetiDoctypeNode, YetiChildNode } from "./types.ts";
 import { YetiHTMLParsingError } from "../error.ts";
-import { isVoidTag } from "./utils.ts";
-import { isBundleInlineObject, makeBundleInlineElementNode } from "../bundle/bundle.ts";
+import { isVoidTag, textEncoder } from "./utils.ts";
+import { isBundleImportObject, isBundleInlineObject, makeBundleInlineElementNode } from "../bundle/bundle.ts";
+import { readFile } from "node:fs/promises";
 
 // TODO:
 // - Handle html import objects
@@ -174,6 +175,14 @@ export const parseHTML = async (htmlStringChars: Uint8Array, dynamicValues: unkn
       } else {
         currentOpenTreeTagnameAndComponentCounts.set(closingParentNode.component, currentInstanceCount - 1);
       }
+      if ("js" in closingParentNode.component && typeof closingParentNode.component.js === "function") {
+        rootNode.componentJS ??= new Set();
+        rootNode.componentJS.add(closingParentNode.component.js as any);
+      }
+      if ("css" in closingParentNode.component && typeof closingParentNode.component.css === "function") {
+        rootNode.componentCSS ??= new Set();
+        rootNode.componentCSS.add(closingParentNode.component.css as any);
+      }
     } else {
       // For regular element nodes, we can just insert them directly.
       await appendContentToNode(nextParent, closingParentNode);
@@ -314,7 +323,47 @@ export const parseHTML = async (htmlStringChars: Uint8Array, dynamicValues: unkn
         break;
       }
       case TOKEN_TYPE.CHILD_CONTENT: {
-        await appendContentToNode(getCurrentOpenParent(), tokenValue);
+        if (isBundleImportObject(tokenValue, "html")) {
+          // Special handling when we encounter an `html.import()` to import external file content
+          // into our HTML.
+          rootNode.htmlBundleData ??= {
+            htmlDependencies: new Set(),
+          };
+          // Mark the imported file as an HTML dependency
+          rootNode.htmlBundleData.htmlDependencies.add(tokenValue.importPath);
+
+          // Read the file contents and figure out what to do with them
+          const fileContents = await readFile(tokenValue.importPath, "utf-8");
+          if (tokenValue.bundleName) {
+            // If a bundle name is specified, we will add the imported file's content to the corresponding HTML bundle
+            // in the root node's htmlBundleData.
+            // The final bundle contents will be inserted into the tree in a later processing step after HTML parsing is complete.
+            rootNode.htmlBundleData.htmlBundles ??= new Map();
+            let currentBundleArray = rootNode.htmlBundleData.htmlBundles.get(tokenValue.bundleName);
+            if (!currentBundleArray) {
+              currentBundleArray = [fileContents];
+              rootNode.htmlBundleData.htmlBundles.set(tokenValue.bundleName, currentBundleArray);
+            } else {
+              currentBundleArray.push(fileContents);
+            }
+          } else {
+            // If no bundle name is specified, we will insert the imported HTML content directly into the tree at the location of the import statement.
+            if (tokenValue.options?.shouldEscape) {
+              // If the shouldEscape option is true, we will insert the raw HTML text as a text node
+              await appendContentToNode(getCurrentOpenParent(), {
+                type: YETI_NODE_TYPE.TEXT,
+                content: fileContents,
+              });
+            } else {
+              // If the shouldEscape option is false, we will parse the imported HTML content and insert the resulting nodes directly into the tree
+              const parsedImportedHTML = await parseHTML(textEncoder.encode(fileContents), []);
+              await appendContentToNode(getCurrentOpenParent(), parsedImportedHTML);
+            }
+          }
+        } else {
+          // All other content should just be appended to the current open parent
+          await appendContentToNode(getCurrentOpenParent(), tokenValue);
+        }
         break;
       }
       case TOKEN_TYPE.COMMENT_PART: {

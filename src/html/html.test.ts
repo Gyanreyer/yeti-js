@@ -1,5 +1,6 @@
 import { describe, test } from "node:test";
 import assert from "node:assert/strict";
+import { fileURLToPath } from "node:url";
 
 import { html } from "./html.ts";
 import { YETI_NODE_TYPE, } from "./types.ts";
@@ -1438,6 +1439,113 @@ Line 3 with a <span> tag
                   bundleName: "my-js-bundle",
                   assetType: "js",
                 },
+              },
+            ],
+          },
+        ],
+      });
+    });
+  });
+
+  describe("html imports", () => {
+    test("handles html imports", async () => {
+      const result = await html`<div>Content from import: "${html.import("../../test_data/external-html.html")}"</div>`;
+
+      assert.deepStrictEqual<YetiRootNode>(result, {
+        type: YETI_NODE_TYPE.ROOT,
+        htmlBundleData: {
+          htmlDependencies: new Set([fileURLToPath(import.meta.resolve("../../test_data/external-html.html"))]),
+        },
+        children: [
+          {
+            type: YETI_NODE_TYPE.ELEMENT,
+            tagName: "div",
+            children: [
+              {
+                type: YETI_NODE_TYPE.TEXT,
+                content: 'Content from import: "',
+              },
+              {
+                type: YETI_NODE_TYPE.ELEMENT,
+                tagName: "p",
+                children: [
+                  {
+                    type: YETI_NODE_TYPE.TEXT,
+                    content: "This is an ",
+                  },
+                  {
+                    type: YETI_NODE_TYPE.ELEMENT,
+                    tagName: "em",
+                    children: [
+                      {
+                        type: YETI_NODE_TYPE.TEXT,
+                        content: "HTML",
+                      },
+                    ],
+                  },
+                  {
+                    type: YETI_NODE_TYPE.TEXT,
+                    content: " snippet.",
+                  }
+                ],
+              },
+              {
+                type: YETI_NODE_TYPE.TEXT,
+                content: '"',
+              },
+            ],
+          },
+        ],
+      });
+    });
+
+    test("handles escaped html imports", async () => {
+      const result = await html`<div>Content from escaped import: "${html.import("../../test_data/external-text.txt", {
+        shouldEscape: true,
+      })}"</div>`;
+
+      assert.deepStrictEqual<YetiRootNode>(result, {
+        type: YETI_NODE_TYPE.ROOT,
+        htmlBundleData: {
+          htmlDependencies: new Set([fileURLToPath(import.meta.resolve("../../test_data/external-text.txt"))]),
+        },
+        children: [
+          {
+            type: YETI_NODE_TYPE.ELEMENT,
+            tagName: "div",
+            children: [
+              {
+                type: YETI_NODE_TYPE.TEXT,
+                content: 'Content from escaped import: "Hello, world! I am an external text file. My contents will be escaped, so <bold>this</bold> will not be bold."',
+              },
+            ],
+          },
+        ],
+      });
+    });
+
+    test("handles bundled html imports", async () => {
+      const result = await html`<div>Content from bundled import...? ${html.import("../../test_data/external-svg.svg", {
+        bundleName: "icons"
+      })}</div>`;
+
+      assert.deepStrictEqual<YetiRootNode>(result, {
+        type: YETI_NODE_TYPE.ROOT,
+        htmlBundleData: {
+          htmlBundles: new Map([
+            ["icons", [`<svg xmlns="http://www.w3.org/2000/svg" height="24px" viewBox="0 -960 960 960" width="24px" fill="#e8eaed"><path d="m256-200-56-56 224-224-224-224 56-56 224 224 224-224 56 56-224 224 224 224-56 56-224-224-224 224Z" /></svg>`]],
+          ]),
+          htmlDependencies: new Set([fileURLToPath(import.meta.resolve("../../test_data/external-svg.svg"))]),
+        },
+        children: [
+          {
+            type: YETI_NODE_TYPE.ELEMENT,
+            tagName: "div",
+
+            children: [
+              {
+                type: YETI_NODE_TYPE.TEXT,
+                content: "Content from bundled import...? ",
               },
             ],
           },

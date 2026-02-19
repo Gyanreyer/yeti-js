@@ -158,7 +158,7 @@ export const isBundleStartObject = <TAssetType extends "css" | "js" = "css" | "j
   return isBundleObject(obj) && obj[BUNDLE_TYPE] === "start" && (assetType === undefined || obj.assetType === assetType);
 };
 
-export const isBundleImportObject = <TAssetType extends "html" | "css" | "js" = "html" | "css" | "js">(obj: unknown, assetType?: TAssetType): obj is BundleImportObject<TAssetType> => {
+export const isBundleImportObject = <TAssetType extends "html" | "css" | "js" = "html" | "css" | "js">(obj: unknown, assetType?: TAssetType): obj is Extract<AnyBundleImportObject, { assetType: TAssetType }> => {
   return isBundleObject(obj) && obj[BUNDLE_TYPE] === "import" && (assetType === undefined || obj.assetType === assetType);
 };
 

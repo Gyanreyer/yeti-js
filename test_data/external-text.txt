@@ -1,0 +1,1 @@
+Hello, world! I am an external text file. My contents will be escaped, so <bold>this</bold> will not be bold.

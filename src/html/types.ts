@@ -1,9 +1,26 @@
+import type { CSSResult } from "../css/css.ts";
+import type { JSResult } from "../js/js.ts";
+
+interface HTMLBundleData {
+  htmlBundles?: Map<string, string[]>;
+  htmlDependencies: Set<string>;
+}
+
+// Using symbols for node types to ensure uniqueness and prevent potential conflicts with user-defined content
+// We have to declare them outside of the YETI_NODE_TYPE object because otherwise they
+// were just getting typed as generic symbols instead of unique symbol values
+const ROOT_SYMBOL = Symbol("ROOT");
+const ELEMENT_SYMBOL = Symbol("ELEMENT");
+const TEXT_SYMBOL = Symbol("TEXT");
+const COMMENT_SYMBOL = Symbol("COMMENT");
+const DOCTYPE_SYMBOL = Symbol("DOCTYPE");
+
 export const YETI_NODE_TYPE = {
-  ROOT: 0,
-  ELEMENT: 2,
-  TEXT: 4,
-  COMMENT: 8,
-  DOCTYPE: 12,
+  ROOT: ROOT_SYMBOL,
+  ELEMENT: ELEMENT_SYMBOL,
+  TEXT: TEXT_SYMBOL,
+  COMMENT: COMMENT_SYMBOL,
+  DOCTYPE: DOCTYPE_SYMBOL,
 } as const;
 
 export type YetiNodeType = typeof YETI_NODE_TYPE[keyof typeof YETI_NODE_TYPE];
@@ -15,6 +32,9 @@ export interface BaseYetiNode {
 export interface YetiRootNode extends BaseYetiNode {
   type: typeof YETI_NODE_TYPE.ROOT;
   children: YetiChildNode[];
+  componentCSS?: Set<() => Promise<CSSResult>>;
+  componentJS?: Set<() => Promise<JSResult>>;
+  htmlBundleData?: HTMLBundleData;
 }
 
 export interface YetiTextNode extends BaseYetiNode {

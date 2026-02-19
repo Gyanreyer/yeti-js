@@ -1,28 +1,33 @@
-import { readFile } from "node:fs/promises";
+import { bundleAsync } from 'lightningcss';
 import { BUNDLE_TYPE, isBundleObject, makeBundleInlineObject, makeBundleSrcObject, makeBundleStartObject, makeBundleImportObject } from "../bundle/bundle.ts";
 import { resolveImportPath } from "../bundle/import.ts";
 import { getConfig } from "../config.js";
 import { BundleError } from "../error.ts";
+import { textDecoder } from '../html/utils.ts';
 
 export interface CSSResult {
-  cssBundles: {
-    [bundleName: string]: string;
-  };
-  cssDependencies: {
-    [path: string]: true;
-  };
+  cssBundles: Map<string, string[]>;
+  cssDependencies: Set<string>;
 }
 
-export const css = (strings: TemplateStringsArray, ...values: unknown[]): () => Promise<CSSResult> => async () => {
-  const rawCssBundles: Record<string, string[]> = {};
-  const cssDependencies: Record<string, true> = {};
+export const css = (strings: TemplateStringsArray, ...values: unknown[]): () => Promise<CSSResult> => {
+  const rawCssBundles = new Map<string, string[]>();
+  // Map of bundleName to array of import paths for that bundle{
+  const bundleImportPaths = new Map<string, string[]>();
 
   let currentBundleName = css.getDefaultBundleName();
 
   const stringCount = strings.length;
   for (let i = 0; i < stringCount; i++) {
-    const currentBundleArray = (rawCssBundles[currentBundleName] ??= []);
-    currentBundleArray.push(strings[i]);
+    const str = strings[i];
+
+    let currentBundleArray = rawCssBundles.get(currentBundleName);
+    if (!currentBundleArray) {
+      currentBundleArray = [str];
+      rawCssBundles.set(currentBundleName, currentBundleArray);
+    } else {
+      currentBundleArray.push(str);
+    }
 
     const value = values[i];
     if (isBundleObject(value)) {
@@ -40,16 +45,13 @@ export const css = (strings: TemplateStringsArray, ...values: unknown[]): () => 
       } else {
         // Import
         const importPath = value.importPath;
-        cssDependencies[importPath] = true;
         const targetBundleName = value.bundleName ?? currentBundleName;
-        try {
-          const fileContents = await readFile(importPath, "utf-8");
-          const targetBundleArray = (rawCssBundles[targetBundleName] ??= []);
-          targetBundleArray.push(fileContents.trim());
-        } catch (err) {
-          throw new BundleError(`css.import() failed to import file at path "${importPath}".`, {
-            cause: err,
-          });
+        let currentBundleImportPaths = bundleImportPaths.get(targetBundleName);
+        if (!currentBundleImportPaths) {
+          currentBundleImportPaths = [importPath];
+          bundleImportPaths.set(targetBundleName, currentBundleImportPaths);
+        } else {
+          currentBundleImportPaths.push(importPath);
         }
       }
     } else if (value !== undefined && value !== null) {
@@ -57,17 +59,46 @@ export const css = (strings: TemplateStringsArray, ...values: unknown[]): () => 
     }
   }
 
-  const finalCssBundles: Record<string, string> = {};
-  for (const [bundleName, bundleChunks] of Object.entries(rawCssBundles)) {
-    const combinedBundleString = bundleChunks.join("").trim();
-    if (combinedBundleString) {
-      finalCssBundles[bundleName] = combinedBundleString;
-    }
-  }
+  return async () => {
+    const cssDependencies = new Set<string>();
+    const finalCssBundles = new Map<string, string[]>();
 
-  return {
-    cssBundles: finalCssBundles,
-    cssDependencies,
+    for (const [bundleName, importPaths] of bundleImportPaths.entries()) {
+      try {
+        const resultingCode = await Promise.all(importPaths.map(async (importPath) => {
+          const result = await bundleAsync({
+            filename: importPath,
+            minify: true,
+          });
+          if (result.dependencies) {
+            for (const dependency of result.dependencies) {
+              cssDependencies.add(dependency.url);
+            }
+          }
+          return textDecoder.decode(result.code);
+        }));
+        finalCssBundles.set(bundleName, resultingCode);
+      } catch (err) {
+        throw new BundleError(`css.import() failed to import files for bundle "${bundleName}".`, {
+          cause: err,
+        });
+      }
+    }
+
+    for (const [bundleName, bundleChunks] of rawCssBundles.entries()) {
+      let currentBundleArray = finalCssBundles.get(bundleName);
+      if (!currentBundleArray) {
+        currentBundleArray = [...bundleChunks];
+        finalCssBundles.set(bundleName, currentBundleArray);
+      } else {
+        currentBundleArray.push(...bundleChunks);
+      }
+    }
+
+    return {
+      cssBundles: finalCssBundles,
+      cssDependencies,
+    };
   };
 };
 

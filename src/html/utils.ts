@@ -211,8 +211,8 @@ export const sanitizeHTMLTextContent = (text: string): string => {
   return `${sanitizedText}${text.slice(lastIndex)}`;
 };
 
-const yetiNodeTypes = new Set<number>(Object.values(YETI_NODE_TYPE));
+const yetiNodeTypes = new Set(Object.values(YETI_NODE_TYPE));
 
 export const isYetiNode = (value: unknown): value is YetiNode => {
-  return typeof value === "object" && value !== null && "type" in value && typeof value.type === "number" && yetiNodeTypes.has(value.type);
+  return typeof value === "object" && value !== null && "type" in value && yetiNodeTypes.has(value.type as any);
 }

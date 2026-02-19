@@ -1,28 +1,32 @@
-import { readFile } from "node:fs/promises";
+import { build } from 'esbuild';
+
 import { BUNDLE_TYPE, isBundleObject, makeBundleInlineObject, makeBundleSrcObject, makeBundleStartObject, makeBundleImportObject } from "../bundle/bundle.ts";
 import { resolveImportPath } from "../bundle/import.ts";
 import { getConfig } from "../config.js";
 import { BundleError } from "../error.ts";
 
 export interface JSResult {
-  jsBundles: {
-    [bundleName: string]: string;
-  };
-  jsDependencies: {
-    [path: string]: true;
-  };
+  jsBundles: Map<string, string[]>;
+  jsDependencies: Set<string>;
 }
 
-export const js = (strings: TemplateStringsArray, ...values: unknown[]): () => Promise<JSResult> => async () => {
-  const rawJsBundles: Record<string, string[]> = {};
-  const jsDependencies: Record<string, true> = {};
+export const js = (strings: TemplateStringsArray, ...values: unknown[]): () => Promise<JSResult> => {
+  const rawJsBundles = new Map<string, string[]>();
+  // Map of bundleName to array of import paths for that bundle{
+  const bundleImportPaths = new Map<string, string[]>();
 
   let currentBundleName = js.getDefaultBundleName();
 
   const stringCount = strings.length;
   for (let i = 0; i < stringCount; i++) {
-    const currentBundleArray = (rawJsBundles[currentBundleName] ??= []);
-    currentBundleArray.push(strings[i]);
+    const str = strings[i];
+    let currentBundleArray = rawJsBundles.get(currentBundleName);
+    if (!currentBundleArray) {
+      currentBundleArray = [str];
+      rawJsBundles.set(currentBundleName, currentBundleArray);
+    } else {
+      currentBundleArray.push(str);
+    }
 
     const value = values[i];
     if (isBundleObject(value)) {
@@ -40,16 +44,13 @@ export const js = (strings: TemplateStringsArray, ...values: unknown[]): () => P
       } else {
         // Import
         const importPath = value.importPath;
-        jsDependencies[importPath] = true;
         const targetBundleName = value.bundleName ?? currentBundleName;
-        try {
-          const fileContents = await readFile(importPath, "utf-8");
-          const targetBundleArray = (rawJsBundles[targetBundleName] ??= []);
-          targetBundleArray.push(fileContents.trim());
-        } catch (err) {
-          throw new BundleError(`js.import() failed to import file at path "${importPath}".`, {
-            cause: err,
-          });
+        let currentBundleImportPaths = bundleImportPaths.get(targetBundleName);
+        if (!currentBundleImportPaths) {
+          currentBundleImportPaths = [importPath];
+          bundleImportPaths.set(targetBundleName, currentBundleImportPaths);
+        } else {
+          currentBundleImportPaths.push(importPath);
         }
       }
     } else if (value !== undefined && value !== null) {
@@ -57,17 +58,50 @@ export const js = (strings: TemplateStringsArray, ...values: unknown[]): () => P
     }
   }
 
-  const finalJsBundles: Record<string, string> = {};
-  for (const [bundleName, bundleChunks] of Object.entries(rawJsBundles)) {
-    const combinedBundleString = bundleChunks.join("").trim();
-    if (combinedBundleString) {
-      finalJsBundles[bundleName] = combinedBundleString;
-    }
-  }
+  return async () => {
+    const jsDependencies = new Set<string>();
+    const finalJsBundles = new Map<string, string[]>();
 
-  return {
-    jsBundles: finalJsBundles,
-    jsDependencies,
+    for (const [bundleName, importPaths] of bundleImportPaths.entries()) {
+      // Use esbuild to bundle imported files together and get a list of all input files for dependency tracking
+      try {
+        const result = await build({
+          entryPoints: importPaths,
+          bundle: true,
+          write: false,
+          minify: true,
+          treeShaking: true,
+          // Outputs data so we can get a list of all input files for dependency tracking
+          metafile: true,
+          absPaths: ["metafile"],
+          format: "esm",
+          platform: "browser",
+        });
+        for (const inputFile in result.metafile.inputs) {
+          jsDependencies.add(inputFile);
+        }
+        finalJsBundles.set(bundleName, [result.outputFiles[0].text.trim()]);
+      } catch (err) {
+        throw new BundleError(`js.import() failed to import files for bundle "${bundleName}".`, {
+          cause: err,
+        });
+      }
+    }
+
+    for (const [bundleName, bundleChunks] of rawJsBundles.entries()) {
+      let currentBundleArray = finalJsBundles.get(bundleName);
+      if (!currentBundleArray) {
+        currentBundleArray = [...bundleChunks];
+        finalJsBundles.set(bundleName, currentBundleArray);
+      } else {
+        currentBundleArray.push(...bundleChunks);
+      }
+    }
+
+    return {
+      jsBundles: finalJsBundles,
+      jsDependencies,
+    };
   };
 };
 
