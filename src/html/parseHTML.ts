@@ -28,83 +28,6 @@ const isYetiNode = (value: unknown): value is YetiNode => {
   return typeof value === "object" && value !== null && "type" in value;
 };
 
-const appendContentToNode = async (parent: YetiRootNode | YetiElementNode | OpenComponentNode, content: unknown) => {
-  let unwrappedContent = content;
-  if (typeof unwrappedContent === "function") {
-    try {
-      unwrappedContent = unwrappedContent();
-    } catch (error) {
-      throw new YetiHTMLParsingError(`An error occurred while executing an inlined function in HTML`, {
-        cause: error,
-      });
-    }
-  }
-  if (unwrappedContent instanceof Promise) {
-    unwrappedContent = await unwrappedContent;
-  }
-
-  if (unwrappedContent === null || unwrappedContent === undefined || unwrappedContent === "") {
-    // If the content is null, undefined, or an empty string, we can just ignore it and not insert anything.
-    return;
-  }
-
-  if (typeof unwrappedContent === "object") {
-    // If the content is an object, we will try to unwrap any iterables or YetiNodes and insert them appropriately.
-    // If the content is an iterable object, iterate over its values and insert each item as a separate node. Handle both sync and async iterables.
-    if (Symbol.iterator in unwrappedContent && typeof unwrappedContent[Symbol.iterator] === "function") {
-      for (const item of unwrappedContent as Generator) {
-        await appendContentToNode(parent, item);
-      }
-      return;
-    } else if (Symbol.asyncIterator in unwrappedContent && typeof unwrappedContent[Symbol.asyncIterator] === "function") {
-      for await (const item of unwrappedContent as AsyncGenerator) {
-        await appendContentToNode(parent, item);
-      }
-      return;
-    }
-
-    parent.children ??= [];
-
-    if (isYetiNode(unwrappedContent)) {
-      switch (unwrappedContent.type) {
-        case YETI_NODE_TYPE.ROOT:
-          // Unwrap root nodes' children and insert them directly, since we don't want to nest root nodes inside other nodes.
-          // We may get a root node from dynamic content like the return value from rendering a nested component.
-          parent.children.push(...unwrappedContent.children);
-          break;
-        case YETI_NODE_TYPE.TEXT:
-          // Merge text into a single text node if the last child is also a text node,
-          // to avoid unnecessary fragmentation of text nodes.
-          const lastChild = parent.children[parent.children.length - 1];
-          if (lastChild?.type === YETI_NODE_TYPE.TEXT) {
-            lastChild.content += unwrappedContent.content;
-          } else {
-            parent.children.push(unwrappedContent);
-          }
-          break;
-        default:
-          // For all other node types, we can just append them directly without any special handling.
-          parent.children.push(unwrappedContent);
-          break;
-      }
-
-      return;
-    } else if (isBundleInlineObject(unwrappedContent)) {
-      parent.children.push(makeBundleInlineElementNode(
-        unwrappedContent.bundleName,
-        unwrappedContent.assetType,
-      ));
-      return
-    }
-  }
-
-  // If all else fails, we'll stringify the value and insert it as a text node.
-  appendContentToNode(parent, {
-    type: YETI_NODE_TYPE.TEXT,
-    content: String(unwrappedContent),
-  });
-};
-
 /**
  * Parses an HTML string into a tree of YetiNodes. This is the main entry point for the HTML parsing logic.
  * The parser works by first lexing the input HTML string into a stream of tokens using the lexHTML function,
@@ -112,6 +35,160 @@ const appendContentToNode = async (parent: YetiRootNode | YetiElementNode | Open
  */
 export const parseHTML = async (htmlStringChars: Uint8Array, dynamicValues: unknown[]): Promise<YetiRootNode> => {
   const rootNode: YetiRootNode = { type: YETI_NODE_TYPE.ROOT, children: [] };
+
+  const appendContentToNode = async (parent: YetiRootNode | YetiElementNode | OpenComponentNode, content: unknown): Promise<void> => {
+    let unwrappedContent = content;
+    if (typeof unwrappedContent === "function") {
+      try {
+        unwrappedContent = unwrappedContent();
+      } catch (error) {
+        throw new YetiHTMLParsingError(`An error occurred while executing an inlined function in HTML`, {
+          cause: error,
+        });
+      }
+    }
+    if (unwrappedContent instanceof Promise) {
+      unwrappedContent = await unwrappedContent;
+    }
+
+    if (unwrappedContent === null || unwrappedContent === undefined || unwrappedContent === "") {
+      // If the content is null, undefined, or an empty string, we can just ignore it and not insert anything.
+      return;
+    }
+
+    if (typeof unwrappedContent === "object") {
+      // If the content is an object, we will try to unwrap any iterables or YetiNodes and insert them appropriately.
+      // If the content is an iterable object, iterate over its values and insert each item as a separate node. Handle both sync and async iterables.
+      if (Symbol.iterator in unwrappedContent && typeof unwrappedContent[Symbol.iterator] === "function") {
+        for (const item of unwrappedContent as Generator) {
+          await appendContentToNode(parent, item);
+        }
+        return;
+      } else if (Symbol.asyncIterator in unwrappedContent && typeof unwrappedContent[Symbol.asyncIterator] === "function") {
+        for await (const item of unwrappedContent as AsyncGenerator) {
+          await appendContentToNode(parent, item);
+        }
+        return;
+      }
+
+      parent.children ??= [];
+
+      if (isYetiNode(unwrappedContent)) {
+        switch (unwrappedContent.type) {
+          case YETI_NODE_TYPE.ROOT:
+            // Unwrap root nodes' children and insert them directly, since we don't want to nest root nodes inside other nodes.
+            // We may get a root node from dynamic content like the return value from rendering a nested component.
+            parent.children.push(...unwrappedContent.children);
+            if (unwrappedContent.componentCSS) {
+              if (rootNode.componentCSS) {
+                rootNode.componentCSS = rootNode.componentCSS.union(unwrappedContent.componentCSS);
+              } else {
+                rootNode.componentCSS = new Set(unwrappedContent.componentCSS);
+              }
+            }
+            if (unwrappedContent.componentJS) {
+              if (rootNode.componentJS) {
+                rootNode.componentJS = rootNode.componentJS.union(unwrappedContent.componentJS);
+              } else {
+                rootNode.componentJS = new Set(unwrappedContent.componentJS);
+              }
+            }
+            if (unwrappedContent.htmlBundleData) {
+              if (rootNode.htmlBundleData) {
+                rootNode.htmlBundleData.htmlDependencies = rootNode.htmlBundleData.htmlDependencies.union(unwrappedContent.htmlBundleData.htmlDependencies);
+              } else {
+                rootNode.htmlBundleData = {
+                  htmlDependencies: new Set(unwrappedContent.htmlBundleData.htmlDependencies),
+                };
+              }
+
+              if (unwrappedContent.htmlBundleData.htmlBundles) {
+                if (rootNode.htmlBundleData.htmlBundles) {
+                  for (const [bundleName, bundleContents] of unwrappedContent.htmlBundleData.htmlBundles.entries()) {
+                    let currentBundleArray = rootNode.htmlBundleData.htmlBundles.get(bundleName);
+                    if (!currentBundleArray) {
+                      currentBundleArray = [...bundleContents];
+                      rootNode.htmlBundleData.htmlBundles.set(bundleName, currentBundleArray);
+                    } else {
+                      currentBundleArray.push(...bundleContents);
+                    }
+                  }
+                } else {
+                  rootNode.htmlBundleData.htmlBundles = new Map(unwrappedContent.htmlBundleData.htmlBundles);
+                }
+              }
+            }
+            break;
+          case YETI_NODE_TYPE.TEXT:
+            // Merge text into a single text node if the last child is also a text node,
+            // to avoid unnecessary fragmentation of text nodes.
+            const lastChild = parent.children[parent.children.length - 1];
+            if (lastChild?.type === YETI_NODE_TYPE.TEXT) {
+              lastChild.content += unwrappedContent.content;
+            } else {
+              parent.children.push(unwrappedContent);
+            }
+            break;
+          default:
+            // For all other node types, we can just append them directly without any special handling.
+            parent.children.push(unwrappedContent);
+            break;
+        }
+
+        return;
+      } else if (isBundleInlineObject(unwrappedContent)) {
+        parent.children.push(makeBundleInlineElementNode(
+          unwrappedContent.bundleName,
+          unwrappedContent.assetType,
+        ));
+        return
+      } else if (isBundleImportObject(unwrappedContent, "html")) {
+        // Special handling when we encounter an `html.import()` to import external file content
+        // into our HTML.
+        rootNode.htmlBundleData ??= {
+          htmlDependencies: new Set(),
+        };
+        // Mark the imported file as an HTML dependency
+        rootNode.htmlBundleData.htmlDependencies.add(unwrappedContent.importPath);
+
+        // Read the file contents and figure out what to do with them
+        const fileContents = await readFile(unwrappedContent.importPath, "utf-8");
+        if (unwrappedContent.bundleName) {
+          // If a bundle name is specified, we will add the imported file's content to the corresponding HTML bundle
+          // in the root node's htmlBundleData.
+          // The final bundle contents will be inserted into the tree in a later processing step after HTML parsing is complete.
+          rootNode.htmlBundleData.htmlBundles ??= new Map();
+          let currentBundleArray = rootNode.htmlBundleData.htmlBundles.get(unwrappedContent.bundleName);
+          if (!currentBundleArray) {
+            currentBundleArray = [fileContents];
+            rootNode.htmlBundleData.htmlBundles.set(unwrappedContent.bundleName, currentBundleArray);
+          } else {
+            currentBundleArray.push(fileContents);
+          }
+        } else {
+          // If no bundle name is specified, we will insert the imported HTML content directly into the tree at the location of the import statement.
+          if (unwrappedContent.options?.shouldEscape) {
+            // If the shouldEscape option is true, we will insert the raw HTML text as a text node
+            await appendContentToNode(parent, {
+              type: YETI_NODE_TYPE.TEXT,
+              content: fileContents,
+            });
+          } else {
+            // If the shouldEscape option is false, we will parse the imported HTML content and insert the resulting nodes directly into the tree
+            const parsedImportedHTML = await parseHTML(textEncoder.encode(fileContents), []);
+            await appendContentToNode(parent, parsedImportedHTML);
+          }
+        }
+        return;
+      }
+    }
+
+    // If all else fails, we'll stringify the value and insert it as a text node.
+    return appendContentToNode(parent, {
+      type: YETI_NODE_TYPE.TEXT,
+      content: String(unwrappedContent),
+    });
+  };
 
   // Track all unique tagnames that are currently open in the tree.
   // This way, we can quickly determine if a closing tag matches any currently open tag
@@ -323,47 +400,7 @@ export const parseHTML = async (htmlStringChars: Uint8Array, dynamicValues: unkn
         break;
       }
       case TOKEN_TYPE.CHILD_CONTENT: {
-        if (isBundleImportObject(tokenValue, "html")) {
-          // Special handling when we encounter an `html.import()` to import external file content
-          // into our HTML.
-          rootNode.htmlBundleData ??= {
-            htmlDependencies: new Set(),
-          };
-          // Mark the imported file as an HTML dependency
-          rootNode.htmlBundleData.htmlDependencies.add(tokenValue.importPath);
-
-          // Read the file contents and figure out what to do with them
-          const fileContents = await readFile(tokenValue.importPath, "utf-8");
-          if (tokenValue.bundleName) {
-            // If a bundle name is specified, we will add the imported file's content to the corresponding HTML bundle
-            // in the root node's htmlBundleData.
-            // The final bundle contents will be inserted into the tree in a later processing step after HTML parsing is complete.
-            rootNode.htmlBundleData.htmlBundles ??= new Map();
-            let currentBundleArray = rootNode.htmlBundleData.htmlBundles.get(tokenValue.bundleName);
-            if (!currentBundleArray) {
-              currentBundleArray = [fileContents];
-              rootNode.htmlBundleData.htmlBundles.set(tokenValue.bundleName, currentBundleArray);
-            } else {
-              currentBundleArray.push(fileContents);
-            }
-          } else {
-            // If no bundle name is specified, we will insert the imported HTML content directly into the tree at the location of the import statement.
-            if (tokenValue.options?.shouldEscape) {
-              // If the shouldEscape option is true, we will insert the raw HTML text as a text node
-              await appendContentToNode(getCurrentOpenParent(), {
-                type: YETI_NODE_TYPE.TEXT,
-                content: fileContents,
-              });
-            } else {
-              // If the shouldEscape option is false, we will parse the imported HTML content and insert the resulting nodes directly into the tree
-              const parsedImportedHTML = await parseHTML(textEncoder.encode(fileContents), []);
-              await appendContentToNode(getCurrentOpenParent(), parsedImportedHTML);
-            }
-          }
-        } else {
-          // All other content should just be appended to the current open parent
-          await appendContentToNode(getCurrentOpenParent(), tokenValue);
-        }
+        await appendContentToNode(getCurrentOpenParent(), tokenValue);
         break;
       }
       case TOKEN_TYPE.COMMENT_PART: {

@@ -1552,5 +1552,212 @@ Line 3 with a <span> tag
         ],
       });
     });
+
+    test("imports are passed up from nested components", async () => {
+      const NestedComponent = () => html`<div>Nested import: ${html.import("../../test_data/external-html.html")}</div>`;
+      const result = await html`<main><${NestedComponent} /></main>`;
+      assert.deepStrictEqual<YetiRootNode>(result, {
+        type: YETI_NODE_TYPE.ROOT,
+        htmlBundleData: {
+          htmlDependencies: new Set([fileURLToPath(import.meta.resolve("../../test_data/external-html.html"))]),
+        },
+        children: [
+          {
+            type: YETI_NODE_TYPE.ELEMENT,
+            tagName: "main",
+
+            children: [
+              {
+                type: YETI_NODE_TYPE.ELEMENT,
+                tagName: "div",
+                children: [
+                  {
+                    type: YETI_NODE_TYPE.TEXT,
+                    content: "Nested import: ",
+                  },
+                  {
+                    type: YETI_NODE_TYPE.ELEMENT,
+                    tagName: "p",
+                    children: [
+                      {
+                        type: YETI_NODE_TYPE.TEXT,
+                        content: "This is an ",
+                      },
+                      {
+                        type: YETI_NODE_TYPE.ELEMENT,
+                        tagName: "em",
+                        children: [
+                          {
+                            type: YETI_NODE_TYPE.TEXT,
+                            content: "HTML",
+                          },
+                        ],
+                      },
+                      {
+                        type: YETI_NODE_TYPE.TEXT,
+                        content: " snippet.",
+                      }
+                    ],
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      });
+    });
+
+    test("bundled html imports are passed up from nested components", async () => {
+      const NestedComponent = () => html`<div>Nested bundled import: ${html.import("../../test_data/external-svg.svg", {
+        bundleName: "icons"
+      })}</div>`;
+      const result = await html`<main><${NestedComponent} /></main>`;
+      assert.deepStrictEqual<YetiRootNode>(result, {
+        type: YETI_NODE_TYPE.ROOT,
+        htmlBundleData: {
+          htmlBundles: new Map([
+            ["icons", [`<svg xmlns="http://www.w3.org/2000/svg" height="24px" viewBox="0 -960 960 960" width="24px" fill="#e8eaed"><path d="m256-200-56-56 224-224-224-224 56-56 224 224 224-224 56 56-224 224 224 224-56 56-224-224-224 224Z" /></svg>`]],
+          ]),
+          htmlDependencies: new Set([fileURLToPath(import.meta.resolve("../../test_data/external-svg.svg"))]),
+        },
+        children: [
+          {
+            type: YETI_NODE_TYPE.ELEMENT,
+            tagName: "main",
+
+            children: [
+              {
+                type: YETI_NODE_TYPE.ELEMENT,
+                tagName: "div",
+                children: [
+                  {
+                    type: YETI_NODE_TYPE.TEXT,
+                    content: "Nested bundled import: ",
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      });
+    });
+  });
+
+  describe("component css and js assets", () => {
+    test("component css asset bundles are gathered up into the root node", async () => {
+      const Component1 = () => html`<my-component-1>Hello, world!</my-component-1>`;
+      Component1.css = css`
+        :root {
+          color: red;
+        }
+
+        ${css.bundle("component-styles")};
+        my-component-1 {
+          font-weight: bold;
+          color: blue;
+        }
+
+        ${css.import("../../test_data/external-styles.css", "other-bundle")};
+      `;
+
+      const Component2 = () => html`<my-component-2>Goodbye, world!</my-component-2>`;
+      Component2.css = css`
+        ${css.bundle("component-styles")};
+        my-component-2 {
+          font-style: italic;
+          color: green;
+        }
+      `;
+
+      const result = await html`<div><${Component1} /><${Component2} /></div>`;
+
+      assert.deepStrictEqual<YetiRootNode>(result, {
+        type: YETI_NODE_TYPE.ROOT,
+        componentCSS: new Set([Component1.css, Component2.css]),
+        children: [
+          {
+            type: YETI_NODE_TYPE.ELEMENT,
+            tagName: "div",
+            children: [
+              {
+                type: YETI_NODE_TYPE.ELEMENT,
+                tagName: "my-component-1",
+                children: [
+                  {
+                    type: YETI_NODE_TYPE.TEXT,
+                    content: "Hello, world!",
+                  },
+                ],
+              },
+              {
+                type: YETI_NODE_TYPE.ELEMENT,
+                tagName: "my-component-2",
+                children: [
+                  {
+                    type: YETI_NODE_TYPE.TEXT,
+                    content: "Goodbye, world!",
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      });
+    });
+
+    test("component js asset bundles are gathered up into the root node", async () => {
+      const Component1 = () => html`<my-component-1>Hello, world!</my-component-1>`;
+      Component1.js = js`
+        console.log("Hello from default bundle");
+
+        ${js.bundle("component-scripts")};
+        console.log("Hello from component 1");
+
+        ${js.import("../../test_data/external-script.js", "other-bundle")};
+      `;
+
+      const Component2 = () => html`<my-component-2>Goodbye, world!</my-component-2>`;
+      Component2.js = js`
+        ${js.bundle("component-scripts")};
+        console.log("Hello from component 2");
+
+        ${js.import("../../test_data/external-script.js")};
+      `;
+
+      const result = await html`<div><${Component1} /><${Component2} /></div>`;
+
+      assert.deepStrictEqual<YetiRootNode>(result, {
+        type: YETI_NODE_TYPE.ROOT,
+        componentJS: new Set([Component1.js, Component2.js]),
+        children: [
+          {
+            type: YETI_NODE_TYPE.ELEMENT,
+            tagName: "div",
+            children: [
+              {
+                type: YETI_NODE_TYPE.ELEMENT,
+                tagName: "my-component-1",
+                children: [
+                  {
+                    type: YETI_NODE_TYPE.TEXT,
+                    content: "Hello, world!",
+                  },
+                ],
+              },
+              {
+                type: YETI_NODE_TYPE.ELEMENT,
+                tagName: "my-component-2",
+                children: [
+                  {
+                    type: YETI_NODE_TYPE.TEXT,
+                    content: "Goodbye, world!",
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      });
+    });
   });
 });
