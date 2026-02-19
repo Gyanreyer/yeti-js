@@ -5,6 +5,8 @@ import { html } from "./html.ts";
 import { YETI_NODE_TYPE, } from "./types.ts";
 import type { YetiChildNode, YetiRootNode } from './types.ts';
 import { YetiHTMLParsingError } from "../error.ts";
+import { css } from "../css/css.ts";
+import { js } from '../js/js.ts';
 
 describe("html", () => {
   describe("HTML attributes", async () => {
@@ -1369,6 +1371,77 @@ Line 3 with a <span> tag
             content: "html",
           },
         ]
+      });
+    });
+  });
+
+  describe("inlined asset bundles", () => {
+    test("handles inlined HTML bundles as expected", async () => {
+      const bundle = await html`<div>${html.inline("my-bundle")}</div>`;
+      assert.deepStrictEqual<YetiRootNode>(bundle, {
+        type: YETI_NODE_TYPE.ROOT,
+        children: [
+          {
+            type: YETI_NODE_TYPE.ELEMENT,
+            tagName: "div",
+            children: [
+              {
+                type: YETI_NODE_TYPE.ELEMENT,
+                tagName: "---INLINED-BUNDLE---",
+                attributes: {
+                  bundleName: "my-bundle",
+                  assetType: "html",
+                },
+              },
+            ],
+          },
+        ],
+      });
+    });
+
+    test("handles inlined CSS bundles as expected", async () => {
+      const bundle = await html`<style>${css.inline("my-css-bundle")}</style>`;
+      assert.deepStrictEqual<YetiRootNode>(bundle, {
+        type: YETI_NODE_TYPE.ROOT,
+        children: [
+          {
+            type: YETI_NODE_TYPE.ELEMENT,
+            tagName: "style",
+            children: [
+              {
+                type: YETI_NODE_TYPE.ELEMENT,
+                tagName: "---INLINED-BUNDLE---",
+                attributes: {
+                  bundleName: "my-css-bundle",
+                  assetType: "css",
+                },
+              },
+            ],
+          },
+        ],
+      });
+    });
+
+    test("handles inlined JS bundles as expected", async () => {
+      const bundle = await html`<script>${js.inline("my-js-bundle")}</script>`;
+      assert.deepStrictEqual<YetiRootNode>(bundle, {
+        type: YETI_NODE_TYPE.ROOT,
+        children: [
+          {
+            type: YETI_NODE_TYPE.ELEMENT,
+            tagName: "script",
+            children: [
+              {
+                type: YETI_NODE_TYPE.ELEMENT,
+                tagName: "---INLINED-BUNDLE---",
+                attributes: {
+                  bundleName: "my-js-bundle",
+                  assetType: "js",
+                },
+              },
+            ],
+          },
+        ],
       });
     });
   });

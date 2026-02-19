@@ -1,3 +1,4 @@
+import { YETI_NODE_TYPE, type YetiElementNode } from "../html/types.ts";
 import { BundleError } from "../error.ts";
 
 // Reserved Wildcard bundle name that can be used to indicate a spot where all used bundles on a page
@@ -43,7 +44,7 @@ export const makeBundleStartObject = <TAssetType extends "css" | "js", TBundleNa
 /**
  * Object marking a place in an HTML template where a bundle's contents should be inlined into the HTML.
  */
-export interface BundleInlineObject<TAssetType extends "html" | "css" | "js", TBundleName extends string = string> extends BaseBundleObject<TAssetType, "inline"> {
+export interface BundleInlineObject<TAssetType extends "html" | "css" | "js" = "html" | "css" | "js", TBundleName extends string = string> extends BaseBundleObject<TAssetType, "inline"> {
   /**
    * The name of the bundle that this inline content belongs to.
    */
@@ -54,6 +55,28 @@ export const makeBundleInlineObject = <TAssetType extends "html" | "css" | "js",
   [BUNDLE_TYPE]: "inline",
   assetType,
   bundleName,
+});
+
+export const INLINED_BUNDLE_ELEMENT_TAG_NAME = "---INLINED-BUNDLE---";
+/**
+ * Special element node used as a placeholder for where inlined bundle content should be
+ * placed in a final processing step after HTML parsing.
+ */
+export interface BundleInlineElementNode extends YetiElementNode {
+  tagName: typeof INLINED_BUNDLE_ELEMENT_TAG_NAME;
+  attributes: {
+    bundleName: string;
+    assetType: "html" | "css" | "js";
+  };
+}
+
+export const makeBundleInlineElementNode = (bundleName: string, assetType: "html" | "css" | "js"): BundleInlineElementNode => ({
+  type: YETI_NODE_TYPE.ELEMENT,
+  tagName: INLINED_BUNDLE_ELEMENT_TAG_NAME,
+  attributes: {
+    bundleName,
+    assetType,
+  },
 });
 
 /**

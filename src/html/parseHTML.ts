@@ -1,8 +1,9 @@
 import { lexHTML, TOKEN_TYPE } from "./lexHTML.ts";
 import { YETI_NODE_TYPE } from "./types.ts";
-import type { YetiNode, YetiRootNode, YetiElementNode, YetiCommentNode, YetiDoctypeNode } from "./types.ts";
-import { YetiHTMLParsingError } from "./error.ts";
+import type { YetiNode, YetiRootNode, YetiElementNode, YetiCommentNode, YetiDoctypeNode, YetiChildNode } from "./types.ts";
+import { YetiHTMLParsingError } from "../error.ts";
 import { isVoidTag } from "./utils.ts";
+import { isBundleInlineObject, makeBundleInlineElementNode } from "../bundle/bundle.ts";
 
 // TODO:
 // - Handle html import objects
@@ -19,7 +20,7 @@ type OpenComponentNode = {
   type: typeof COMPONENT_NODE_TYPE;
   component: Function;
   attributes?: Record<string, unknown>;
-  children?: YetiNode[];
+  children?: YetiChildNode[];
 };
 
 const isYetiNode = (value: unknown): value is YetiNode => {
@@ -74,7 +75,7 @@ const appendContentToNode = async (parent: YetiRootNode | YetiElementNode | Open
           // Merge text into a single text node if the last child is also a text node,
           // to avoid unnecessary fragmentation of text nodes.
           const lastChild = parent.children[parent.children.length - 1];
-          if (lastChild && lastChild.type === YETI_NODE_TYPE.TEXT) {
+          if (lastChild?.type === YETI_NODE_TYPE.TEXT) {
             lastChild.content += unwrappedContent.content;
           } else {
             parent.children.push(unwrappedContent);
@@ -87,6 +88,12 @@ const appendContentToNode = async (parent: YetiRootNode | YetiElementNode | Open
       }
 
       return;
+    } else if (isBundleInlineObject(unwrappedContent)) {
+      parent.children.push(makeBundleInlineElementNode(
+        unwrappedContent.bundleName,
+        unwrappedContent.assetType,
+      ));
+      return
     }
   }
 
