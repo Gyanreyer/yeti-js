@@ -8,3 +8,6 @@ export { yetiPlugin } from "./plugin.js";
 
 // Core components
 export { Head } from './components/Head.component.js';
+
+// HTML node types for bundle processing
+export { YETI_NODE_TYPE } from './html/types.ts';

@@ -1,6 +1,9 @@
 import type EleventyUserConfig from '@11ty/eleventy/src/UserConfig';
 import type { bundleNameSymbol, bundleTypeSymbol, assetTypeSymbol, importFilePathSymbol, shouldEscapeHTMLSymbol, bundleSrcPrefix, inlinedHTMLBundleTagName, inlinedBundleContentTypeSymbol } from './bundle';
 import { DeepPartial } from './utils/utilityTypes';
+import type { YetiRootNode } from './html/types.ts';
+import { bundle, CustomAtRules, TransformOptions as LightningCSSTransformOptions } from 'lightningcss';
+import { TransformOptions as EsbuildTransformOptions } from 'esbuild';
 
 export type YetiConfig = {
   /**
@@ -34,16 +37,32 @@ export type YetiConfig = {
      */
     sourceMaps: boolean;
     /**
-     * The directory relative to the site's outputDir where JavaScript bundles will be written.
-     * For example, if the site's outputDir is "dist" and `js.outputDir` is "assets/js", JavaScript bundles will be written to "dist/assets/js".
-     * @default "js"
-     */
-    outputDir: string;
-    /**
-     * The default globa JS bundle name to use when no bundle name is specified.
+     * The default global JS bundle name to use when no bundle name is specified.
      * @default "global"
      */
     defaultBundleName: string;
+    /**
+     * Function to derive custom file paths for where external JavaScript bundle files should be written.
+     * This function will be called for each bundle with a JavaScript bundle name,
+     * and should return a string representing the path relative to the site's `outputDir`
+     * where the bundle should be written.
+     * If not provided, bundle file names will default to `/js/${bundleName}.js`.
+     * Leading slashes are optional.
+     *
+     * @param {string} bundleName - The name of the bundle
+     *
+     * @example
+     * ```ts
+     * eleventyConfig.addPlugin(yetiPlugin, {
+     *   js: {
+     *     // Bundle files should go in the "assets/js" directory and have a `.bundle.js` suffix
+     *     deriveBundleFilePath: (bundleName) => `assets/js/${bundleName}.bundle.js`,
+     *   },
+     * });
+     * ```
+     */
+    deriveBundleFilePath: (bundleName: string) => string;
+    deriveBundleTransformConfig?: (bundleName: string) => EsbuildTransformOptions | null | undefined;
   };
   css: {
     /**
@@ -57,16 +76,102 @@ export type YetiConfig = {
      */
     sourceMaps: boolean;
     /**
-     * The directory relative to the site's outputDir where CSS bundles will be written.
-     * For example, if the site's outputDir is "dist" and `css.outputDir` is "assets/css", CSS bundles will be written to "dist/assets/css".
-     * @default "css"
-     */
-    outputDir: string;
-    /**
      * The default global CSS bundle name to use when no bundle name is specified.
      * @default "global"
      */
     defaultBundleName: string;
+    /**
+     * Function to derive custom file paths for where external CSS bundle files should be written.
+     * This function will be called for each bundle with a CSS bundle name,
+     * and should return a string representing the path relative to the site's `outputDir`
+     * where the bundle should be written.
+     * If not provided, bundle file names will default to `/css/${bundleName}.css`.
+     * Leading slashes are optional.
+     *
+     * @param {string} bundleName - The name of the bundle
+     *
+     * @example
+     * ```ts
+     * eleventyConfig.addPlugin(yetiPlugin, {
+     *   css: {
+     *     // Bundle files should go in the "assets/css" directory and have a `.bundle.css` suffix
+     *     deriveBundleFilePath: (bundleName) => `assets/css/${bundleName}.bundle.css`,
+     *   },
+     * });
+     * ```
+     */
+    deriveBundleFilePath: (bundleName: string) => string;
+    deriveBundleTransformConfig?: (bundleName: string) => Omit<LightningCSSTransformOptions<CustomAtRules>, "code" | "filename"> | null | undefined;
+  };
+  html: {
+    /**
+     * Whether to minify HTML output.
+     * @default true
+     */
+    minify: boolean;
+    /**
+     * Function to derive custom file paths for where external HTML bundle files should be written.
+     * This function will be called for each bundle with a HTML bundle name,
+     * and should return a string representing the path relative to the site's `outputDir`
+     * where the bundle should be written.
+     * If not provided, bundle file names will default to `/html/${bundleName}.html`.
+     * Leading slashes are optional.
+     *
+     * @param {string} bundleName - The name of the bundle
+     *
+     * @example
+     * ```ts
+     * eleventyConfig.addPlugin(yetiPlugin, {
+     *   html: {
+     *     // "spritesheet" bundle should get a `.svg` extension instead of the default `.html`
+     *     deriveBundleFilePath: (bundleName) => bundleName === "spritesheet" ? `/icons/spritesheet.svg` : `/html/${bundleName}.html`,
+     *   },
+     * });
+     * ```
+     */
+    deriveBundleFilePath: (bundleName: string) => string;
+    /**
+     * Object to map bundle names to functions to process and transform parsed HTML bundle nodes before final rendering.
+     * These functions will be called for each HTML bundle matching the key name before it's inserted into the final output,
+     * allowing you to modify the HTML tree structure.
+     * You may also use a special wildcard "*" key to specify a function that will be called for all bundles,
+     * which can be useful for applying generic transformations to all bundles or for processing bundles
+     * without explicitly referencing them by name.
+     *
+     * This is useful for transformations like:
+     * - Converting `<svg>` elements into `<symbol>` elements for SVG sprite generation
+     * - Adding vendor prefixes to inline styles
+     * - Transforming or filtering specific elements
+     * - Adding wrapper elements or attributes
+     *
+     * @example Converting SVG elements to symbols for sprite generation
+     * ```ts
+     * import { YETI_NODE_TYPE } from 'yeti-js';
+     *
+     * eleventyConfig.addPlugin(yetiPlugin, {
+     *   html: {
+     *     processBundle: {
+     *       "svg-sprites": (rootNode) => {
+     *         // Transform each <svg> element into a <symbol> for sprite usage
+     *         for (const child of rootNode.children) {
+     *           if (child.type === YETI_NODE_TYPE.ELEMENT && child.tagName === 'svg') {
+     *             child.tagName = 'symbol';
+     *             // Remove xmlns as it's not needed on symbol
+     *             if (child.attributes?.xmlns) {
+     *               delete child.attributes.xmlns;
+     *             }
+     *           }
+     *         }
+     *         return rootNode;
+     *       },
+     *     },
+     *   },
+     * });
+     * ```
+     */
+    processBundle?: {
+      [bundleName: string]: (rootNode: YetiRootNode, bundleName: string) => YetiRootNode | Promise<YetiRootNode>;
+    };
   };
   /**
    * The file extension used for Yeti page template files.
@@ -704,3 +809,17 @@ export declare function yetiPlugin(eleventyConfig: EleventyUserConfig, userConfi
  * ```
  */
 export declare const Head: YetiComponent;
+
+// Re-export HTML node types for use in bundle processing
+export type {
+  YetiRootNode,
+  YetiElementNode,
+  YetiTextNode,
+  YetiCommentNode,
+  YetiDoctypeNode,
+  YetiChildNode,
+  YetiNode,
+  YetiNodeType,
+  DocumentBundleAssets,
+} from './html/types.ts';
+export { YETI_NODE_TYPE } from './html/types.ts';

@@ -1,10 +1,16 @@
 import { parseHTML } from './parseHTML.ts';
 import { calculateStringByteLength, DYNAMIC_VALUE_CHARACTER_SEQUENCE_BYTE_LENGTH, getDynamicValuePlaceholderByteSequence, textEncoder } from './utils.ts';
 import type { YetiRootNode } from './types.ts';
-import { makeBundleInlineObject, makeBundleImportObject, WILDCARD_BUNDLE_NAME, type HTMLBundleImportObject } from '../bundle/bundle.ts';
+import { makeBundleInlineObject, makeBundleImportObject, WILDCARD_BUNDLE_NAME, type HTMLBundleImportObject, makeBundleSrcObject } from '../bundle/bundle.ts';
 import { resolveImportPath } from '../bundle/import.ts';
+import { getCallSites } from 'node:util';
+import { fileURLToPath } from 'node:url';
 
 export const html = async (strings: TemplateStringsArray, ...values: unknown[]): Promise<YetiRootNode> => {
+  // Get the file URL of the file which called this html template tag
+  // so we can use it for dependency tracking
+  const parentCallSiteURL = getCallSites()[1]?.scriptName;
+
   const stringsCount = strings.length;
   const valuesCount = values.length;
 
@@ -47,7 +53,17 @@ export const html = async (strings: TemplateStringsArray, ...values: unknown[]):
     }
   }
 
-  return parseHTML(textCharBuffer, dynamicValues);
+  const parsedRoot = await parseHTML(textCharBuffer, dynamicValues);
+
+  if (parentCallSiteURL) {
+    const callerFilePath = fileURLToPath(parentCallSiteURL);
+    parsedRoot.assets ??= {};
+    parsedRoot.assets.html ??= {};
+    parsedRoot.assets.html.dependencies ??= new Set<string>();
+    parsedRoot.assets.html.dependencies.add(callerFilePath);
+  }
+
+  return parsedRoot;
 };
 
 html.import = (importPath: string, options: {
@@ -73,3 +89,5 @@ html.import = (importPath: string, options: {
 };
 
 html.inline = <TBundleName extends string>(bundleName: TBundleName) => makeBundleInlineObject("html", bundleName);
+
+html.src = <TBundleName extends string>(bundleName: TBundleName) => makeBundleSrcObject("html", bundleName);

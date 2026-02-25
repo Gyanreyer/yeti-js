@@ -1,21 +1,38 @@
 import { bundleAsync } from 'lightningcss';
 import { BUNDLE_TYPE, isBundleObject, makeBundleInlineObject, makeBundleSrcObject, makeBundleStartObject, makeBundleImportObject } from "../bundle/bundle.ts";
 import { resolveImportPath } from "../bundle/import.ts";
-import { getConfig } from "../config.js";
+import { getConfig } from "../config.ts";
 import { BundleError } from "../error.ts";
-import { textDecoder } from '../html/utils.ts';
+import { textEncoder } from '../html/utils.ts';
 
-export interface CSSResult {
-  cssBundles: Map<string, string[]>;
-  cssDependencies: Set<string>;
+export interface CSSBundleResult {
+  bundleName: string;
+  code: Uint8Array;
+  dependencies: Set<string>;
 }
 
-export const css = (strings: TemplateStringsArray, ...values: unknown[]): () => Promise<CSSResult> => {
+export type CSSBundleGetter = () => Promise<CSSBundleResult>;
+export type CSSBundleGetterMap = Map<string, CSSBundleGetter>;
+export const cssTemplateResultSymbol = Symbol("CSS_TEMPLATE_RESULT");
+
+export type CSSTemplateResult = {
+  bundles: CSSBundleGetterMap;
+  [cssTemplateResultSymbol]: true;
+}
+
+export const isCSSTemplateResult = (obj: unknown): obj is CSSTemplateResult => {
+  return typeof obj === "object" && obj !== null &&
+    cssTemplateResultSymbol in obj;
+};
+
+export const css = (strings: TemplateStringsArray, ...values: unknown[]): CSSTemplateResult => {
   const rawCssBundles = new Map<string, string[]>();
   // Map of bundleName to array of import paths for that bundle{
-  const bundleImportPaths = new Map<string, string[]>();
+  const bundleImportPaths = new Map<string, Set<string>>();
 
   let currentBundleName = css.getDefaultBundleName();
+
+  const bundleNames = new Set<string>([currentBundleName]);
 
   const stringCount = strings.length;
   for (let i = 0; i < stringCount; i++) {
@@ -42,63 +59,86 @@ export const css = (strings: TemplateStringsArray, ...values: unknown[]): () => 
 
       if (bundleType === "start") {
         currentBundleName = value.bundleName;
+        bundleNames.add(currentBundleName);
       } else {
         // Import
         const importPath = value.importPath;
         const targetBundleName = value.bundleName ?? currentBundleName;
         let currentBundleImportPaths = bundleImportPaths.get(targetBundleName);
         if (!currentBundleImportPaths) {
-          currentBundleImportPaths = [importPath];
+          currentBundleImportPaths = new Set<string>();
           bundleImportPaths.set(targetBundleName, currentBundleImportPaths);
-        } else {
-          currentBundleImportPaths.push(importPath);
         }
+        currentBundleImportPaths.add(importPath);
+        bundleNames.add(targetBundleName);
       }
     } else if (value !== undefined && value !== null) {
       currentBundleArray.push(String(value));
     }
   }
 
-  return async () => {
-    const cssDependencies = new Set<string>();
-    const finalCssBundles = new Map<string, string[]>();
+  const bundleGetterMap = new Map<string, () => Promise<CSSBundleResult>>();
 
-    for (const [bundleName, importPaths] of bundleImportPaths.entries()) {
-      try {
-        const resultingCode = await Promise.all(importPaths.map(async (importPath) => {
-          const result = await bundleAsync({
-            filename: importPath,
-            minify: true,
-          });
-          if (result.dependencies) {
-            for (const dependency of result.dependencies) {
-              cssDependencies.add(dependency.url);
+  for (const bundleName of bundleNames) {
+    bundleGetterMap.set(bundleName, async () => {
+      const dependencies = new Set<string>();
+      // We'll gather the code for the bundle in an array of Uint8Arrays (code chunks)
+      // and then stitch them together into a single Uint8Array at the end to return as the bundle result.
+      const codeChunks: Uint8Array[] = [];
+
+      const importPaths = bundleImportPaths.get(bundleName);
+      if (importPaths) {
+        // Use lightningcss to bundle each imported file and its dependencies,
+        // and collect the resulting code and dependencies for the bundle result
+        for (const importPath of importPaths) {
+          dependencies.add(importPath);
+          try {
+            const result = await bundleAsync({
+              filename: importPath,
+            });
+            if (result.dependencies) {
+              for (const dependency of result.dependencies) {
+                dependencies.add(dependency.url);
+              }
             }
+            codeChunks.push(result.code);
+          } catch (err) {
+            throw new BundleError(`css.import() failed to import file "${importPath}" for bundle "${bundleName}".`, {
+              cause: err,
+            });
           }
-          return textDecoder.decode(result.code);
-        }));
-        finalCssBundles.set(bundleName, resultingCode);
-      } catch (err) {
-        throw new BundleError(`css.import() failed to import files for bundle "${bundleName}".`, {
-          cause: err,
-        });
+        }
       }
-    }
 
-    for (const [bundleName, bundleChunks] of rawCssBundles.entries()) {
-      let currentBundleArray = finalCssBundles.get(bundleName);
-      if (!currentBundleArray) {
-        currentBundleArray = [...bundleChunks];
-        finalCssBundles.set(bundleName, currentBundleArray);
-      } else {
-        currentBundleArray.push(...bundleChunks);
+      const rawBundleChunks = rawCssBundles.get(bundleName);
+      if (rawBundleChunks) {
+        for (const chunk of rawBundleChunks) {
+          codeChunks.push(textEncoder.encode(chunk));
+        }
       }
-    }
 
-    return {
-      cssBundles: finalCssBundles,
-      cssDependencies,
-    };
+      let combinedCodeLength = 0;
+      for (const chunk of codeChunks) {
+        combinedCodeLength += chunk.length;
+      }
+      const combinedCode = new Uint8Array(combinedCodeLength);
+      let offset = 0;
+      for (const chunk of codeChunks) {
+        combinedCode.set(chunk, offset);
+        offset += chunk.length;
+      }
+
+      return {
+        bundleName,
+        code: combinedCode,
+        dependencies,
+      };
+    });
+  }
+
+  return {
+    bundles: bundleGetterMap,
+    [cssTemplateResultSymbol]: true,
   };
 };
 

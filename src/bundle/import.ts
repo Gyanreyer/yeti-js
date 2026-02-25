@@ -1,7 +1,7 @@
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 import { getCallSites } from "node:util";
-import { getConfig } from "../config.js";
+import { getConfig } from "../config.ts";
 
 const FILE_URL_PREFIX = "file://";
 

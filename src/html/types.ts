@@ -1,9 +1,9 @@
-import type { CSSResult } from "../css/css.ts";
-import type { JSResult } from "../js/js.ts";
+import type { CSSBundleGetter } from "../css/css.ts";
+import type { JSBundleGetter } from "../js/js.ts";
 
-interface HTMLBundleData {
+export interface HTMLBundleData {
   htmlBundles?: Map<string, string[]>;
-  htmlDependencies: Set<string>;
+  htmlDependencies?: Set<string>;
 }
 
 // Using symbols for node types to ensure uniqueness and prevent potential conflicts with user-defined content
@@ -29,12 +29,19 @@ export interface BaseYetiNode {
   type: YetiNodeType;
 }
 
+export interface DocumentBundleAssets {
+  css?: Map<string, Set<CSSBundleGetter>>;
+  js?: Map<string, Set<JSBundleGetter>>;
+  html?: {
+    bundles?: Map<string, string[]>;
+    dependencies?: Set<string>;
+  };
+}
+
 export interface YetiRootNode extends BaseYetiNode {
   type: typeof YETI_NODE_TYPE.ROOT;
   children: YetiChildNode[];
-  componentCSS?: Set<() => Promise<CSSResult>>;
-  componentJS?: Set<() => Promise<JSResult>>;
-  htmlBundleData?: HTMLBundleData;
+  assets?: DocumentBundleAssets;
 }
 
 export interface YetiTextNode extends BaseYetiNode {

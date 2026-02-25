@@ -1,15 +1,14 @@
+import { readFile } from "node:fs/promises";
+
 import { lexHTML, TOKEN_TYPE } from "./lexHTML.ts";
 import { YETI_NODE_TYPE } from "./types.ts";
-import type { YetiNode, YetiRootNode, YetiElementNode, YetiCommentNode, YetiDoctypeNode, YetiChildNode } from "./types.ts";
+import type { YetiNode, YetiRootNode, YetiElementNode, YetiCommentNode, YetiDoctypeNode, YetiChildNode, DocumentBundleAssets } from "./types.ts";
 import { YetiHTMLParsingError } from "../error.ts";
 import { isVoidTag, textEncoder } from "./utils.ts";
 import { isBundleImportObject, isBundleInlineObject, makeBundleInlineElementNode } from "../bundle/bundle.ts";
-import { readFile } from "node:fs/promises";
-
-// TODO:
-// - Handle html import objects
-// - Handle inlined bundle content objects
-// - Bundle CSS and JS resources attached to components and include them in parsed output
+import { mergeBundleCodeMaps, mergeBundleGetterSetMaps, mergeSets } from "../bundle/mergeBundleContents.ts";
+import { isCSSTemplateResult } from "../css/css.ts";
+import { isJSTemplateResult } from "../js/js.ts";
 
 // Node type to identify a component node
 const COMPONENT_NODE_TYPE = 1000;
@@ -75,51 +74,42 @@ export const parseHTML = async (htmlStringChars: Uint8Array, dynamicValues: unkn
 
       if (isYetiNode(unwrappedContent)) {
         switch (unwrappedContent.type) {
-          case YETI_NODE_TYPE.ROOT:
+          case YETI_NODE_TYPE.ROOT: {
             // Unwrap root nodes' children and insert them directly, since we don't want to nest root nodes inside other nodes.
             // We may get a root node from dynamic content like the return value from rendering a nested component.
             parent.children.push(...unwrappedContent.children);
-            if (unwrappedContent.componentCSS) {
-              if (rootNode.componentCSS) {
-                rootNode.componentCSS = rootNode.componentCSS.union(unwrappedContent.componentCSS);
-              } else {
-                rootNode.componentCSS = new Set(unwrappedContent.componentCSS);
-              }
-            }
-            if (unwrappedContent.componentJS) {
-              if (rootNode.componentJS) {
-                rootNode.componentJS = rootNode.componentJS.union(unwrappedContent.componentJS);
-              } else {
-                rootNode.componentJS = new Set(unwrappedContent.componentJS);
-              }
-            }
-            if (unwrappedContent.htmlBundleData) {
-              if (rootNode.htmlBundleData) {
-                rootNode.htmlBundleData.htmlDependencies = rootNode.htmlBundleData.htmlDependencies.union(unwrappedContent.htmlBundleData.htmlDependencies);
-              } else {
-                rootNode.htmlBundleData = {
-                  htmlDependencies: new Set(unwrappedContent.htmlBundleData.htmlDependencies),
-                };
-              }
 
-              if (unwrappedContent.htmlBundleData.htmlBundles) {
-                if (rootNode.htmlBundleData.htmlBundles) {
-                  for (const [bundleName, bundleContents] of unwrappedContent.htmlBundleData.htmlBundles.entries()) {
-                    let currentBundleArray = rootNode.htmlBundleData.htmlBundles.get(bundleName);
-                    if (!currentBundleArray) {
-                      currentBundleArray = [...bundleContents];
-                      rootNode.htmlBundleData.htmlBundles.set(bundleName, currentBundleArray);
-                    } else {
-                      currentBundleArray.push(...bundleContents);
-                    }
-                  }
-                } else {
-                  rootNode.htmlBundleData.htmlBundles = new Map(unwrappedContent.htmlBundleData.htmlBundles);
+            if (unwrappedContent.assets) {
+              rootNode.assets ??= {};
+              rootNode.assets.css = mergeBundleGetterSetMaps(
+                rootNode.assets.css,
+                unwrappedContent.assets.css,
+              );
+              rootNode.assets.js = mergeBundleGetterSetMaps(
+                rootNode.assets.js,
+                unwrappedContent.assets.js,
+              );
+              if (unwrappedContent.assets.html) {
+                rootNode.assets.html ??= {};
+                const mergedBundles = mergeBundleCodeMaps(
+                  rootNode.assets.html.bundles,
+                  unwrappedContent.assets.html.bundles,
+                );
+                if (mergedBundles) {
+                  rootNode.assets.html.bundles = mergedBundles;
+                }
+                const mergedDependencies = mergeSets(
+                  rootNode.assets.html.dependencies,
+                  unwrappedContent.assets.html.dependencies,
+                );
+                if (mergedDependencies) {
+                  rootNode.assets.html.dependencies = mergedDependencies;
                 }
               }
             }
             break;
-          case YETI_NODE_TYPE.TEXT:
+          }
+          case YETI_NODE_TYPE.TEXT: {
             // Merge text into a single text node if the last child is also a text node,
             // to avoid unnecessary fragmentation of text nodes.
             const lastChild = parent.children[parent.children.length - 1];
@@ -129,39 +119,42 @@ export const parseHTML = async (htmlStringChars: Uint8Array, dynamicValues: unkn
               parent.children.push(unwrappedContent);
             }
             break;
-          default:
+          }
+          default: {
             // For all other node types, we can just append them directly without any special handling.
             parent.children.push(unwrappedContent);
             break;
+          }
         }
 
         return;
       } else if (isBundleInlineObject(unwrappedContent)) {
-        parent.children.push(makeBundleInlineElementNode(
+        const inlineElementNode = makeBundleInlineElementNode(
           unwrappedContent.bundleName,
           unwrappedContent.assetType,
-        ));
+        );
+        await appendContentToNode(parent, inlineElementNode);
         return
       } else if (isBundleImportObject(unwrappedContent, "html")) {
+        rootNode.assets ??= {};
+        rootNode.assets.html ??= {};
         // Special handling when we encounter an `html.import()` to import external file content
         // into our HTML.
-        rootNode.htmlBundleData ??= {
-          htmlDependencies: new Set(),
-        };
         // Mark the imported file as an HTML dependency
-        rootNode.htmlBundleData.htmlDependencies.add(unwrappedContent.importPath);
+        rootNode.assets.html.dependencies ??= new Set();
+        rootNode.assets.html.dependencies.add(unwrappedContent.importPath);
 
         // Read the file contents and figure out what to do with them
         const fileContents = await readFile(unwrappedContent.importPath, "utf-8");
         if (unwrappedContent.bundleName) {
           // If a bundle name is specified, we will add the imported file's content to the corresponding HTML bundle
-          // in the root node's htmlBundleData.
+          // in the root node's assets.html.bundles.
           // The final bundle contents will be inserted into the tree in a later processing step after HTML parsing is complete.
-          rootNode.htmlBundleData.htmlBundles ??= new Map();
-          let currentBundleArray = rootNode.htmlBundleData.htmlBundles.get(unwrappedContent.bundleName);
+          rootNode.assets.html.bundles ??= new Map();
+          let currentBundleArray = rootNode.assets.html.bundles.get(unwrappedContent.bundleName);
           if (!currentBundleArray) {
             currentBundleArray = [fileContents];
-            rootNode.htmlBundleData.htmlBundles.set(unwrappedContent.bundleName, currentBundleArray);
+            rootNode.assets.html.bundles.set(unwrappedContent.bundleName, currentBundleArray);
           } else {
             currentBundleArray.push(fileContents);
           }
@@ -252,13 +245,32 @@ export const parseHTML = async (htmlStringChars: Uint8Array, dynamicValues: unkn
       } else {
         currentOpenTreeTagnameAndComponentCounts.set(closingParentNode.component, currentInstanceCount - 1);
       }
-      if ("js" in closingParentNode.component && typeof closingParentNode.component.js === "function") {
-        rootNode.componentJS ??= new Set();
-        rootNode.componentJS.add(closingParentNode.component.js as any);
+
+      // Gather any JS or CSS assets attached to the component and add them to the root node's assets
+      // so that they can be processed and included in the final output.
+      if ("js" in closingParentNode.component && isJSTemplateResult(closingParentNode.component.js)) {
+        rootNode.assets ??= {};
+        rootNode.assets.js ??= new Map();
+        for (const [bundleName, bundleGetter] of closingParentNode.component.js.bundles) {
+          let bundleSet = rootNode.assets.js.get(bundleName);
+          if (!bundleSet) {
+            bundleSet = new Set();
+            rootNode.assets.js.set(bundleName, bundleSet);
+          }
+          bundleSet.add(bundleGetter);
+        }
       }
-      if ("css" in closingParentNode.component && typeof closingParentNode.component.css === "function") {
-        rootNode.componentCSS ??= new Set();
-        rootNode.componentCSS.add(closingParentNode.component.css as any);
+      if ("css" in closingParentNode.component && isCSSTemplateResult(closingParentNode.component.css)) {
+        rootNode.assets ??= {};
+        rootNode.assets.css ??= new Map();
+        for (const [bundleName, bundleGetter] of closingParentNode.component.css.bundles) {
+          let bundleSet = rootNode.assets.css.get(bundleName);
+          if (!bundleSet) {
+            bundleSet = new Set();
+            rootNode.assets.css.set(bundleName, bundleSet);
+          }
+          bundleSet.add(bundleGetter);
+        }
       }
     } else {
       // For regular element nodes, we can just insert them directly.
