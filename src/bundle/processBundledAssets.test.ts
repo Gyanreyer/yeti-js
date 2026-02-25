@@ -255,4 +255,157 @@ describe("processBundledAssets", () => {
       ],
     });
   });
+
+  test("handles a page with empty wildcards", async () => {
+    const MyPageComponent = (await import("../../test_data/simplePageWithEmptyWildcards/MyPage.page.ts")).default;
+
+    const { rootNode, externalBundleContents, dependencies } = await processBundledAssets(await MyPageComponent());
+
+    assert.deepStrictEqual(externalBundleContents, {
+      css: new Map(),
+      js: new Map(),
+      html: new Map(),
+    });
+
+    assert.deepStrictEqual(dependencies, {
+      css: new Set(),
+      js: new Set(),
+      html: new Set([
+        fileURLToPath(import.meta.resolve("../../test_data/simplePageWithEmptyWildcards/Layout.component.ts")),
+        fileURLToPath(import.meta.resolve("../../test_data/simplePageWithEmptyWildcards/MyPage.page.ts")),
+      ]),
+    });
+
+    assert.deepStrictEqual<YetiRootNode>(rootNode, {
+      type: YETI_NODE_TYPE.ROOT,
+      children: [
+        {
+          type: YETI_NODE_TYPE.DOCTYPE,
+          content: "html",
+        },
+        {
+          type: YETI_NODE_TYPE.TEXT,
+          content: "\n",
+        },
+        {
+          type: YETI_NODE_TYPE.ELEMENT,
+          tagName: "html",
+          attributes: {
+            lang: "en",
+          },
+          children: [
+            {
+              type: YETI_NODE_TYPE.TEXT,
+              content: "\n  ",
+            },
+            {
+              type: YETI_NODE_TYPE.ELEMENT,
+              tagName: "head",
+              children: [
+                {
+                  type: YETI_NODE_TYPE.TEXT,
+                  content: "\n    ",
+                },
+                {
+                  type: YETI_NODE_TYPE.ELEMENT,
+                  tagName: "meta",
+                  attributes: {
+                    charset: "UTF-8",
+                  },
+                },
+                {
+                  type: YETI_NODE_TYPE.TEXT,
+                  content: "\n    ",
+                },
+                {
+                  type: YETI_NODE_TYPE.ELEMENT,
+                  tagName: "meta",
+                  attributes: {
+                    name: "viewport",
+                    content: "width=device-width, initial-scale=1.0",
+                  },
+                },
+                {
+                  type: YETI_NODE_TYPE.TEXT,
+                  content: "\n    ",
+                },
+                {
+                  type: YETI_NODE_TYPE.ELEMENT,
+                  tagName: "title",
+                  children: [
+                    {
+                      type: YETI_NODE_TYPE.TEXT,
+                      content: "Test Page",
+                    },
+                  ],
+                },
+                {
+                  type: YETI_NODE_TYPE.TEXT,
+                  content: "\n    ",
+                },
+                {
+                  type: YETI_NODE_TYPE.ELEMENT,
+                  tagName: "style",
+                  children: [
+                    {
+                      type: YETI_NODE_TYPE.TEXT,
+                      content: "\n    "
+                    },
+                  ],
+                },
+                {
+                  type: YETI_NODE_TYPE.TEXT,
+                  content: "\n    ",
+                },
+                {
+                  type: YETI_NODE_TYPE.ELEMENT,
+                  tagName: "script",
+                  attributes: {
+                    type: "module",
+                  },
+                  children: [
+                    {
+                      type: YETI_NODE_TYPE.TEXT,
+                      content: "\n    "
+                    },
+                  ],
+                },
+                {
+                  type: YETI_NODE_TYPE.TEXT,
+                  content: "\n  ",
+                },
+              ],
+            },
+            {
+              type: YETI_NODE_TYPE.TEXT,
+              content: "\n  ",
+            },
+            // Body
+            {
+              type: YETI_NODE_TYPE.ELEMENT,
+              tagName: "body",
+              children: [
+                {
+                  type: YETI_NODE_TYPE.TEXT,
+                  content: "\n    \n    ",
+                },
+                {
+                  type: YETI_NODE_TYPE.ELEMENT,
+                  tagName: "main",
+                },
+                {
+                  type: YETI_NODE_TYPE.TEXT,
+                  content: "\n  ",
+                }
+              ],
+            },
+            {
+              type: YETI_NODE_TYPE.TEXT,
+              content: "\n",
+            },
+          ],
+        },
+      ],
+    });
+  });
 });

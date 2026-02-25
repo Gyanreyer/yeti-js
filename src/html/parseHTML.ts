@@ -81,14 +81,20 @@ export const parseHTML = async (htmlStringChars: Uint8Array, dynamicValues: unkn
 
             if (unwrappedContent.assets) {
               rootNode.assets ??= {};
-              rootNode.assets.css = mergeBundleGetterSetMaps(
+              const mergedCSS = mergeBundleGetterSetMaps(
                 rootNode.assets.css,
                 unwrappedContent.assets.css,
               );
-              rootNode.assets.js = mergeBundleGetterSetMaps(
+              if (mergedCSS) {
+                rootNode.assets.css = mergedCSS;
+              }
+              const mergedJS = mergeBundleGetterSetMaps(
                 rootNode.assets.js,
                 unwrappedContent.assets.js,
               );
+              if (mergedJS) {
+                rootNode.assets.js = mergedJS;
+              }
               if (unwrappedContent.assets.html) {
                 rootNode.assets.html ??= {};
                 const mergedBundles = mergeBundleCodeMaps(

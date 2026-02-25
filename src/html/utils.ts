@@ -27,7 +27,6 @@ export const parseDynamicValueByteSequenceIndex = (byteSequence: Uint8Array): nu
   return (highByte << 8) | lowByte;
 };
 
-
 export const DOCTYPE_STRING_CHAR_CODE_SEQUENCE = textEncoder.encode("DOCTYPE");
 
 export const CHAR_CODE_LT = 60; // <

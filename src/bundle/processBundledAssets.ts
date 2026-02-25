@@ -8,6 +8,7 @@ import { getConfig } from "../config.ts";
 import { parseHTML } from "../html/parseHTML.ts";
 import { textDecoder, textEncoder } from "../html/utils.ts";
 import { renderHTML } from "../html/renderHTML.ts";
+import { BundleError } from "../error.ts";
 
 const DELETE_NODE = Symbol("DELETE_NODE");
 
@@ -272,7 +273,13 @@ export const processBundledAssets = async (rootNode: YetiRootNode): Promise<{
         const child = node.children[i];
         const result = await processNode(child, node);
         if (result === DELETE_NODE) {
-          node.children.splice(i, 1);
+          const prevSibling = node.children[i - 1];
+          if (prevSibling && prevSibling.type === YETI_NODE_TYPE.TEXT && prevSibling.content.trim() === "") {
+            // Delete preceding whitespace-only text node along with the deleted node to avoid leaving extraneous whitespace in the tree.
+            node.children.splice(i - 1, 2);
+          } else {
+            node.children.splice(i, 1);
+          }
           // Adjust the index to account for the removed element
           i--;
         } else if (result) {
@@ -351,11 +358,20 @@ export const processBundledAssets = async (rootNode: YetiRootNode): Promise<{
     for (const wildcardNodeEntry of wildcardNodes) {
       const { node, type, assetType, parent } = wildcardNodeEntry;
 
+      if (assetType === "html") {
+        throw new BundleError("Wildcard bundle inclusions are not supported for HTML bundles. Please specify a bundle name explicitly.");
+      }
+
       if (!parent.children) {
         throw new Error("Expected parent node to have children. This state should not be possible.");
       }
 
       const nodeIndex = parent.children.indexOf(node);
+
+      // If the previous sibling is a whitespace-only text node, we'll duplicate it along with each
+      // duplicate of the wildcard node to preserve indentation
+      const prevSibling = parent.children[nodeIndex - 1];
+      const prevSiblingIsIndentationWhitespace = prevSibling && prevSibling.type === YETI_NODE_TYPE.TEXT && prevSibling.content.trim() === "";
 
       const bundleContentsMap = await getUnusedBundleContents(assetType);
 
@@ -364,6 +380,9 @@ export const processBundledAssets = async (rootNode: YetiRootNode): Promise<{
       if (type === "inline") {
         // For an inline wildcard, we want to insert a text node containing the contents of each unreferenced bundle of the appropriate asset type directly into the tree at the location of the inline node.
         for (const [bundleName, bundleContent] of bundleContentsMap) {
+          if (prevSiblingIsIndentationWhitespace) {
+            nodesToInsert.push(prevSibling);
+          }
           nodesToInsert.push({
             type: YETI_NODE_TYPE.TEXT,
             content: bundleContent,
@@ -373,6 +392,9 @@ export const processBundledAssets = async (rootNode: YetiRootNode): Promise<{
         const { attrName } = wildcardNodeEntry;
         // For a src wildcard, we want to duplicate the element with a different attribute value for each unreferenced bundle of the appropriate asset type and insert those elements into the tree at the location of the original element.
         for (const [bundleName, bundleContent] of bundleContentsMap) {
+          if (prevSiblingIsIndentationWhitespace) {
+            nodesToInsert.push(prevSibling);
+          }
           nodesToInsert.push({
             ...node,
             attributes: {
@@ -384,7 +406,11 @@ export const processBundledAssets = async (rootNode: YetiRootNode): Promise<{
         }
       }
 
-      parent.children.splice(nodeIndex, 1, ...nodesToInsert);
+      if (prevSiblingIsIndentationWhitespace) {
+        parent.children.splice(nodeIndex - 1, 2, ...nodesToInsert);
+      } else {
+        parent.children.splice(nodeIndex, 1, ...nodesToInsert);
+      }
     }
   }
 

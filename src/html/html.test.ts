@@ -7,7 +7,7 @@ import { YETI_NODE_TYPE, } from "./types.ts";
 import type { YetiChildNode, YetiRootNode } from './types.ts';
 import { YetiHTMLParsingError } from "../error.ts";
 import { css } from "../css/css.ts";
-import { js } from '../js/js.ts';
+import { js, type JSBundleResult } from '../js/js.ts';
 
 describe("html", () => {
   describe("HTML attributes", async () => {
@@ -16,6 +16,7 @@ describe("html", () => {
 
       assert.deepStrictEqual<YetiRootNode>(result, {
         type: YETI_NODE_TYPE.ROOT,
+        assets: { html: { dependencies: new Set([import.meta.filename]) } },
         children: [
           {
             type: YETI_NODE_TYPE.ELEMENT,
@@ -48,6 +49,7 @@ data-quoted-static-then-dynamic-then-static="static-${myObj}-static"
 
       assert.deepStrictEqual<YetiRootNode>(result, {
         type: YETI_NODE_TYPE.ROOT,
+        assets: { html: { dependencies: new Set([import.meta.filename]) } },
         children: [
           {
             type: YETI_NODE_TYPE.ELEMENT,
@@ -77,6 +79,7 @@ data-quoted-static-then-dynamic-then-static="static-${myObj}-static"
 
       assert.deepStrictEqual<YetiRootNode>(result, {
         type: YETI_NODE_TYPE.ROOT,
+        assets: { html: { dependencies: new Set([import.meta.filename]) } },
         children: [
           {
             type: YETI_NODE_TYPE.ELEMENT,
@@ -103,6 +106,7 @@ data-quoted-static-then-dynamic-then-static="static-${myObj}-static"
 
       assert.deepStrictEqual<YetiRootNode>(result, {
         type: YETI_NODE_TYPE.ROOT,
+        assets: { html: { dependencies: new Set([import.meta.filename]) } },
         children: [
           {
             type: YETI_NODE_TYPE.ELEMENT,
@@ -145,6 +149,7 @@ data-quoted-static-then-dynamic-then-static="static-${myObj}-static"
 
       assert.deepStrictEqual<YetiRootNode>(result, {
         type: YETI_NODE_TYPE.ROOT,
+        assets: { html: { dependencies: new Set([import.meta.filename]) } },
         children: [
           {
             type: YETI_NODE_TYPE.ELEMENT,
@@ -172,6 +177,7 @@ data-quoted-static-then-dynamic-then-static="static-${myObj}-static"
       const result = await html`<div ...${null} ...${undefined}></div>`;
       assert.deepStrictEqual<YetiRootNode>(result, {
         type: YETI_NODE_TYPE.ROOT,
+        assets: { html: { dependencies: new Set([import.meta.filename]) } },
         children: [
           {
             type: YETI_NODE_TYPE.ELEMENT,
@@ -197,6 +203,7 @@ data-quoted-static-then-dynamic-then-static="static-${myObj}-static"
 
       assert.deepStrictEqual<YetiRootNode>(result, {
         type: YETI_NODE_TYPE.ROOT,
+        assets: { html: { dependencies: new Set([import.meta.filename]) } },
         children: [
           {
             type: YETI_NODE_TYPE.ELEMENT,
@@ -220,6 +227,7 @@ data-quoted-static-then-dynamic-then-static="static-${myObj}-static"
 
       assert.deepStrictEqual<YetiRootNode>(result, {
         type: YETI_NODE_TYPE.ROOT,
+        assets: { html: { dependencies: new Set([import.meta.filename]) } },
         children: [
           {
             type: YETI_NODE_TYPE.ELEMENT,
@@ -247,6 +255,7 @@ data-quoted-static-then-dynamic-then-static="static-${myObj}-static"
 
       assert.deepStrictEqual<YetiRootNode>(result, {
         type: YETI_NODE_TYPE.ROOT,
+        assets: { html: { dependencies: new Set([import.meta.filename]) } },
         children: [
           {
             type: YETI_NODE_TYPE.ELEMENT,
@@ -270,6 +279,7 @@ data-quoted-static-then-dynamic-then-static="static-${myObj}-static"
 
       assert.deepStrictEqual<YetiRootNode>(result, {
         type: YETI_NODE_TYPE.ROOT,
+        assets: { html: { dependencies: new Set([import.meta.filename]) } },
         children: [
           {
             type: YETI_NODE_TYPE.ELEMENT,
@@ -304,6 +314,7 @@ data-quoted-static-then-dynamic-then-static="static-${myObj}-static"
 
       assert.deepStrictEqual<YetiRootNode>(result, {
         type: YETI_NODE_TYPE.ROOT,
+        assets: { html: { dependencies: new Set([import.meta.filename]) } },
         children: [
           {
             type: YETI_NODE_TYPE.TEXT,
@@ -330,6 +341,7 @@ data-quoted-static-then-dynamic-then-static="static-${myObj}-static"
       const result = await html`<area><base><br><col><embed><hr><img><input><link><meta><param><source><track><wbr>`;
       assert.deepStrictEqual<YetiRootNode>(result, {
         type: YETI_NODE_TYPE.ROOT,
+        assets: { html: { dependencies: new Set([import.meta.filename]) } },
         children: [
           { type: YETI_NODE_TYPE.ELEMENT, tagName: "area" },
           { type: YETI_NODE_TYPE.ELEMENT, tagName: "base" },
@@ -354,6 +366,7 @@ data-quoted-static-then-dynamic-then-static="static-${myObj}-static"
 
       assert.deepStrictEqual<YetiRootNode>(result, {
         type: YETI_NODE_TYPE.ROOT,
+        assets: { html: { dependencies: new Set([import.meta.filename]) } },
         children: [
           {
             type: YETI_NODE_TYPE.ELEMENT,
@@ -392,6 +405,7 @@ data-quoted-static-then-dynamic-then-static="static-${myObj}-static"
 
       assert.deepStrictEqual<YetiRootNode>(result, {
         type: YETI_NODE_TYPE.ROOT,
+        assets: { html: { dependencies: new Set([import.meta.filename]) } },
         children: [
           {
             type: YETI_NODE_TYPE.ELEMENT,
@@ -443,6 +457,7 @@ data-quoted-static-then-dynamic-then-static="static-${myObj}-static"
 
       assert.deepStrictEqual<YetiRootNode>(result, {
         type: YETI_NODE_TYPE.ROOT,
+        assets: { html: { dependencies: new Set([import.meta.filename]) } },
         children: [
           {
             type: YETI_NODE_TYPE.ELEMENT,
@@ -464,6 +479,7 @@ data-quoted-static-then-dynamic-then-static="static-${myObj}-static"
 
       assert.deepStrictEqual<YetiRootNode>(result, {
         type: YETI_NODE_TYPE.ROOT,
+        assets: { html: { dependencies: new Set([import.meta.filename]) } },
         children: [
           {
             type: YETI_NODE_TYPE.ELEMENT,
@@ -509,6 +525,7 @@ data-quoted-static-then-dynamic-then-static="static-${myObj}-static"
 
       assert.deepStrictEqual<YetiRootNode>(result, {
         type: YETI_NODE_TYPE.ROOT,
+        assets: { html: { dependencies: new Set([import.meta.filename]) } },
         children: [
           {
             type: YETI_NODE_TYPE.ELEMENT,
@@ -554,6 +571,7 @@ data-quoted-static-then-dynamic-then-static="static-${myObj}-static"
 
       assert.deepStrictEqual<YetiRootNode>(result, {
         type: YETI_NODE_TYPE.ROOT,
+        assets: { html: { dependencies: new Set([import.meta.filename]) } },
         children: [],
       });
     });
@@ -563,6 +581,7 @@ data-quoted-static-then-dynamic-then-static="static-${myObj}-static"
 
       assert.deepStrictEqual<YetiRootNode>(result, {
         type: YETI_NODE_TYPE.ROOT,
+        assets: { html: { dependencies: new Set([import.meta.filename]) } },
         children: [
           {
             type: YETI_NODE_TYPE.TEXT,
@@ -577,6 +596,7 @@ data-quoted-static-then-dynamic-then-static="static-${myObj}-static"
 
       assert.deepStrictEqual<YetiRootNode>(result, {
         type: YETI_NODE_TYPE.ROOT,
+        assets: { html: { dependencies: new Set([import.meta.filename]) } },
         children: [
           {
             type: YETI_NODE_TYPE.ELEMENT,
@@ -593,6 +613,7 @@ data-quoted-static-then-dynamic-then-static="static-${myObj}-static"
 
       assert.deepStrictEqual<YetiRootNode>(result, {
         type: YETI_NODE_TYPE.ROOT,
+        assets: { html: { dependencies: new Set([import.meta.filename]) } },
         children: [
           {
             type: YETI_NODE_TYPE.ELEMENT,
@@ -627,6 +648,7 @@ data-quoted-static-then-dynamic-then-static="static-${myObj}-static"
 
       assert.deepStrictEqual<YetiRootNode>(result, {
         type: YETI_NODE_TYPE.ROOT,
+        assets: { html: { dependencies: new Set([import.meta.filename]) } },
         children: [
           {
             type: YETI_NODE_TYPE.ELEMENT,
@@ -647,6 +669,7 @@ data-quoted-static-then-dynamic-then-static="static-${myObj}-static"
       const result = await html`<div>Emoji: 😀, Chinese: 你好, Cyrillic: Привет</div>`;
       assert.deepStrictEqual<YetiRootNode>(result, {
         type: YETI_NODE_TYPE.ROOT,
+        assets: { html: { dependencies: new Set([import.meta.filename]) } },
         children: [
           {
             type: YETI_NODE_TYPE.ELEMENT,
@@ -667,6 +690,7 @@ data-quoted-static-then-dynamic-then-static="static-${myObj}-static"
       const result = await html`<div id="null">${null}</div><div id="undefined">${undefined}</div><div id="empty-string">${""}</div><div id="zero">${0}</div>`;
       assert.deepStrictEqual<YetiRootNode>(result, {
         type: YETI_NODE_TYPE.ROOT,
+        assets: { html: { dependencies: new Set([import.meta.filename]) } },
         children: [
           {
             type: YETI_NODE_TYPE.ELEMENT,
@@ -704,6 +728,7 @@ data-quoted-static-then-dynamic-then-static="static-${myObj}-static"
 
       assert.deepStrictEqual<YetiRootNode>(result, {
         type: YETI_NODE_TYPE.ROOT,
+        assets: { html: { dependencies: new Set([import.meta.filename]) } },
         children: [
           {
             type: YETI_NODE_TYPE.ELEMENT,
@@ -731,6 +756,7 @@ data-quoted-static-then-dynamic-then-static="static-${myObj}-static"
       const result = await html`<div>${() => html`<span>Nested content from callback 1 and ${async () => 2}</span>`}</div>`;
       assert.deepStrictEqual<YetiRootNode>(result, {
         type: YETI_NODE_TYPE.ROOT,
+        assets: { html: { dependencies: new Set([import.meta.filename]) } },
         children: [
           {
             type: YETI_NODE_TYPE.ELEMENT,
@@ -769,6 +795,7 @@ data-quoted-static-then-dynamic-then-static="static-${myObj}-static"
 
       assert.deepStrictEqual<YetiRootNode>(result, {
         type: YETI_NODE_TYPE.ROOT,
+        assets: { html: { dependencies: new Set([import.meta.filename]) } },
         children: [
           {
             type: YETI_NODE_TYPE.ELEMENT,
@@ -792,6 +819,7 @@ data-quoted-static-then-dynamic-then-static="static-${myObj}-static"
       }}</ul>`;
       assert.deepStrictEqual<YetiRootNode>(result, {
         type: YETI_NODE_TYPE.ROOT,
+        assets: { html: { dependencies: new Set([import.meta.filename]) } },
         children: [
           {
             type: YETI_NODE_TYPE.ELEMENT,
@@ -828,6 +856,7 @@ data-quoted-static-then-dynamic-then-static="static-${myObj}-static"
       }}</ul>`;
       assert.deepStrictEqual<YetiRootNode>(result, {
         type: YETI_NODE_TYPE.ROOT,
+        assets: { html: { dependencies: new Set([import.meta.filename]) } },
         children: [
           {
             type: YETI_NODE_TYPE.ELEMENT,
@@ -858,6 +887,7 @@ data-quoted-static-then-dynamic-then-static="static-${myObj}-static"
       const result = await html`<ul>${[1, 2, 3].map(num => html`<li>Item ${num}</li>`)}</ul>`;
       assert.deepStrictEqual<YetiRootNode>(result, {
         type: YETI_NODE_TYPE.ROOT,
+        assets: { html: { dependencies: new Set([import.meta.filename]) } },
         children: [
           {
             type: YETI_NODE_TYPE.ELEMENT,
@@ -889,6 +919,7 @@ data-quoted-static-then-dynamic-then-static="static-${myObj}-static"
         const result = await html`<script>const str1 = "</script>"; const str2 = '<div>Hello</div>'; const str3 = \`<span>Bye</span>\`;</script>`;
         assert.deepStrictEqual<YetiRootNode>(result, {
           type: YETI_NODE_TYPE.ROOT,
+          assets: { html: { dependencies: new Set([import.meta.filename]) } },
           children: [
             {
               type: YETI_NODE_TYPE.ELEMENT,
@@ -913,6 +944,7 @@ data-quoted-static-then-dynamic-then-static="static-${myObj}-static"
 </style>`;
         assert.deepStrictEqual<YetiRootNode>(result, {
           type: YETI_NODE_TYPE.ROOT,
+          assets: { html: { dependencies: new Set([import.meta.filename]) } },
           children: [
             {
               type: YETI_NODE_TYPE.ELEMENT,
@@ -940,6 +972,7 @@ Line 3 with a <span> tag
 </textarea>`;
         assert.deepStrictEqual<YetiRootNode>(result, {
           type: YETI_NODE_TYPE.ROOT,
+          assets: { html: { dependencies: new Set([import.meta.filename]) } },
           children: [
             {
               type: YETI_NODE_TYPE.ELEMENT,
@@ -963,6 +996,7 @@ Line 3 with a <span> tag
         const result = await html`<title>This is a title with a <div> tag</title>`;
         assert.deepStrictEqual<YetiRootNode>(result, {
           type: YETI_NODE_TYPE.ROOT,
+          assets: { html: { dependencies: new Set([import.meta.filename]) } },
           children: [
             {
               type: YETI_NODE_TYPE.ELEMENT,
@@ -985,6 +1019,7 @@ Line 3 with a <span> tag
       const result = await html`<script>const dynamicValue = "${dynamicValue}";</script>`;
       assert.deepStrictEqual<YetiRootNode>(result, {
         type: YETI_NODE_TYPE.ROOT,
+        assets: { html: { dependencies: new Set([import.meta.filename]) } },
         children: [
           {
             type: YETI_NODE_TYPE.ELEMENT,
@@ -1009,6 +1044,7 @@ Line 3 with a <span> tag
 
       assert.deepStrictEqual<YetiRootNode>(result, {
         type: YETI_NODE_TYPE.ROOT,
+        assets: { html: { dependencies: new Set([import.meta.filename]) } },
         children: [
           {
             type: YETI_NODE_TYPE.ELEMENT,
@@ -1053,6 +1089,7 @@ Line 3 with a <span> tag
 
       assert.deepStrictEqual<YetiRootNode>(result, {
         type: YETI_NODE_TYPE.ROOT,
+        assets: { html: { dependencies: new Set([import.meta.filename]) } },
         children: [
           {
             type: YETI_NODE_TYPE.DOCTYPE,
@@ -1190,6 +1227,7 @@ Line 3 with a <span> tag
 
       assert.deepStrictEqual<YetiRootNode>(result, {
         type: YETI_NODE_TYPE.ROOT,
+        assets: { html: { dependencies: new Set([import.meta.filename]) } },
         children: [
           {
             type: YETI_NODE_TYPE.ELEMENT,
@@ -1216,6 +1254,7 @@ Line 3 with a <span> tag
 
       assert.deepStrictEqual<YetiRootNode>(result, {
         type: YETI_NODE_TYPE.ROOT,
+        assets: { html: { dependencies: new Set([import.meta.filename]) } },
         children: [
           {
             type: YETI_NODE_TYPE.ELEMENT,
@@ -1241,6 +1280,7 @@ Line 3 with a <span> tag
 
       assert.deepStrictEqual<YetiRootNode>(result, {
         type: YETI_NODE_TYPE.ROOT,
+        assets: { html: { dependencies: new Set([import.meta.filename]) } },
         children: [
           {
             type: YETI_NODE_TYPE.ELEMENT,
@@ -1267,6 +1307,7 @@ Line 3 with a <span> tag
       const result = await html`<!DOCTYPE html><div>Content</div>`;
       assert.deepStrictEqual<YetiRootNode>(result, {
         type: YETI_NODE_TYPE.ROOT,
+        assets: { html: { dependencies: new Set([import.meta.filename]) } },
         children: [
           {
             type: YETI_NODE_TYPE.DOCTYPE,
@@ -1291,6 +1332,7 @@ Line 3 with a <span> tag
       const result = await html`<!DOCTYPE    html   ><div>Content</div>`;
       assert.deepStrictEqual<YetiRootNode>(result, {
         type: YETI_NODE_TYPE.ROOT,
+        assets: { html: { dependencies: new Set([import.meta.filename]) } },
         children: [
           {
             type: YETI_NODE_TYPE.DOCTYPE,
@@ -1315,6 +1357,7 @@ Line 3 with a <span> tag
       const result = await html`<!DOCTYPE><div>Content</div>`;
       assert.deepStrictEqual<YetiRootNode>(result, {
         type: YETI_NODE_TYPE.ROOT,
+        assets: { html: { dependencies: new Set([import.meta.filename]) } },
         children: [
           {
             type: YETI_NODE_TYPE.DOCTYPE,
@@ -1340,6 +1383,7 @@ Line 3 with a <span> tag
       const result = await html`<!DOCTYPE ${doctypeContent}><div>Content</div>`;
       assert.deepStrictEqual<YetiRootNode>(result, {
         type: YETI_NODE_TYPE.ROOT,
+        assets: { html: { dependencies: new Set([import.meta.filename]) } },
         children: [
           {
             type: YETI_NODE_TYPE.DOCTYPE,
@@ -1366,6 +1410,7 @@ Line 3 with a <span> tag
       const result = await html`<!DOCTYPE h${doctypeContent1}m${doctypeContent2}>`;
       assert.deepStrictEqual<YetiRootNode>(result, {
         type: YETI_NODE_TYPE.ROOT,
+        assets: { html: { dependencies: new Set([import.meta.filename]) } },
         children: [
           {
             type: YETI_NODE_TYPE.DOCTYPE,
@@ -1381,6 +1426,7 @@ Line 3 with a <span> tag
       const bundle = await html`<div>${html.inline("my-bundle")}</div>`;
       assert.deepStrictEqual<YetiRootNode>(bundle, {
         type: YETI_NODE_TYPE.ROOT,
+        assets: { html: { dependencies: new Set([import.meta.filename]) } },
         children: [
           {
             type: YETI_NODE_TYPE.ELEMENT,
@@ -1404,6 +1450,7 @@ Line 3 with a <span> tag
       const bundle = await html`<style>${css.inline("my-css-bundle")}</style>`;
       assert.deepStrictEqual<YetiRootNode>(bundle, {
         type: YETI_NODE_TYPE.ROOT,
+        assets: { html: { dependencies: new Set([import.meta.filename]) } },
         children: [
           {
             type: YETI_NODE_TYPE.ELEMENT,
@@ -1427,6 +1474,7 @@ Line 3 with a <span> tag
       const bundle = await html`<script>${js.inline("my-js-bundle")}</script>`;
       assert.deepStrictEqual<YetiRootNode>(bundle, {
         type: YETI_NODE_TYPE.ROOT,
+        assets: { html: { dependencies: new Set([import.meta.filename]) } },
         children: [
           {
             type: YETI_NODE_TYPE.ELEMENT,
@@ -1453,8 +1501,13 @@ Line 3 with a <span> tag
 
       assert.deepStrictEqual<YetiRootNode>(result, {
         type: YETI_NODE_TYPE.ROOT,
-        htmlBundleData: {
-          htmlDependencies: new Set([fileURLToPath(import.meta.resolve("../../test_data/external-html.html"))]),
+        assets: {
+          html: {
+            dependencies: new Set([
+              import.meta.filename,
+              fileURLToPath(import.meta.resolve("../../test_data/external-html.html")),
+            ]),
+          },
         },
         children: [
           {
@@ -1506,8 +1559,13 @@ Line 3 with a <span> tag
 
       assert.deepStrictEqual<YetiRootNode>(result, {
         type: YETI_NODE_TYPE.ROOT,
-        htmlBundleData: {
-          htmlDependencies: new Set([fileURLToPath(import.meta.resolve("../../test_data/external-text.txt"))]),
+        assets: {
+          html: {
+            dependencies: new Set([
+              fileURLToPath(import.meta.resolve("../../test_data/external-text.txt")),
+              import.meta.filename,
+            ]),
+          },
         },
         children: [
           {
@@ -1531,11 +1589,16 @@ Line 3 with a <span> tag
 
       assert.deepStrictEqual<YetiRootNode>(result, {
         type: YETI_NODE_TYPE.ROOT,
-        htmlBundleData: {
-          htmlBundles: new Map([
-            ["icons", [`<svg xmlns="http://www.w3.org/2000/svg" height="24px" viewBox="0 -960 960 960" width="24px" fill="#e8eaed"><path d="m256-200-56-56 224-224-224-224 56-56 224 224 224-224 56 56-224 224 224 224-56 56-224-224-224 224Z" /></svg>`]],
-          ]),
-          htmlDependencies: new Set([fileURLToPath(import.meta.resolve("../../test_data/external-svg.svg"))]),
+        assets: {
+          html: {
+            bundles: new Map([
+              ["icons", [`<svg xmlns="http://www.w3.org/2000/svg" height="24px" viewBox="0 -960 960 960" width="24px" fill="#e8eaed"><path d="m256-200-56-56 224-224-224-224 56-56 224 224 224-224 56 56-224 224 224 224-56 56-224-224-224 224Z" /></svg>`]],
+            ]),
+            dependencies: new Set([
+              fileURLToPath(import.meta.resolve("../../test_data/external-svg.svg")),
+              import.meta.filename,
+            ]),
+          },
         },
         children: [
           {
@@ -1558,8 +1621,13 @@ Line 3 with a <span> tag
       const result = await html`<main><${NestedComponent} /></main>`;
       assert.deepStrictEqual<YetiRootNode>(result, {
         type: YETI_NODE_TYPE.ROOT,
-        htmlBundleData: {
-          htmlDependencies: new Set([fileURLToPath(import.meta.resolve("../../test_data/external-html.html"))]),
+        assets: {
+          html: {
+            dependencies: new Set([
+              import.meta.filename,
+              fileURLToPath(import.meta.resolve("../../test_data/external-html.html")),
+            ]),
+          },
         },
         children: [
           {
@@ -1614,11 +1682,16 @@ Line 3 with a <span> tag
       const result = await html`<main><${NestedComponent} /></main>`;
       assert.deepStrictEqual<YetiRootNode>(result, {
         type: YETI_NODE_TYPE.ROOT,
-        htmlBundleData: {
-          htmlBundles: new Map([
-            ["icons", [`<svg xmlns="http://www.w3.org/2000/svg" height="24px" viewBox="0 -960 960 960" width="24px" fill="#e8eaed"><path d="m256-200-56-56 224-224-224-224 56-56 224 224 224-224 56 56-224 224 224 224-56 56-224-224-224 224Z" /></svg>`]],
-          ]),
-          htmlDependencies: new Set([fileURLToPath(import.meta.resolve("../../test_data/external-svg.svg"))]),
+        assets: {
+          html: {
+            dependencies: new Set([
+              import.meta.filename,
+              fileURLToPath(import.meta.resolve("../../test_data/external-svg.svg")),
+            ]),
+            bundles: new Map([
+              ["icons", [`<svg xmlns="http://www.w3.org/2000/svg" height="24px" viewBox="0 -960 960 960" width="24px" fill="#e8eaed"><path d="m256-200-56-56 224-224-224-224 56-56 224 224 224-224 56 56-224 224 224 224-56 56-224-224-224 224Z" /></svg>`]],
+            ]),
+          },
         },
         children: [
           {
@@ -1673,7 +1746,16 @@ Line 3 with a <span> tag
 
       assert.deepStrictEqual<YetiRootNode>(result, {
         type: YETI_NODE_TYPE.ROOT,
-        componentCSS: new Set([Component1.css, Component2.css]),
+        assets: {
+          html: {
+            dependencies: new Set([import.meta.filename]),
+          },
+          css: new Map([
+            ["component-styles", new Set([Component1.css.bundles.get("component-styles")!, Component2.css.bundles.get("component-styles")!])],
+            ["other-bundle", new Set([Component1.css.bundles.get("other-bundle")!])],
+            ["global", new Set([Component1.css.bundles.get("global")!, Component2.css.bundles.get("global")!])],
+          ]),
+        },
         children: [
           {
             type: YETI_NODE_TYPE.ELEMENT,
@@ -1728,7 +1810,16 @@ Line 3 with a <span> tag
 
       assert.deepStrictEqual<YetiRootNode>(result, {
         type: YETI_NODE_TYPE.ROOT,
-        componentJS: new Set([Component1.js, Component2.js]),
+        assets: {
+          html: {
+            dependencies: new Set([import.meta.filename]),
+          },
+          js: new Map([
+            ["component-scripts", new Set([Component1.js.bundles.get("component-scripts")!, Component2.js.bundles.get("component-scripts")!])],
+            ["other-bundle", new Set([Component1.js.bundles.get("other-bundle")!])],
+            ["global", new Set([Component1.js.bundles.get("global")!, Component2.js.bundles.get("global")!])],
+          ]),
+        },
         children: [
           {
             type: YETI_NODE_TYPE.ELEMENT,
