@@ -42,33 +42,29 @@ export const processPageComponent = async (pageComponent: YetiPageComponent, pag
     js: Map<string, Set<Uint8Array>>;
     htmlImportPaths: Map<string, Set<string>>;
   };
-  dependencies: {
-    css: Set<string>;
-    js: Set<string>;
-    html: Set<string>;
-  };
+  dependencies: Set<string>;
 }> => {
   const pageCssBundleCode = new Map<string, Set<Uint8Array>>();
-  const pageCssDependencies = new Set<string>();
+
+  const pageDependencies = new Set<string>();
 
   if (isCSSTemplateResult(pageComponent.css)) {
     for (const [bundleName, bundleGetter] of pageComponent.css.bundles) {
       const result = await bundleGetter();
       pageCssBundleCode.set(bundleName, new Set([result.code]));
       for (const dependency of result.dependencies) {
-        pageCssDependencies.add(dependency);
+        pageDependencies.add(dependency);
       }
     }
   }
   const pageJsBundleCode = new Map<string, Set<Uint8Array>>();
-  const pageJsDependencies = new Set<string>();
 
   if (isJSTemplateResult(pageComponent.js)) {
     for (const [bundleName, bundleGetter] of pageComponent.js.bundles) {
       const result = await bundleGetter();
       pageJsBundleCode.set(bundleName, new Set([result.code]));
       for (const dependency of result.dependencies) {
-        pageJsDependencies.add(dependency);
+        pageDependencies.add(dependency);
       }
     }
   }
@@ -86,7 +82,7 @@ export const processPageComponent = async (pageComponent: YetiPageComponent, pag
           const result = await bundleGetter();
           bundleGetters.add(result.code);
           for (const dependency of result.dependencies) {
-            pageCssDependencies.add(dependency);
+            pageDependencies.add(dependency);
           }
         }
       }
@@ -102,9 +98,14 @@ export const processPageComponent = async (pageComponent: YetiPageComponent, pag
           const result = await bundleGetter();
           bundleGetters.add(result.code);
           for (const dependency of result.dependencies) {
-            pageJsDependencies.add(dependency);
+            pageDependencies.add(dependency);
           }
         }
+      }
+    }
+    if (pageRootNode.assets.html?.dependencies) {
+      for (const dependency of pageRootNode.assets.html.dependencies) {
+        pageDependencies.add(dependency);
       }
     }
   }
@@ -537,18 +538,12 @@ export const processPageComponent = async (pageComponent: YetiPageComponent, pag
     externalBundles.htmlImportPaths.set(bundleName, bundleImportPaths);
   }
 
-  const dependencies = {
-    css: pageCssDependencies,
-    js: pageJsDependencies,
-    html: new Set<string>(pageRootNode.assets?.html?.dependencies),
-  };
-
   // Delete assets object from root node since we don't need it now that we've processed it
   delete pageRootNode.assets;
 
   return {
     pageRootNode,
     externalBundles,
-    dependencies,
+    dependencies: pageDependencies,
   };
 };

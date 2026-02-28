@@ -13,8 +13,6 @@ describe("processPageComponent", () => {
 
     const { pageRootNode, externalBundles, dependencies } = await processPageComponent(MyPageComponent, {} as any);
 
-    debugger;
-
     assert.deepStrictEqual(externalBundles, {
       css: new Map([
         ["global", new Set([textEncoder.encode(`header {
