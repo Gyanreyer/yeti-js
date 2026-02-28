@@ -4,9 +4,10 @@ import { lexHTML, TOKEN_TYPE } from "./lexHTML.ts";
 import { YETI_NODE_TYPE } from "./types.ts";
 import type { YetiNode, YetiRootNode, YetiElementNode, YetiCommentNode, YetiDoctypeNode, YetiChildNode, DocumentBundleAssets } from "./types.ts";
 import { YetiHTMLParsingError } from "../error.ts";
-import { isVoidTag, textEncoder } from "./utils.ts";
+import { isVoidTag } from "./utils.ts";
+import { textEncoder } from "../utils/textEncoder.ts";
 import { isBundleImportObject, isBundleInlineObject, makeBundleInlineElementNode } from "../bundle/bundle.ts";
-import { mergeBundleCodeMaps, mergeBundleGetterSetMaps, mergeSets } from "../bundle/mergeBundleContents.ts";
+import { mergeBundleSetMaps, mergeSets } from "../bundle/mergeBundleContents.ts";
 import { isCSSTemplateResult } from "../css/css.ts";
 import { isJSTemplateResult } from "../js/js.ts";
 
@@ -81,14 +82,14 @@ export const parseHTML = async (htmlStringChars: Uint8Array, dynamicValues: unkn
 
             if (unwrappedContent.assets) {
               rootNode.assets ??= {};
-              const mergedCSS = mergeBundleGetterSetMaps(
+              const mergedCSS = mergeBundleSetMaps(
                 rootNode.assets.css,
                 unwrappedContent.assets.css,
               );
               if (mergedCSS) {
                 rootNode.assets.css = mergedCSS;
               }
-              const mergedJS = mergeBundleGetterSetMaps(
+              const mergedJS = mergeBundleSetMaps(
                 rootNode.assets.js,
                 unwrappedContent.assets.js,
               );
@@ -97,12 +98,12 @@ export const parseHTML = async (htmlStringChars: Uint8Array, dynamicValues: unkn
               }
               if (unwrappedContent.assets.html) {
                 rootNode.assets.html ??= {};
-                const mergedBundles = mergeBundleCodeMaps(
-                  rootNode.assets.html.bundles,
-                  unwrappedContent.assets.html.bundles,
+                const mergedBundleImportPaths = mergeBundleSetMaps(
+                  rootNode.assets.html.bundleImportPaths,
+                  unwrappedContent.assets.html.bundleImportPaths,
                 );
-                if (mergedBundles) {
-                  rootNode.assets.html.bundles = mergedBundles;
+                if (mergedBundleImportPaths) {
+                  rootNode.assets.html.bundleImportPaths = mergedBundleImportPaths;
                 }
                 const mergedDependencies = mergeSets(
                   rootNode.assets.html.dependencies,
@@ -150,21 +151,20 @@ export const parseHTML = async (htmlStringChars: Uint8Array, dynamicValues: unkn
         rootNode.assets.html.dependencies ??= new Set();
         rootNode.assets.html.dependencies.add(unwrappedContent.importPath);
 
-        // Read the file contents and figure out what to do with them
-        const fileContents = await readFile(unwrappedContent.importPath, "utf-8");
         if (unwrappedContent.bundleName) {
-          // If a bundle name is specified, we will add the imported file's content to the corresponding HTML bundle
-          // in the root node's assets.html.bundles.
-          // The final bundle contents will be inserted into the tree in a later processing step after HTML parsing is complete.
-          rootNode.assets.html.bundles ??= new Map();
-          let currentBundleArray = rootNode.assets.html.bundles.get(unwrappedContent.bundleName);
-          if (!currentBundleArray) {
-            currentBundleArray = [fileContents];
-            rootNode.assets.html.bundles.set(unwrappedContent.bundleName, currentBundleArray);
+          // If a bundle name is specified, we will track this import file path so we can de-duplicate bundled imports
+          // until the final bundle contents are generated in a later processing step.
+          rootNode.assets.html.bundleImportPaths ??= new Map();
+          let currentBundleImportPathsSet = rootNode.assets.html.bundleImportPaths.get(unwrappedContent.bundleName);
+          if (!currentBundleImportPathsSet) {
+            currentBundleImportPathsSet = new Set<string>([unwrappedContent.importPath]);
+            rootNode.assets.html.bundleImportPaths.set(unwrappedContent.bundleName, currentBundleImportPathsSet);
           } else {
-            currentBundleArray.push(fileContents);
+            currentBundleImportPathsSet.add(unwrappedContent.importPath);
           }
         } else {
+          // Read the file contents and figure out what to do with them
+          const fileContents = await readFile(unwrappedContent.importPath, "utf-8");
           // If no bundle name is specified, we will insert the imported HTML content directly into the tree at the location of the import statement.
           if (unwrappedContent.options?.shouldEscape) {
             // If the shouldEscape option is true, we will insert the raw HTML text as a text node

@@ -1,10 +1,12 @@
-import { parseHTML } from './parseHTML.ts';
-import { calculateStringByteLength, DYNAMIC_VALUE_CHARACTER_SEQUENCE_BYTE_LENGTH, getDynamicValuePlaceholderByteSequence, textEncoder } from './utils.ts';
-import type { YetiRootNode } from './types.ts';
-import { makeBundleInlineObject, makeBundleImportObject, WILDCARD_BUNDLE_NAME, type HTMLBundleImportObject, makeBundleSrcObject } from '../bundle/bundle.ts';
-import { resolveImportPath } from '../bundle/import.ts';
 import { getCallSites } from 'node:util';
 import { fileURLToPath } from 'node:url';
+
+import { parseHTML } from './parseHTML.ts';
+import { calculateStringByteLength, DYNAMIC_VALUE_CHARACTER_SEQUENCE_BYTE_LENGTH, getDynamicValuePlaceholderByteSequence } from './utils.ts';
+import { textEncoder } from '../utils/textEncoder.ts';
+import type { YetiRootNode } from './types.ts';
+import { WILDCARD_BUNDLE_NAME, type HTMLBundleImportObject, makeBundleSrcObject, makeHTMLBundleInlineObject, makeHTMLBundleImportObject } from '../bundle/bundle.ts';
+import { resolveImportPath } from '../bundle/import.ts';
 
 export const html = async (strings: TemplateStringsArray, ...values: unknown[]): Promise<YetiRootNode> => {
   // Get the file URL of the file which called this html template tag
@@ -80,7 +82,7 @@ html.import = (importPath: string, options: {
 
   try {
     const resolvedFilePath = resolveImportPath(importPath);
-    return makeBundleImportObject("html", resolvedFilePath, bundleName, { shouldEscape });
+    return makeHTMLBundleImportObject(resolvedFilePath, bundleName, { shouldEscape });
   } catch (err) {
     throw new Error(`html.import() failed to resolve path to file at "${importPath}"`, {
       cause: err,
@@ -88,6 +90,6 @@ html.import = (importPath: string, options: {
   }
 };
 
-html.inline = <TBundleName extends string>(bundleName: TBundleName) => makeBundleInlineObject("html", bundleName);
+html.inline = <TBundleName extends string>(bundleName: TBundleName, options?: { shouldEscape?: boolean }) => makeHTMLBundleInlineObject(bundleName, options);
 
 html.src = <TBundleName extends string>(bundleName: TBundleName) => makeBundleSrcObject("html", bundleName);

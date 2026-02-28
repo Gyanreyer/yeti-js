@@ -1,7 +1,5 @@
 import { YETI_NODE_TYPE, type YetiNode } from "./types.ts";
-
-export const textEncoder = new TextEncoder();
-export const textDecoder = new TextDecoder();
+import { textEncoder } from "../utils/textEncoder.ts";
 
 export const CHAR_CODE_DYNAMIC_VALUE_PLACEHOLDER = 0;
 // 1 byte for the placeholder char code + 2 bytes for the value index
@@ -182,6 +180,10 @@ const RAW_STRING_CONTENTS_HTML_TAG_SET = new Set([
 ]);
 
 export const isRawStringContentTag = (tagName: string): tagName is RawStringContentTagName => RAW_STRING_CONTENTS_HTML_TAG_SET.has(tagName.toLowerCase());
+
+const PRESERVE_WHITESPACE_TAGNAMES = new Set(["pre", "textarea"]);
+
+export const isPreserveWhitespaceTag = (tagName: string): boolean => PRESERVE_WHITESPACE_TAGNAMES.has(tagName.toLowerCase());
 
 const sanitizedHTMLEscapeCharMap: Record<number, string> = {
   [CHAR_CODE_AMPERSAND]: "&amp;",

@@ -1,6 +1,15 @@
 import { YETI_NODE_TYPE } from "./types.ts";
 import type { YetiRootNode, YetiElementNode, YetiTextNode, YetiCommentNode, YetiDoctypeNode, YetiChildNode } from "./types.ts";
-import { sanitizeHTMLTextContent } from "./utils.ts";
+import { isPreserveWhitespaceTag, isRawStringContentTag, sanitizeHTMLTextContent } from "./utils.ts";
+
+const WHITESPACE_REGEX = /\s+/g;
+
+export const collapseWhitespace = (text: string): string => text.replace(WHITESPACE_REGEX, " ");
+
+interface RenderChildNodeOptions {
+  minify: boolean;
+  preserveWhitespace: boolean;
+}
 
 const renderDoctypeNode = (node: YetiDoctypeNode): string => {
   return `<!DOCTYPE ${node.content}>`;
@@ -10,9 +19,16 @@ const renderCommentNode = (node: YetiCommentNode): string => {
   return `<!-- ${node.content} -->`;
 };
 
-const renderTextNode = (node: YetiTextNode): string => {
+
+const renderTextNode = (node: YetiTextNode, { minify, preserveWhitespace }: RenderChildNodeOptions): string => {
   // Sanitize text content to prevent HTML injection vulnerabilities
-  return sanitizeHTMLTextContent(node.content);
+  const sanitized = sanitizeHTMLTextContent(node.content);
+
+  if (!minify || preserveWhitespace) {
+    return sanitized;
+  }
+
+  return collapseWhitespace(sanitized.trim());
 };
 
 const renderAttributes = (attributes: Record<string, unknown>): string => {
@@ -32,18 +48,29 @@ const renderAttributes = (attributes: Record<string, unknown>): string => {
     .join(" ");
 };
 
-const renderElementNode = (node: YetiElementNode): string => {
+const renderElementNode = (node: YetiElementNode, options: RenderChildNodeOptions): string => {
   const { tagName, attributes, children } = node;
-  return `<${tagName}${attributes ? ` ${renderAttributes(attributes)}` : ""}>${children ? children.map(renderChildNode).join("") : ""}</${tagName}>`;
+  const preserveWhitespace = options.preserveWhitespace || isRawStringContentTag(tagName) || isPreserveWhitespaceTag(tagName);
+  const childOptions: RenderChildNodeOptions = {
+    minify: options.minify,
+    preserveWhitespace,
+  };
+  const renderedChildren = children ? children.map(child => renderChildNode(child, childOptions)).join("") : "";
+
+  return `<${tagName}${attributes ? ` ${renderAttributes(attributes)}` : ""}>${renderedChildren}</${tagName}>`;
 };
 
-const renderChildNode = (node: YetiChildNode): string => {
+const renderChildNode = (node: YetiChildNode, options: RenderChildNodeOptions): string => {
   switch (node.type) {
     case YETI_NODE_TYPE.TEXT:
-      return renderTextNode(node);
+      return renderTextNode(node, options);
     case YETI_NODE_TYPE.ELEMENT:
-      return renderElementNode(node);
+      return renderElementNode(node, options);
     case YETI_NODE_TYPE.COMMENT:
+      if (options.minify) {
+        // Strip comments entirely when minifying
+        return "";
+      }
       return renderCommentNode(node);
     case YETI_NODE_TYPE.DOCTYPE:
       return renderDoctypeNode(node);
@@ -52,9 +79,16 @@ const renderChildNode = (node: YetiChildNode): string => {
   }
 };
 
+export interface RenderHTMLOptions {
+  /**
+   * Whether to minify the output HTML by collapsing whitespace and removing comments. Defaults to false.
+   */
+  minify?: boolean;
+}
+
 /**
  * Renders a YetiRootNode object into an HTML string.
  */
-export const renderHTML = (rootNode: YetiRootNode): string => {
-  return rootNode.children.map(renderChildNode).join("");
+export const renderHTML = (rootNode: YetiRootNode, { minify = false }: RenderHTMLOptions = {}): string => {
+  return rootNode.children.map(child => renderChildNode(child, { minify, preserveWhitespace: false })).join("");
 };

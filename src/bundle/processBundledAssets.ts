@@ -1,14 +1,17 @@
 import { transform as transformCSS, type TransformOptions as LightningCSSTransformOptions, type CustomAtRules } from "lightningcss";
-import { transform as transformJS } from 'esbuild';
+import { transform as transformJS, TransformOptions as ESBuildTransformOptions } from 'esbuild';
 
 import { getExternalBundleFilePath, isBundleSrcObject, isInlinedBundleElementNode, WILDCARD_BUNDLE_NAME } from "../bundle/bundle.ts";
 import { YETI_NODE_TYPE } from "../html/types.ts";
 import type { YetiRootNode, YetiElementNode, YetiChildNode } from "../html/types.ts";
 import { getConfig } from "../config.ts";
 import { parseHTML } from "../html/parseHTML.ts";
-import { textDecoder, textEncoder } from "../html/utils.ts";
+import { textEncoder } from "../utils/textEncoder.ts";
+import { textDecoder } from "../utils/textDecoder.ts";
 import { renderHTML } from "../html/renderHTML.ts";
 import { BundleError } from "../error.ts";
+import { CSSBundleGetterMap } from "../css/css.ts";
+import { JSBundleGetterMap } from "../js/js.ts";
 
 const DELETE_NODE = Symbol("DELETE_NODE");
 
@@ -26,9 +29,9 @@ const DELETE_NODE = Symbol("DELETE_NODE");
 export const processBundledAssets = async (rootNode: YetiRootNode): Promise<{
   rootNode: YetiRootNode,
   externalBundleContents: {
-    css: Map<string, string>;
-    js: Map<string, string>;
-    html: Map<string, string>;
+    css: Map<string, string[]>;
+    js: Map<string, string[]>;
+    html: Map<string, string[]>;
   };
   dependencies: {
     css: Set<string>;
@@ -38,20 +41,15 @@ export const processBundledAssets = async (rootNode: YetiRootNode): Promise<{
 }> => {
   const config = getConfig();
 
-  const resolvedBundleContents = {
-    css: new Map<string, string>(),
-    js: new Map<string, string>(),
-    html: new Map<string, string>(),
-  };
-
   const dependencies = {
     css: new Set<string>(),
     js: new Set<string>(),
     html: new Set(rootNode.assets?.html?.dependencies),
   };
 
-  const getCSSBundleContent = async (bundleName: string): Promise<string | null> => {
-    const cachedBundleContents = resolvedBundleContents.css.get(bundleName);
+  const inlinedCSSBundleContentCache = new Map<string, string>();
+  const getInlinedCSSBundleContent = async (bundleName: string): Promise<string | null> => {
+    const cachedBundleContents = inlinedCSSBundleContentCache.get(bundleName);
     if (cachedBundleContents) {
       return cachedBundleContents;
     }
@@ -84,17 +82,18 @@ export const processBundledAssets = async (rootNode: YetiRootNode): Promise<{
 
     const transformResult = transformCSS(Object.assign({
       code: combinedRawCode,
-      filename: config.css.deriveBundleFilePath(bundleName),
+      filename: `${config.css.deriveBundleFilePath(bundleName)}?inlined=true`,
       minify: true,
     } satisfies LightningCSSTransformOptions<CustomAtRules>, config.css.deriveBundleTransformConfig?.(bundleName)));
 
     const transformedCode = textDecoder.decode(transformResult.code);
-    resolvedBundleContents.css.set(bundleName, transformedCode);
+    inlinedCSSBundleContentCache.set(bundleName, transformedCode);
     return transformedCode;
   };
 
-  const getJSBundleContent = async (bundleName: string): Promise<string | null> => {
-    const cachedBundleContents = resolvedBundleContents.js.get(bundleName);
+  const inlinedJSBundleContentCache = new Map<string, string>();
+  const getInlinedJSBundleContent = async (bundleName: string): Promise<string | null> => {
+    const cachedBundleContents = inlinedJSBundleContentCache.get(bundleName);
     if (cachedBundleContents) {
       return cachedBundleContents;
     }
@@ -127,14 +126,15 @@ export const processBundledAssets = async (rootNode: YetiRootNode): Promise<{
 
     const transformResult = await transformJS(combinedRawCode, Object.assign({
       minify: true,
-    }, config.js.deriveBundleTransformConfig?.(bundleName)));
+    } satisfies ESBuildTransformOptions, config.js.deriveBundleTransformConfig?.(bundleName)));
 
-    resolvedBundleContents.js.set(bundleName, transformResult.code);
+    inlinedJSBundleContentCache.set(bundleName, transformResult.code);
     return transformResult.code;
   };
 
+  const inlinedHTMLBundleContentCache = new Map<string, string>();
   const getHTMLBundleContent = async (bundleName: string): Promise<string | null> => {
-    const cachedBundleContents = resolvedBundleContents.html.get(bundleName);
+    const cachedBundleContents = inlinedHTMLBundleContentCache.get(bundleName);
     if (cachedBundleContents) {
       return cachedBundleContents;
     }
@@ -163,16 +163,16 @@ export const processBundledAssets = async (rootNode: YetiRootNode): Promise<{
       htmlContent = renderHTML(processedNode);
     }
 
-    resolvedBundleContents.html.set(bundleName, htmlContent);
+    inlinedHTMLBundleContentCache.set(bundleName, htmlContent);
 
     return htmlContent;
   };
 
-  const externalBundleNames = {
-    css: new Set<string>(),
-    js: new Set<string>(),
-    html: new Set<string>(),
-  };
+  const externalBundles: {
+    css?: CSSBundleGetterMap;
+    js?: JSBundleGetterMap;
+    html?: Map<string, string[]>;
+  } = {};
 
   const wildcardNodes = new Array<{
     node: YetiElementNode;
@@ -215,9 +215,9 @@ export const processBundledAssets = async (rootNode: YetiRootNode): Promise<{
 
       let bundleContent: string | null;
       if (assetType === "css") {
-        bundleContent = await getCSSBundleContent(bundleName);
+        bundleContent = await getInlinedCSSBundleContent(bundleName);
       } else if (assetType === "js") {
-        bundleContent = await getJSBundleContent(bundleName);
+        bundleContent = await getInlinedJSBundleContent(bundleName);
       } else {
         bundleContent = await getHTMLBundleContent(bundleName);
       }
@@ -237,7 +237,7 @@ export const processBundledAssets = async (rootNode: YetiRootNode): Promise<{
     if (node.attributes) {
       // Check for bundle src objects on this element's attributes
       for (const attrName in node.attributes) {
-        const attrValue = node.attributes[attrName];
+        const attrValue: unknown = node.attributes[attrName];
         if (isBundleSrcObject(attrValue)) {
           const bundleName = attrValue.bundleName;
           const assetType = attrValue.assetType;
@@ -252,7 +252,12 @@ export const processBundledAssets = async (rootNode: YetiRootNode): Promise<{
               parent,
             });
           } else {
-            const bundleContent = resolvedBundleContents[assetType].get(bundleName);
+            let bundleContent;
+            if (assetType === "html") {
+              bundleContent = rootNode.assets?.html?.bundles?.get(bundleName) ?? null;
+            } else {
+              bundleContent = rootNode.assets?.[assetType]?.get(bundleName) ?? null;
+            }
 
             if (!bundleContent) {
               // If we don't have any content for this bundle, we can just skip adding this attribute to the new attributes object, which will have the effect of removing it from the element in the tree.
@@ -261,7 +266,8 @@ export const processBundledAssets = async (rootNode: YetiRootNode): Promise<{
               // Replace the bundle src object with a string containing the path to the external bundle file.
               // For now we can just use the bundle name as the path, but this will be updated to the actual file path in a later step.
               node.attributes[attrName] = getExternalBundleFilePath(bundleName, assetType);
-              externalBundleNames[assetType].add(bundleName);
+              externalBundles[assetType] ??= new Map();
+              externalBundles[assetType].set(bundleName, bundleContent as any);
             }
           }
         }
@@ -309,6 +315,12 @@ export const processBundledAssets = async (rootNode: YetiRootNode): Promise<{
   }
 
   if (wildcardNodes.length > 0) {
+    const unusedBundleNames = {
+      css: new Set<string>(rootNode.assets?.css?.keys()),
+      js: new Set<string>(rootNode.assets?.js?.keys()),
+      html: new Set<string>(rootNode.assets?.html?.bundles?.keys()),
+    };
+
     const unusedBundleContents: {
       css: Map<string, string> | null;
       js: Map<string, string> | null;
@@ -327,23 +339,23 @@ export const processBundledAssets = async (rootNode: YetiRootNode): Promise<{
       const bundleContentsMap = unusedBundleContents[assetType] = new Map<string, string>();
 
       if (assetType === "css") {
-        const unusedBundleNamesSet = new Set(rootNode.assets?.css?.keys()).difference(new Set(resolvedBundleContents.css.keys()));
+        const unusedBundleNamesSet = new Set(rootNode.assets?.css?.keys()).difference(new Set(resolvedRawBundleContents.css.keys()));
         for (const bundleName of unusedBundleNamesSet) {
-          const content = await getCSSBundleContent(bundleName);
+          const content = await getInlinedCSSBundleContent(bundleName);
           if (content) {
             bundleContentsMap.set(bundleName, content);
           }
         }
       } else if (assetType === "js") {
-        const unusedBundleNamesSet = new Set(rootNode.assets?.js?.keys()).difference(new Set(resolvedBundleContents.js.keys()));
+        const unusedBundleNamesSet = new Set(rootNode.assets?.js?.keys()).difference(new Set(resolvedRawBundleContents.js.keys()));
         for (const bundleName of unusedBundleNamesSet) {
-          const content = await getJSBundleContent(bundleName);
+          const content = await getInlinedJSBundleContent(bundleName);
           if (content) {
             bundleContentsMap.set(bundleName, content);
           }
         }
       } else {
-        const unusedBundleNamesSet = new Set(rootNode.assets?.html?.bundles?.keys()).difference(new Set(resolvedBundleContents.html.keys()));
+        const unusedBundleNamesSet = new Set(rootNode.assets?.html?.bundles?.keys()).difference(new Set(resolvedRawBundleContents.html.keys()));
         for (const bundleName of unusedBundleNamesSet) {
           const content = await getHTMLBundleContent(bundleName);
           if (content) {
@@ -414,26 +426,29 @@ export const processBundledAssets = async (rootNode: YetiRootNode): Promise<{
     }
   }
 
-  const externalBundleContents = {
-    css: new Map<string, string>(),
-    js: new Map<string, string>(),
-    html: new Map<string, string>(),
-  };
+  const externalBundleContents: {
+    css?: Map<string, string>;
+    js?: Map<string, string>;
+    html?: Map<string, string>;
+  } = {};
 
+  if (externalBundleNames.css.size > 0) {
+    externalBundleContents.css = new Map<string, string>();
+  }
   for (const bundleName of externalBundleNames.css) {
-    const content = resolvedBundleContents.css.get(bundleName);
+    const content = rootNode.assets.css.get(bundleName);
     if (content) {
       externalBundleContents.css.set(bundleName, content);
     }
   }
   for (const bundleName of externalBundleNames.js) {
-    const content = resolvedBundleContents.js.get(bundleName);
+    const content = resolvedRawBundleContents.js.get(bundleName);
     if (content) {
       externalBundleContents.js.set(bundleName, content);
     }
   }
   for (const bundleName of externalBundleNames.html) {
-    const content = resolvedBundleContents.html.get(bundleName);
+    const content = resolvedRawBundleContents.html.get(bundleName);
     if (content) {
       externalBundleContents.html.set(bundleName, content);
     }

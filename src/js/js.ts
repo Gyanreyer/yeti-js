@@ -1,10 +1,10 @@
 import { build } from 'esbuild';
 
-import { BUNDLE_TYPE, isBundleObject, makeBundleInlineObject, makeBundleSrcObject, makeBundleStartObject, makeBundleImportObject } from "../bundle/bundle.ts";
+import { BUNDLE_TYPE, isBundleObject, makeCssOrJsBundleInlineObject, makeBundleSrcObject, makeBundleStartObject, makeCssOrJsBundleImportObject } from "../bundle/bundle.ts";
 import { resolveImportPath } from "../bundle/import.ts";
 import { getConfig } from "../config.ts";
 import { BundleError } from "../error.ts";
-import { textEncoder } from '../html/utils.ts';
+import { textEncoder } from '../utils/textEncoder.ts';
 
 export interface JSBundleResult {
   bundleName: string;
@@ -14,7 +14,7 @@ export interface JSBundleResult {
 
 export type JSBundleGetter = () => Promise<JSBundleResult>;
 export type JSBundleGetterMap = Map<string, JSBundleGetter>;
-export const jsTemplateResultSymbol = Symbol("JS_TEMPLATE_RESULT");
+const jsTemplateResultSymbol = Symbol("JS_TEMPLATE_RESULT");
 
 export type JSTemplateResult = {
   bundles: JSBundleGetterMap;
@@ -80,62 +80,72 @@ export const js = (strings: TemplateStringsArray, ...values: unknown[]): JSTempl
   const bundleGetterMap: JSBundleGetterMap = new Map();
 
   for (const bundleName of bundleNames) {
-    bundleGetterMap.set(bundleName, async () => {
-      const dependencies = new Set<string>();
-      const codeChunks: Uint8Array[] = [];
+    let cachedPromise: Promise<JSBundleResult> | null = null;
 
-      const importPaths = bundleImportPaths.get(bundleName);
-      if (importPaths) {
-        // Use esbuild to bundle imported files together and get a list of all input files for dependency tracking
-        try {
-          const result = await build({
-            entryPoints: Array.from(importPaths),
-            bundle: true,
-            write: false,
-            treeShaking: true,
-            // Outputs data so we can get a list of all input files for dependency tracking
-            metafile: true,
-            absPaths: ["metafile"],
-            format: "esm",
-            platform: "browser",
-          });
-          for (const inputFile in result.metafile.inputs) {
-            dependencies.add(inputFile);
+    bundleGetterMap.set(bundleName, () => {
+      if (cachedPromise) {
+        return cachedPromise;
+      }
+
+      cachedPromise = (async () => {
+        const dependencies = new Set<string>();
+        const codeChunks: Uint8Array[] = [];
+
+        const importPaths = bundleImportPaths.get(bundleName);
+        if (importPaths) {
+          // Use esbuild to bundle imported files together and get a list of all input files for dependency tracking
+          try {
+            const result = await build({
+              entryPoints: Array.from(importPaths),
+              bundle: true,
+              write: false,
+              treeShaking: true,
+              // Outputs data so we can get a list of all input files for dependency tracking
+              metafile: true,
+              absPaths: ["metafile"],
+              format: "esm",
+              platform: "browser",
+            });
+            for (const inputFile in result.metafile.inputs) {
+              dependencies.add(inputFile);
+            }
+            for (const outputFile in result.outputFiles) {
+              const outputFileData = result.outputFiles[outputFile];
+              codeChunks.push(outputFileData.contents);
+            }
+          } catch (err) {
+            throw new BundleError(`js.import() failed to import files for bundle "${bundleName}".`, {
+              cause: err,
+            });
           }
-          for (const outputFile in result.outputFiles) {
-            const outputFileData = result.outputFiles[outputFile];
-            codeChunks.push(outputFileData.contents);
+        }
+
+        const rawBundleChunks = rawJsBundles.get(bundleName);
+        if (rawBundleChunks) {
+          for (const chunk of rawBundleChunks) {
+            codeChunks.push(textEncoder.encode(chunk));
           }
-        } catch (err) {
-          throw new BundleError(`js.import() failed to import files for bundle "${bundleName}".`, {
-            cause: err,
-          });
         }
-      }
 
-      const rawBundleChunks = rawJsBundles.get(bundleName);
-      if (rawBundleChunks) {
-        for (const chunk of rawBundleChunks) {
-          codeChunks.push(textEncoder.encode(chunk));
+        let combinedCodeLength = 0;
+        for (const chunk of codeChunks) {
+          combinedCodeLength += chunk.length;
         }
-      }
+        const combinedCode = new Uint8Array(combinedCodeLength);
+        let offset = 0;
+        for (const chunk of codeChunks) {
+          combinedCode.set(chunk, offset);
+          offset += chunk.length;
+        }
 
-      let combinedCodeLength = 0;
-      for (const chunk of codeChunks) {
-        combinedCodeLength += chunk.length;
-      }
-      const combinedCode = new Uint8Array(combinedCodeLength);
-      let offset = 0;
-      for (const chunk of codeChunks) {
-        combinedCode.set(chunk, offset);
-        offset += chunk.length;
-      }
+        return {
+          bundleName,
+          code: combinedCode,
+          dependencies,
+        };
+      })();
 
-      return {
-        bundleName,
-        code: combinedCode,
-        dependencies,
-      };
+      return cachedPromise;
     });
   }
 
@@ -152,7 +162,7 @@ js.bundle = <TBundleName extends string>(bundleName: TBundleName) => makeBundleS
 js.import = (importPath: string, bundleName?: string) => {
   try {
     const resolvedFilePath = resolveImportPath(importPath);
-    return makeBundleImportObject("js", resolvedFilePath, bundleName);
+    return makeCssOrJsBundleImportObject("js", resolvedFilePath, bundleName);
   } catch (err) {
     throw new Error(`js.import() failed to resolve path to file at "${importPath}"`, {
       cause: err,
@@ -160,7 +170,7 @@ js.import = (importPath: string, bundleName?: string) => {
   }
 };
 
-js.inline = <TBundleName extends string>(bundleName: TBundleName) => makeBundleInlineObject("js", bundleName);
+js.inline = <TBundleName extends string>(bundleName: TBundleName) => makeCssOrJsBundleInlineObject("js", bundleName);
 
 js.src = <TBundleName extends string>(bundleName: TBundleName) => makeBundleSrcObject("js", bundleName);
 

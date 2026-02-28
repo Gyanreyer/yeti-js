@@ -1,11 +1,6 @@
 import type { CSSBundleGetter } from "../css/css.ts";
 import type { JSBundleGetter } from "../js/js.ts";
 
-export interface HTMLBundleData {
-  htmlBundles?: Map<string, string[]>;
-  htmlDependencies?: Set<string>;
-}
-
 // Using symbols for node types to ensure uniqueness and prevent potential conflicts with user-defined content
 // We have to declare them outside of the YETI_NODE_TYPE object because otherwise they
 // were just getting typed as generic symbols instead of unique symbol values
@@ -33,7 +28,7 @@ export interface DocumentBundleAssets {
   css?: Map<string, Set<CSSBundleGetter>>;
   js?: Map<string, Set<JSBundleGetter>>;
   html?: {
-    bundles?: Map<string, string[]>;
+    bundleImportPaths?: Map<string, Set<string>>;
     dependencies?: Set<string>;
   };
 }

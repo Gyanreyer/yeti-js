@@ -17,7 +17,6 @@ import {
   isValidHTMLAttributeNameString,
   doCharCodeSequencesMatch,
   DOCTYPE_STRING_CHAR_CODE_SEQUENCE,
-  textDecoder,
   parseDynamicValueByteSequenceIndex,
   DYNAMIC_VALUE_CHARACTER_SEQUENCE_BYTE_LENGTH,
   isRawStringContentTag,
@@ -25,6 +24,7 @@ import {
   CHAR_CODE_BACKTICK,
 } from "./utils.ts";
 import { YetiHTMLParsingError } from "../error.ts";
+import { textDecoder } from '../utils/textDecoder.ts';
 
 export const TOKEN_TYPE = {
   ERROR: 0,

@@ -20,7 +20,7 @@ export const mergeSets = <
   return targetSet as TTargetSet extends undefined ? TSourceSet : TTargetSet;
 };
 
-export const mergeBundleGetterSetMaps = <
+export const mergeBundleSetMaps = <
   T,
   TTargetMap extends Map<string, Set<T>> | undefined,
   TSourceMap extends Map<string, Set<T>> | undefined,
@@ -66,3 +66,15 @@ export const mergeBundleCodeMaps = (targetBundles: Map<string, string[]> | undef
   }
   return targetBundles;
 };
+
+export const mergeBundleContentMaps = (targetBundleContents: Map<string, string>, sourceBundleContents: Map<string, string> | undefined): void => {
+  if (!sourceBundleContents) {
+    // If we don't have source bundle contents, leave the target bundle contents as is and return
+    return;
+  }
+
+  for (const [bundleName, bundleContent] of sourceBundleContents.entries()) {
+    const existingBundleContent = targetBundleContents.get(bundleName) ?? "";
+    targetBundleContents.set(bundleName, `${existingBundleContent}${bundleContent}`);
+  }
+}

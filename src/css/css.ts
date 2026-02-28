@@ -1,9 +1,9 @@
 import { bundleAsync } from 'lightningcss';
-import { BUNDLE_TYPE, isBundleObject, makeBundleInlineObject, makeBundleSrcObject, makeBundleStartObject, makeBundleImportObject } from "../bundle/bundle.ts";
+import { BUNDLE_TYPE, isBundleObject, makeCssOrJsBundleInlineObject, makeBundleSrcObject, makeBundleStartObject, makeCssOrJsBundleImportObject } from "../bundle/bundle.ts";
 import { resolveImportPath } from "../bundle/import.ts";
 import { getConfig } from "../config.ts";
 import { BundleError } from "../error.ts";
-import { textEncoder } from '../html/utils.ts';
+import { textEncoder } from '../utils/textEncoder.ts';
 
 export interface CSSBundleResult {
   bundleName: string;
@@ -77,62 +77,72 @@ export const css = (strings: TemplateStringsArray, ...values: unknown[]): CSSTem
     }
   }
 
-  const bundleGetterMap = new Map<string, () => Promise<CSSBundleResult>>();
+  const bundleGetterMap: CSSBundleGetterMap = new Map();
 
   for (const bundleName of bundleNames) {
-    bundleGetterMap.set(bundleName, async () => {
-      const dependencies = new Set<string>();
-      // We'll gather the code for the bundle in an array of Uint8Arrays (code chunks)
-      // and then stitch them together into a single Uint8Array at the end to return as the bundle result.
-      const codeChunks: Uint8Array[] = [];
+    let cachedPromise: Promise<CSSBundleResult> | null = null;
 
-      const importPaths = bundleImportPaths.get(bundleName);
-      if (importPaths) {
-        // Use lightningcss to bundle each imported file and its dependencies,
-        // and collect the resulting code and dependencies for the bundle result
-        for (const importPath of importPaths) {
-          dependencies.add(importPath);
-          try {
-            const result = await bundleAsync({
-              filename: importPath,
-            });
-            if (result.dependencies) {
-              for (const dependency of result.dependencies) {
-                dependencies.add(dependency.url);
+    bundleGetterMap.set(bundleName, () => {
+      if (cachedPromise) {
+        return cachedPromise;
+      }
+
+      cachedPromise = (async () => {
+        const dependencies = new Set<string>();
+        // We'll gather the code for the bundle in an array of Uint8Arrays (code chunks)
+        // and then stitch them together into a single Uint8Array at the end to return as the bundle result.
+        const codeChunks: Uint8Array[] = [];
+
+        const importPaths = bundleImportPaths.get(bundleName);
+        if (importPaths) {
+          // Use lightningcss to bundle each imported file and its dependencies,
+          // and collect the resulting code and dependencies for the bundle result
+          for (const importPath of importPaths) {
+            dependencies.add(importPath);
+            try {
+              const result = await bundleAsync({
+                filename: importPath,
+              });
+              if (result.dependencies) {
+                for (const dependency of result.dependencies) {
+                  dependencies.add(dependency.url);
+                }
               }
+              codeChunks.push(result.code);
+            } catch (err) {
+              throw new BundleError(`css.import() failed to import file "${importPath}" for bundle "${bundleName}".`, {
+                cause: err,
+              });
             }
-            codeChunks.push(result.code);
-          } catch (err) {
-            throw new BundleError(`css.import() failed to import file "${importPath}" for bundle "${bundleName}".`, {
-              cause: err,
-            });
           }
         }
-      }
 
-      const rawBundleChunks = rawCssBundles.get(bundleName);
-      if (rawBundleChunks) {
-        for (const chunk of rawBundleChunks) {
-          codeChunks.push(textEncoder.encode(chunk));
+        const rawBundleChunks = rawCssBundles.get(bundleName);
+        if (rawBundleChunks) {
+          for (const chunk of rawBundleChunks) {
+            codeChunks.push(textEncoder.encode(chunk));
+          }
         }
-      }
 
-      let combinedCodeLength = 0;
-      for (const chunk of codeChunks) {
-        combinedCodeLength += chunk.length;
-      }
-      const combinedCode = new Uint8Array(combinedCodeLength);
-      let offset = 0;
-      for (const chunk of codeChunks) {
-        combinedCode.set(chunk, offset);
-        offset += chunk.length;
-      }
+        let combinedCodeLength = 0;
+        for (const chunk of codeChunks) {
+          combinedCodeLength += chunk.length;
+        }
+        const combinedCode = new Uint8Array(combinedCodeLength);
+        let offset = 0;
+        for (const chunk of codeChunks) {
+          combinedCode.set(chunk, offset);
+          offset += chunk.length;
+        }
 
-      return {
-        bundleName,
-        code: combinedCode,
-        dependencies,
-      };
+        return {
+          bundleName,
+          code: combinedCode,
+          dependencies,
+        };
+      })();
+
+      return cachedPromise;
     });
   }
 
@@ -149,7 +159,7 @@ css.bundle = <TBundleName extends string>(bundleName: TBundleName) => makeBundle
 css.import = (importPath: string, bundleName?: string) => {
   try {
     const resolvedFilePath = resolveImportPath(importPath);
-    return makeBundleImportObject("css", resolvedFilePath, bundleName);
+    return makeCssOrJsBundleImportObject("css", resolvedFilePath, bundleName);
   } catch (err) {
     throw new Error(`css.import() failed to resolve path to file at "${importPath}"`, {
       cause: err,
@@ -157,6 +167,6 @@ css.import = (importPath: string, bundleName?: string) => {
   }
 };
 
-css.inline = <TBundleName extends string>(bundleName: TBundleName) => makeBundleInlineObject("css", bundleName);
+css.inline = <TBundleName extends string>(bundleName: TBundleName) => makeCssOrJsBundleInlineObject("css", bundleName);
 
 css.src = <TBundleName extends string>(bundleName: TBundleName) => makeBundleSrcObject("css", bundleName);

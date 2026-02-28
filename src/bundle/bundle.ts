@@ -1,6 +1,7 @@
 import { YETI_NODE_TYPE, type YetiElementNode } from "../html/types.ts";
 import { BundleError } from "../error.ts";
 import { getConfig } from "../config.ts";
+import { logWarning } from "../log.ts";
 
 // Reserved Wildcard bundle name that can be used to indicate a spot where all used bundles on a page
 // which are not referenced anywhere else should be placed.
@@ -51,18 +52,37 @@ export const makeBundleStartObject = <TAssetType extends BundleStartAssetType, T
 /**
  * Object marking a place in an HTML template where a bundle's contents should be inlined into the HTML.
  */
-export interface BundleInlineObject<TAssetType extends AssetType = AssetType, TBundleName extends string = string> extends BaseBundleObject<TAssetType, "inline"> {
+export interface BundleInlineObject<TAssetType extends AssetType = AssetType, TBundleName extends string = string, TOptions extends Record<string, unknown> = never> extends BaseBundleObject<TAssetType, "inline"> {
   /**
    * The name of the bundle that this inline content belongs to.
    */
   bundleName: TBundleName;
+  options?: TOptions;
 }
 
-export const makeBundleInlineObject = <TAssetType extends AssetType, TBundleName extends string>(assetType: TAssetType, bundleName: TBundleName): BundleInlineObject<TAssetType, TBundleName> => ({
-  [BUNDLE_TYPE]: "inline",
-  assetType,
-  bundleName,
-});
+export type HTMLBundleInlineObject<TBundleName extends string = string> = BundleInlineObject<"html", TBundleName, { shouldEscape?: boolean }>;
+
+export const makeCssOrJsBundleInlineObject = <TAssetType extends "js" | "css", TBundleName extends string>(assetType: TAssetType, bundleName: TBundleName): BundleInlineObject<TAssetType, TBundleName> => {
+  return {
+    [BUNDLE_TYPE]: "inline",
+    assetType,
+    bundleName,
+  };
+}
+
+export const makeHTMLBundleInlineObject = <TBundleName extends string>(bundleName: TBundleName, options?: { shouldEscape?: boolean }): HTMLBundleInlineObject => {
+  const inlineObject: HTMLBundleInlineObject = {
+    [BUNDLE_TYPE]: "inline",
+    assetType: "html",
+    bundleName,
+  };
+
+  if (options) {
+    inlineObject.options = options;
+  }
+
+  return inlineObject;
+};
 
 export const INLINED_BUNDLE_ELEMENT_TAG_NAME = "---INLINED-BUNDLE---";
 /**
@@ -139,12 +159,13 @@ export interface HTMLBundleImportObject extends BundleImportObject<"html"> {
     shouldEscape?: boolean;
   }
 }
+
 export interface CSSBundleImportObject extends BundleImportObject<"css"> { }
 export interface JSBundleImportObject extends BundleImportObject<"js"> { }
 
 type AnyBundleImportObject = HTMLBundleImportObject | CSSBundleImportObject | JSBundleImportObject;
 
-export const makeBundleImportObject = <TAssetType extends AssetType>(assetType: TAssetType, importPath: string, bundleName?: string, options?: TAssetType extends "html" ? HTMLBundleImportObject["options"] : never): BundleImportObject<TAssetType> => {
+export const makeCssOrJsBundleImportObject = <TAssetType extends "css" | "js">(assetType: TAssetType, importPath: string, bundleName?: string): BundleImportObject<TAssetType> => {
   if (bundleName === WILDCARD_BUNDLE_NAME) {
     throw new BundleError(`Attempted to import into bundle with reserved wildcard name "${WILDCARD_BUNDLE_NAME}".`);
   }
@@ -155,9 +176,30 @@ export const makeBundleImportObject = <TAssetType extends AssetType>(assetType: 
     importPath,
     bundleName,
   };
-  if (assetType === "html" && options) {
-    (importObject as HTMLBundleImportObject).options = options;
+
+  return importObject;
+};
+
+export const makeHTMLBundleImportObject = (importPath: string, bundleName?: string, options?: HTMLBundleImportObject["options"]): HTMLBundleImportObject => {
+  if (bundleName === WILDCARD_BUNDLE_NAME) {
+    throw new BundleError(`Attempted to import into bundle with reserved wildcard name "${WILDCARD_BUNDLE_NAME}".`);
   }
+
+  const importObject: HTMLBundleImportObject = {
+    [BUNDLE_TYPE]: "import",
+    assetType: "html",
+    importPath,
+    bundleName,
+  };
+
+  if (options) {
+    importObject.options = options;
+  }
+
+  if (bundleName && options?.shouldEscape) {
+    logWarning(`html.import() called with both a bundleName and shouldEscape: true option. The shouldEscape option will be ignored since the imported HTML content will be bundled rather than directly inserted into the document. To escape bundled HTML content, use the shouldEscape option for html.inline().`)
+  }
+
   return importObject;
 };
 

@@ -54,4 +54,39 @@ describe("renderHTML", () => {
       `<p>This is &quot;double quotes&quot;, &#39;single quotes&#39;, &amp; a &lt;tag&gt; inside text.</p>`
     );
   });
+
+  describe("minification", () => {
+    test("minifies whitespace and strips comments", async () => {
+      const htmlRoot = await html`<!DOCTYPE html>
+<div>
+  <span>Hello</span>
+  <span>World</span>
+  <!-- This is a comment -->
+</div>`;
+      const result = renderHTML(htmlRoot, { minify: true });
+
+      assert.strictEqual(
+        result,
+        `<!DOCTYPE html><div><span>Hello</span><span>World</span></div>`
+      );
+    });
+
+    test("preserves whitespace in <pre> tags even when minifying", async () => {
+      const htmlRoot = await html`<div>
+  <pre>
+    This is    preformatted   text.
+    It should preserve   whitespace.
+  </pre>
+</div>`;
+      const result = renderHTML(htmlRoot, { minify: true });
+
+      assert.strictEqual(
+        result,
+        `<div><pre>
+    This is    preformatted   text.
+    It should preserve   whitespace.
+  </pre></div>`
+      );
+    });
+  });
 });
