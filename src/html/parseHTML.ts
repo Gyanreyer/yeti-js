@@ -33,7 +33,7 @@ const isYetiNode = (value: unknown): value is YetiNode => {
  * The parser works by first lexing the input HTML string into a stream of tokens using the lexHTML function,
  * and then processing each token to build up the node tree.
  */
-export const parseHTML = async (htmlStringChars: Uint8Array, dynamicValues: unknown[]): Promise<YetiRootNode> => {
+export const parseHTML = async (htmlStringChars: Uint8Array, dynamicValues: unknown[] = []): Promise<YetiRootNode> => {
   const rootNode: YetiRootNode = { type: YETI_NODE_TYPE.ROOT, children: [] };
 
   const appendContentToNode = async (parent: YetiRootNode | YetiElementNode | OpenComponentNode, content: unknown): Promise<void> => {

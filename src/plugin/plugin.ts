@@ -1,6 +1,7 @@
 import { resolve } from 'node:path';
 import type EleventyUserConfig from '@11ty/eleventy/src/UserConfig.js';
-import { transform as transformCSS, type TransformOptions as LightningCSSTransformOptions, type CustomAtRules } from 'lightningcss';
+import { transform as transformCSS } from 'lightningcss';
+import { transform as transformJS } from 'esbuild';
 
 import { updateConfig, type YetiConfig } from '../config.ts';
 import { logError } from '../log.ts';
@@ -9,29 +10,12 @@ import { YETI_NODE_TYPE } from '../html/types.ts';
 import { isYetiNode } from '../html/utils.ts';
 import { renderHTML } from '../html/renderHTML.ts';
 import { processPageComponent } from './processPageComponent.ts';
-import { writeFile } from 'node:fs/promises';
+import { writeFile, open, FileHandle } from 'node:fs/promises';
+import { parseHTML } from '../html/parseHTML.ts';
 
 export const yetiPlugin = (eleventyConfig: EleventyUserConfig, userConfig: Partial<YetiConfig> = {}) => {
   // Update the Yeti config with any user-provided values
-  const {
-    pageTemplateFileExtension,
-    html: {
-      minify: shouldMinifyHTML,
-      deriveBundleFilePath: deriveHTMLBundleFilePath,
-    },
-    css: {
-      minify: shouldMinifyCSS,
-      sourceMaps: shouldGenerateCSSSourceMapsIfMinified,
-      deriveBundleFilePath: deriveCSSBundleFilePath,
-      deriveBundleTransformConfig: deriveCSSBundleTransformConfig,
-    },
-    js: {
-      minify: shouldMinifyJS,
-      sourceMaps: shouldGenerateJSSourceMapsIfMinified,
-      deriveBundleFilePath: deriveJSBundleFilePath,
-      deriveBundleTransformConfig: deriveJSBundleTransformConfig,
-    },
-  } = updateConfig(userConfig);
+  const config = updateConfig(userConfig);
 
   eleventyConfig.on("eleventy.before", async ({
     inputDir,
@@ -55,7 +39,7 @@ export const yetiPlugin = (eleventyConfig: EleventyUserConfig, userConfig: Parti
     });
   });
 
-  eleventyConfig.addTemplateFormats(pageTemplateFileExtension);
+  eleventyConfig.addTemplateFormats(config.pageTemplateFileExtension);
 
   // Maps input paths to the external CSS/JS/HTML content which we should gather into bundles in the "eleventy.after" hook
   // and write to files.
@@ -67,8 +51,8 @@ export const yetiPlugin = (eleventyConfig: EleventyUserConfig, userConfig: Parti
     };
   } = {};
 
-  eleventyConfig.addExtension([pageTemplateFileExtension], {
-    key: pageTemplateFileExtension,
+  eleventyConfig.addExtension([config.pageTemplateFileExtension], {
+    key: config.pageTemplateFileExtension,
     async getInstanceFromInputPath(inputPath: string) {
       const mod = await import(
         // 11ty makes input paths relative to cwd
@@ -98,7 +82,7 @@ export const yetiPlugin = (eleventyConfig: EleventyUserConfig, userConfig: Parti
         globalExternalBundleContents[inputPath] = externalBundles;
 
         return renderHTML(pageRootNode, {
-          minify: shouldMinifyHTML,
+          minify: config.html.minify,
         });
       };
     },
@@ -161,15 +145,81 @@ export const yetiPlugin = (eleventyConfig: EleventyUserConfig, userConfig: Parti
         offset += content.byteLength;
       }
 
-      const outputFilePath = deriveCSSBundleFilePath(bundleName);
+      const outputFilePath = config.css.deriveBundleFilePath(bundleName);
 
-      const { code } = transformCSS(Object.assign({
+      const transformConfig = config.css.deriveBundleTransformConfig(bundleName, config.css.defaultBundleTransformConfig);
+      const { code } = transformCSS({
+        ...transformConfig,
         code: combinedCodeBytes,
         filename: outputFilePath,
-        minify: shouldMinifyCSS,
-      } satisfies LightningCSSTransformOptions<CustomAtRules>, deriveCSSBundleTransformConfig?.(bundleName)));
+      });
 
       await writeFile(resolve(output, outputFilePath), code);
+    }
+
+    for (const [bundleName, bundleContents] of Object.entries(combinedJSBundleContents)) {
+      let combinedContentsByteSize = 0;
+      for (const content of bundleContents) {
+        combinedContentsByteSize += content.byteLength;
+      }
+
+      const combinedCodeBytes = new Uint8Array(combinedContentsByteSize);
+      let offset = 0;
+      for (const content of bundleContents) {
+        combinedCodeBytes.set(content, offset);
+        offset += content.byteLength;
+      }
+
+      const outputFilePath = config.js.deriveBundleFilePath(bundleName);
+
+      const transformConfig = config.js.deriveBundleTransformConfig(bundleName, config.js.defaultBundleTransformConfig);
+      const transformResult = await transformJS(combinedCodeBytes, transformConfig);
+
+      await writeFile(resolve(output, outputFilePath), transformResult.code);
+    }
+
+    for (const [bundleName, importPaths] of Object.entries(combinedHTMLImportPaths)) {
+      const outputFilePath = config.html.deriveBundleFilePath(bundleName);
+
+      const fileHandles = new Array<FileHandle>(importPaths.size);
+      let combinedBundleBytes: Uint8Array;
+
+      try {
+        let handleIndex = 0;
+        let bundleByteLength = 0;
+        for (const importPath of importPaths) {
+          const fileHandle = await open(importPath, "r");
+          const stats = await fileHandle.stat();
+          bundleByteLength += stats.size;
+          fileHandles[handleIndex++] = fileHandle;
+        }
+
+        combinedBundleBytes = new Uint8Array(bundleByteLength);
+        let offset = 0;
+        for (const fileHandle of fileHandles) {
+          const { bytesRead } = await fileHandle.read(combinedBundleBytes, offset);
+          offset += bytesRead;
+        }
+      } finally {
+        for (const fileHandle of fileHandles) {
+          await fileHandle.close();
+        }
+      }
+
+      const transformConfig = config.html.deriveBundleTransformConfig(bundleName, config.html.defaultBundleTransformConfig);
+      let parsedBundleRootNode = await parseHTML(combinedBundleBytes);
+      if (transformConfig.processNodeTree) {
+        parsedBundleRootNode = await transformConfig.processNodeTree(parsedBundleRootNode);
+        if (!isYetiNode(parsedBundleRootNode) || parsedBundleRootNode.type !== YETI_NODE_TYPE.ROOT) {
+          throw new Error(`Expected processNodeTree function to return a YetiRootNode for bundle ${bundleName}. Received: ${JSON.stringify(parsedBundleRootNode)}`);
+        }
+      }
+
+      const renderedHTML = renderHTML(parsedBundleRootNode, {
+        minify: transformConfig.minify,
+      });
+
+      await writeFile(resolve(output, outputFilePath), renderedHTML);
     }
   });
 }

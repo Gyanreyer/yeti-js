@@ -1,4 +1,4 @@
-import { transform as transformCSS, type TransformOptions as LightningCSSTransformOptions, type CustomAtRules } from "lightningcss";
+import { transform as transformCSS, type TransformOptions as LightningCSSTransformOptions, type CustomAtRules, transform } from "lightningcss";
 import { transform as transformJS, type TransformOptions as ESBuildTransformOptions } from 'esbuild';
 import { open, type FileHandle } from "node:fs/promises";
 
@@ -135,11 +135,12 @@ export const processPageComponent = async (pageComponent: YetiPageComponent, pag
       offset += chunk.length;
     }
 
-    const transformResult = transformCSS(Object.assign({
+    const transformConfig = config.css.deriveBundleTransformConfig(bundleName, config.css.defaultBundleTransformConfig);
+    const transformResult = transformCSS({
+      ...transformConfig,
       code: combinedRawCode,
       filename: `${config.css.deriveBundleFilePath(bundleName)}?inlined=true`,
-      minify: true,
-    } satisfies LightningCSSTransformOptions<CustomAtRules>, config.css.deriveBundleTransformConfig?.(bundleName)));
+    });
 
     const transformedCode = textDecoder.decode(transformResult.code);
     transformedInlineCSSBundleCache.set(bundleName, transformedCode);
@@ -169,9 +170,8 @@ export const processPageComponent = async (pageComponent: YetiPageComponent, pag
       offset += chunk.length;
     }
 
-    const transformResult = await transformJS(combinedRawCode, Object.assign({
-      minify: true,
-    } satisfies ESBuildTransformOptions, config.js.deriveBundleTransformConfig?.(bundleName)));
+    const transformConfig = config.js.deriveBundleTransformConfig(bundleName, config.js.defaultBundleTransformConfig);
+    const transformResult = await transformJS(combinedRawCode, transformConfig);
 
     transformedInlineJSBundleCache.set(bundleName, transformResult.code);
     return transformResult.code;
@@ -191,43 +191,42 @@ export const processPageComponent = async (pageComponent: YetiPageComponent, pag
     }
 
     const fileHandles = new Array<FileHandle>(bundleImportPathsSet.size);
-    let handleIndex = 0;
+    let bundleContentBuffer: Uint8Array;
 
-    let bundleByteLength = 0;
-    for (const importPath of bundleImportPathsSet) {
-      const fileHandle = await open(importPath, "r");
-      const stats = await fileHandle.stat();
-      bundleByteLength += stats.size;
-      fileHandles[handleIndex++] = fileHandle;
-    }
+    try {
+      let handleIndex = 0;
 
-    const bundleContentBuffer = new Uint8Array(bundleByteLength);
-    let offset = 0;
-    for (const fileHandle of fileHandles) {
-      const { bytesRead } = await fileHandle.read(bundleContentBuffer, offset);
-      offset += bytesRead;
-      await fileHandle.close();
-    }
+      let bundleByteLength = 0;
+      for (const importPath of bundleImportPathsSet) {
+        const fileHandle = await open(importPath, "r");
+        const stats = await fileHandle.stat();
+        bundleByteLength += stats.size;
+        fileHandles[handleIndex++] = fileHandle;
+      }
 
-    let parsedBundleRootNode = await parseHTML(bundleContentBuffer, []);
-
-    if (config.html.processBundle && (config.html.processBundle[bundleName] || config.html.processBundle[WILDCARD_BUNDLE_NAME])) {
-      // If a processBundle function is provided for this bundle name, we need to parse the combined
-      // HTML into a Yeti node tree so that we can pass it to the processBundle function, and then
-      // render the processed tree back into HTML to get the final bundle content.
-      if (config.html.processBundle[bundleName]) {
-        parsedBundleRootNode = await config.html.processBundle[bundleName](parsedBundleRootNode, bundleName);
-        if (!isYetiNode(parsedBundleRootNode) || parsedBundleRootNode.type !== YETI_NODE_TYPE.ROOT) {
-          throw new Error(`Expected config.html.processBundle["${bundleName}"] function to return a YetiRootNode. Received: ${JSON.stringify(parsedBundleRootNode)}`);
+      bundleContentBuffer = new Uint8Array(bundleByteLength);
+      let offset = 0;
+      for (const fileHandle of fileHandles) {
+        const { bytesRead } = await fileHandle.read(bundleContentBuffer, offset);
+        offset += bytesRead;
+      }
+    } finally {
+      for (const fileHandle of fileHandles) {
+        if (fileHandle) {
+          await fileHandle.close();
         }
       }
-      if (config.html.processBundle[WILDCARD_BUNDLE_NAME]) {
-        // If we have a wildcard processBundle function, perform an additional pass after the specific bundle name pass
-        // to allow the wildcard function to apply generic transformations to the bundle's HTML tree, or to process bundles without specific functions.
-        parsedBundleRootNode = await config.html.processBundle[WILDCARD_BUNDLE_NAME](parsedBundleRootNode, bundleName);
-        if (!isYetiNode(parsedBundleRootNode) || parsedBundleRootNode.type !== YETI_NODE_TYPE.ROOT) {
-          throw new Error(`Expected config.html.processBundle["${WILDCARD_BUNDLE_NAME}"] function to return a YetiRootNode. Received: ${JSON.stringify(parsedBundleRootNode)}`);
-        }
+    }
+
+    let parsedBundleRootNode = await parseHTML(bundleContentBuffer);
+
+    const transformConfig = config.html.deriveBundleTransformConfig(bundleName, config.html.defaultBundleTransformConfig);
+    transformConfig.processNodeTree
+
+    if (transformConfig.processNodeTree) {
+      parsedBundleRootNode = await transformConfig.processNodeTree(parsedBundleRootNode);
+      if (!isYetiNode(parsedBundleRootNode) || parsedBundleRootNode.type !== YETI_NODE_TYPE.ROOT) {
+        throw new Error(`Expected processNodeTree function to return a YetiRootNode for bundle ${bundleName}. Received: ${JSON.stringify(parsedBundleRootNode)}`);
       }
     }
 

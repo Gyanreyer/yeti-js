@@ -4,6 +4,59 @@ import type { TransformOptions as EsbuildTransformOptions } from 'esbuild';
 import { type YetiRootNode } from './html/types.ts';
 import type { DeepPartial } from './utils/utilityTypes.ts';
 
+export type JSBundleTransformConfig = Omit<EsbuildTransformOptions, "sourcefile" | "sourcesContent" | "sourceRoot">;
+export type CSSBundleTransformConfig = Omit<LightningCSSTransformOptions<CustomAtRules>, "code" | "filename" | "inputSourceMap" | "analyzeDependencies">;
+export type HTMLBundleTransformConfig = {
+  minify: boolean;
+  /**
+   * Object to map bundle names to functions to process and transform parsed HTML bundle nodes before final rendering.
+   * These functions will be called for each HTML bundle matching the key name before it's inserted into the final output,
+   * allowing you to modify the HTML tree structure.
+   * You may also use a special wildcard "*" key to specify a function that will be called for all bundles,
+   * which can be useful for applying generic transformations to all bundles or for processing bundles
+   * without explicitly referencing them by name.
+   *
+   * This is useful for transformations like:
+   * - Converting `<svg>` elements into `<symbol>` elements for SVG sprite generation
+   * - Adding vendor prefixes to inline styles
+   * - Transforming or filtering specific elements
+   * - Adding wrapper elements or attributes
+   *
+   * @example Converting SVG elements to symbols for sprite generation
+   * ```ts
+   * import { YETI_NODE_TYPE } from 'yeti-js';
+   *
+   * eleventyConfig.addPlugin(yetiPlugin, {
+   *   html: {
+   *     deriveBundleTransformConfig: (bundleName, defaultConfig) => {
+   *       if(bundleName === "svg-sprites") {
+   *         return {
+   *          ...defaultConfig,
+   *          processNodeTree: (rootNode) => {
+   *            // Transform each <svg> element into a <symbol> for sprite usage
+   *            for (const child of rootNode.children) {
+   *              if (child.type === YETI_NODE_TYPE.ELEMENT && child.tagName === 'svg') {
+   *                child.tagName = 'symbol';
+   *                // Remove xmlns as it's not needed on symbol
+   *                if (child.attributes?.xmlns) {
+   *                  delete child.attributes.xmlns;
+   *                }
+   *              }
+   *            }
+   *            return rootNode;
+   *           }
+   *         };
+   *       }
+   *
+   *       return defaultConfig;
+   *     },
+   *   },
+   * });
+   * ```
+   */
+  processNodeTree?: (rootNode: YetiRootNode) => YetiRootNode | Promise<YetiRootNode>;
+};
+
 export type YetiConfig = {
   /**
    * The directory where the site's source files are located.
@@ -25,16 +78,6 @@ export type YetiConfig = {
    * Config for JavaScript bundling and output.
    */
   js: {
-    /**
-     * Whether to minify processed JavaScript bundles.
-     * @default true
-     */
-    minify: boolean;
-    /**
-     * Whether to generate source maps for processed JavaScript bundles.
-     * @default false
-     */
-    sourceMaps: boolean;
     /**
      * The default global JS bundle name to use when no bundle name is specified.
      * @default "global"
@@ -61,19 +104,15 @@ export type YetiConfig = {
      * ```
      */
     deriveBundleFilePath: (bundleName: string) => string;
-    deriveBundleTransformConfig?: (bundleName: string) => EsbuildTransformOptions | null | undefined;
+    /**
+     * Default esbuild transform config to use when processing JavaScript bundles, which can be overridden on a per-bundle basis with `deriveBundleTransformConfig`.
+     * This allows you to specify custom esbuild transform options like minification, target environments, and more.
+     * If not provided, bundles will be minified by default.
+     */
+    defaultBundleTransformConfig: JSBundleTransformConfig;
+    deriveBundleTransformConfig: (bundleName: string, defaultConfig: JSBundleTransformConfig) => JSBundleTransformConfig;
   };
   css: {
-    /**
-     * Whether to minify processed CSS bundles.
-     * @default true
-     */
-    minify: boolean;
-    /**
-     * Whether to generate source maps for processed CSS bundles.
-     * @default false
-     */
-    sourceMaps: boolean;
     /**
      * The default global CSS bundle name to use when no bundle name is specified.
      * @default "global"
@@ -100,11 +139,13 @@ export type YetiConfig = {
      * ```
      */
     deriveBundleFilePath: (bundleName: string) => string;
-    deriveBundleTransformConfig?: (bundleName: string) => Omit<LightningCSSTransformOptions<CustomAtRules>, "code" | "filename"> | null | undefined;
+    defaultBundleTransformConfig: CSSBundleTransformConfig;
+    deriveBundleTransformConfig: (bundleName: string, defaultConfig: CSSBundleTransformConfig) => CSSBundleTransformConfig;
   };
   html: {
     /**
-     * Whether to minify HTML output.
+     * Whether the page HTML output should be minified.
+     * 
      * @default true
      */
     minify: boolean;
@@ -129,48 +170,9 @@ export type YetiConfig = {
      * ```
      */
     deriveBundleFilePath: (bundleName: string) => string;
-    /**
-     * Object to map bundle names to functions to process and transform parsed HTML bundle nodes before final rendering.
-     * These functions will be called for each HTML bundle matching the key name before it's inserted into the final output,
-     * allowing you to modify the HTML tree structure.
-     * You may also use a special wildcard "*" key to specify a function that will be called for all bundles,
-     * which can be useful for applying generic transformations to all bundles or for processing bundles
-     * without explicitly referencing them by name.
-     *
-     * This is useful for transformations like:
-     * - Converting `<svg>` elements into `<symbol>` elements for SVG sprite generation
-     * - Adding vendor prefixes to inline styles
-     * - Transforming or filtering specific elements
-     * - Adding wrapper elements or attributes
-     *
-     * @example Converting SVG elements to symbols for sprite generation
-     * ```ts
-     * import { YETI_NODE_TYPE } from 'yeti-js';
-     *
-     * eleventyConfig.addPlugin(yetiPlugin, {
-     *   html: {
-     *     processBundle: {
-     *       "svg-sprites": (rootNode) => {
-     *         // Transform each <svg> element into a <symbol> for sprite usage
-     *         for (const child of rootNode.children) {
-     *           if (child.type === YETI_NODE_TYPE.ELEMENT && child.tagName === 'svg') {
-     *             child.tagName = 'symbol';
-     *             // Remove xmlns as it's not needed on symbol
-     *             if (child.attributes?.xmlns) {
-     *               delete child.attributes.xmlns;
-     *             }
-     *           }
-     *         }
-     *         return rootNode;
-     *       },
-     *     },
-     *   },
-     * });
-     * ```
-     */
-    processBundle?: {
-      [bundleName: string]: (rootNode: YetiRootNode, bundleName: string) => YetiRootNode | Promise<YetiRootNode>;
-    };
+    defaultBundleTransformConfig: HTMLBundleTransformConfig;
+    deriveBundleTransformConfig: (bundleName: string, defaultConfig: HTMLBundleTransformConfig) => HTMLBundleTransformConfig;
+
   };
   /**
    * The file extension used for Yeti page template files.
@@ -183,19 +185,27 @@ const config: YetiConfig = {
   inputDir: "",
   outputDir: "",
   js: {
-    minify: true,
-    sourceMaps: false,
     defaultBundleName: "global",
+    defaultBundleTransformConfig: {
+      minify: true,
+    },
+    deriveBundleTransformConfig: (bundleName, defaultConfig) => defaultConfig,
     deriveBundleFilePath: (bundleName) => `/js/${bundleName}.js`,
   },
   css: {
-    minify: true,
-    sourceMaps: false,
     defaultBundleName: "global",
+    defaultBundleTransformConfig: {
+      minify: true,
+    },
+    deriveBundleTransformConfig: (bundleName, defaultConfig) => defaultConfig,
     deriveBundleFilePath: (bundleName) => `/css/${bundleName}.css`,
   },
   html: {
     minify: true,
+    defaultBundleTransformConfig: {
+      minify: true,
+    },
+    deriveBundleTransformConfig: (bundleName, defaultConfig) => defaultConfig,
     deriveBundleFilePath: (bundleName) => `/html/${bundleName}.html`,
   },
   pageTemplateFileExtension: "page.js",
