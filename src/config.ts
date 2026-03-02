@@ -176,9 +176,9 @@ export type YetiConfig = {
   };
   /**
    * The file extension used for Yeti page template files.
-   * @default ".page.js"
+   * @default [".page.js", ".page.ts"]
    */
-  pageTemplateFileExtension: string;
+  pageTemplateFileExtension: string | string[];
 }
 
 const config: YetiConfig = {
@@ -208,7 +208,7 @@ const config: YetiConfig = {
     deriveBundleTransformConfig: (bundleName, defaultConfig) => defaultConfig,
     deriveBundleFilePath: (bundleName) => `/html/${bundleName}.html`,
   },
-  pageTemplateFileExtension: "page.js",
+  pageTemplateFileExtension: ["page.js", "page.ts"],
   quietMode: false,
 };
 

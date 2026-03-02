@@ -1,9 +1,6 @@
-import { html } from '../../../../src/index.js';
+import { html, type YetiComponent } from '../../../src/index.ts';
 
-/**
- * @type {import('../../../../src/types.js').YetiComponent}
- */
-export const BackButton = () => {
+export const BackButton: YetiComponent = () => {
   return html`<>
     <button aria-label="Go Back">
       <svg class="icon" xmlns="http://www.w3.org/2000/svg">

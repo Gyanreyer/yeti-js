@@ -9,6 +9,7 @@ export const collapseWhitespace = (text: string): string => text.replace(WHITESP
 interface RenderChildNodeOptions {
   minify: boolean;
   preserveWhitespace: boolean;
+  shouldEscapeTextContent: boolean;
 }
 
 const renderDoctypeNode = (node: YetiDoctypeNode): string => {
@@ -20,15 +21,17 @@ const renderCommentNode = (node: YetiCommentNode): string => {
 };
 
 
-const renderTextNode = (node: YetiTextNode, { minify, preserveWhitespace }: RenderChildNodeOptions): string => {
+const renderTextNode = (node: YetiTextNode, { minify, preserveWhitespace, shouldEscapeTextContent }: RenderChildNodeOptions & {
+  sanitize?: boolean;
+}): string => {
   // Sanitize text content to prevent HTML injection vulnerabilities
-  const sanitized = sanitizeHTMLTextContent(node.content);
+  const textContent = shouldEscapeTextContent ? sanitizeHTMLTextContent(node.content) : node.content;
 
   if (!minify || preserveWhitespace) {
-    return sanitized;
+    return textContent;
   }
 
-  return collapseWhitespace(sanitized.trim());
+  return collapseWhitespace(textContent.trim());
 };
 
 const renderAttributes = (attributes: Record<string, unknown>): string => {
@@ -50,10 +53,12 @@ const renderAttributes = (attributes: Record<string, unknown>): string => {
 
 const renderElementNode = (node: YetiElementNode, options: RenderChildNodeOptions): string => {
   const { tagName, attributes, children } = node;
-  const preserveWhitespace = options.preserveWhitespace || isRawStringContentTag(tagName) || isPreserveWhitespaceTag(tagName);
+  const isRawContentTag = isRawStringContentTag(tagName);
+  const preserveWhitespace = options.preserveWhitespace || isRawContentTag || isPreserveWhitespaceTag(tagName);
   const childOptions: RenderChildNodeOptions = {
     minify: options.minify,
     preserveWhitespace,
+    shouldEscapeTextContent: !isRawContentTag
   };
   const renderedChildren = children ? children.map(child => renderChildNode(child, childOptions)).join("") : "";
 
@@ -90,5 +95,5 @@ export interface RenderHTMLOptions {
  * Renders a YetiRootNode object into an HTML string.
  */
 export const renderHTML = (rootNode: YetiRootNode, { minify = false }: RenderHTMLOptions = {}): string => {
-  return rootNode.children.map(child => renderChildNode(child, { minify, preserveWhitespace: false })).join("");
+  return rootNode.children.map(child => renderChildNode(child, { minify, preserveWhitespace: false, shouldEscapeTextContent: true })).join("");
 };

@@ -1,7 +1,7 @@
-import { html, css, js } from '../../../../src/index.js';
+import { html, css, js } from '../../../src/index.ts';
 
 /**
- * @import {YetiComponent} from '../../../../src/types';
+ * @import {YetiComponent} from '../../../src/index.ts';
  */
 
 /**
@@ -12,7 +12,7 @@ import { html, css, js } from '../../../../src/index.js';
  * }>}
  */
 const BaseLayout = ({ title = "Yeti", description = "A helpful tool for building websites", generator, children }) => {
-  return html`
+  return html`<!DOCTYPE html>
   <html lang="en">
     <head>
       <meta charset="utf-8" />

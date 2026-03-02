@@ -1,11 +1,7 @@
-import { css, html } from '../../../src/index.js';
-import { SiteNav } from './_components/SiteNav.component.js';
+import { css, html, type YetiPageComponent } from '../../src/index.ts';
+import { SiteNav } from './_components/SiteNav.component.ts';
 
-/**
- * @import { YetiPageComponent } from '../../../src/types';
- * @type {YetiPageComponent}
- */
-const IndexPage = () => {
+const IndexPage: YetiPageComponent = () => {
   return html`<html>
     <head>
       <title>Page with HTML Bundle Inline Test</title>

@@ -10,26 +10,23 @@ import { fileURLToPath } from "node:url";
 import {
   Eleventy
 } from "@11ty/eleventy";
+import type UserConfig from '@11ty/eleventy/src/UserConfig.js';
+import type { YetiConfig } from '../config.ts';
+import type { DeepPartial } from '../utils/utilityTypes.ts';
 
-import { yetiPlugin } from "../../src/index.js";
-
-/**
- * @import UserConfig from '@11ty/eleventy/src/UserConfig.js';
- * @import { YetiConfig } from '../../src/types';
- * @import { DeepPartial } from '../../src/utils/utilityTypes';
- */
+import { yetiPlugin } from "./plugin.ts";
 
 /**
  * @param {string} inputDir
  * @param {string} outputDir
  * @param {DeepPartial<YetiConfig>} [config]
  */
-const getEleventyInstance = (inputDir, outputDir, config = {}) => {
+const getEleventyInstance = (inputDir: string, outputDir: string, config: DeepPartial<YetiConfig> = {}) => {
   const eleventy = new Eleventy(inputDir, outputDir, {
     /**
      * @param {UserConfig} eleventyConfig
      */
-    config(eleventyConfig) {
+    config(eleventyConfig: UserConfig) {
       eleventyConfig.ignores.add("**/_expected/**");
       eleventyConfig.ignores.add("**/*.html");
       eleventyConfig.addPlugin(yetiPlugin, config);
@@ -42,7 +39,7 @@ const getEleventyInstance = (inputDir, outputDir, config = {}) => {
 /**
  * @param {string} inputDirPath
  */
-const testInputDir = async (inputDirPath) => {
+const testInputDir = async (inputDirPath: string) => {
   const resolvedInputDir = fileURLToPath(import.meta.resolve(inputDirPath));
   const siteOutputDir = resolve(
     resolvedInputDir,
@@ -60,10 +57,20 @@ const testInputDir = async (inputDirPath) => {
 
   const eleventy = getEleventyInstance(resolvedInputDir, siteOutputDir, {
     js: {
-      minify: false,
+      defaultBundleTransformConfig: {
+        minify: false,
+      },
     },
     css: {
+      defaultBundleTransformConfig: {
+        minify: false,
+      },
+    },
+    html: {
       minify: false,
+      defaultBundleTransformConfig: {
+        minify: false,
+      },
     },
   });
   await eleventy.write();
@@ -91,18 +98,18 @@ const testInputDir = async (inputDirPath) => {
 
 describe("Yeti Plugin", () => {
   test("Simple Page", async () => {
-    await testInputDir("./simplePage");
+    await testInputDir("../../test_data/simplePage");
   });
 
   test("Page with Bundle Imports", async () => {
-    await testInputDir("./pageWithBundleImports");
+    await testInputDir("../../test_data/pageWithBundleImports");
   });
 
   test("Pages with Components", async () => {
-    await testInputDir("./pagesWithComponents");
+    await testInputDir("../../test_data/pagesWithComponents");
   });
 
   test("Page with HTML Bundle Inline", async () => {
-    await testInputDir("./pageWithHTMLBundleInline");
+    await testInputDir("../../test_data/pageWithHTMLBundleInline");
   });
 });

@@ -1,7 +1,7 @@
-import { css, html, js } from "../../../../src/index.js";
+import { css, html, js } from "../../../src/index.ts";
 
 /**
- * @type {import("src/types").YetiComponent<{ name: string }>}
+ * @type {import("src").YetiComponent<{ name: string }>}
  */
 export const SayHi = ({
   name,

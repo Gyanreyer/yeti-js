@@ -1,7 +1,9 @@
-import { resolve } from 'node:path';
 import type EleventyUserConfig from '@11ty/eleventy/src/UserConfig.js';
 import { transform as transformCSS } from 'lightningcss';
 import { transform as transformJS } from 'esbuild';
+
+import { resolve, join } from 'node:path';
+import { open, type FileHandle } from 'node:fs/promises';
 
 import { updateConfig, type YetiConfig } from '../config.ts';
 import { logError } from '../log.ts';
@@ -10,8 +12,8 @@ import { YETI_NODE_TYPE } from '../html/types.ts';
 import { isYetiNode } from '../html/utils.ts';
 import { renderHTML } from '../html/renderHTML.ts';
 import { processPageComponent } from './processPageComponent.ts';
-import { writeFile, open, FileHandle } from 'node:fs/promises';
 import { parseHTML } from '../html/parseHTML.ts';
+import { safeWriteFile } from '../utils/safeWriteFile.ts';
 
 export const yetiPlugin = (eleventyConfig: EleventyUserConfig, userConfig: Partial<YetiConfig> = {}) => {
   // Update the Yeti config with any user-provided values
@@ -51,8 +53,8 @@ export const yetiPlugin = (eleventyConfig: EleventyUserConfig, userConfig: Parti
     };
   } = {};
 
-  eleventyConfig.addExtension([config.pageTemplateFileExtension], {
-    key: config.pageTemplateFileExtension,
+  eleventyConfig.addExtension(config.pageTemplateFileExtension, {
+    useJavaScriptImport: true,
     async getInstanceFromInputPath(inputPath: string) {
       const mod = await import(
         // 11ty makes input paths relative to cwd
@@ -154,7 +156,7 @@ export const yetiPlugin = (eleventyConfig: EleventyUserConfig, userConfig: Parti
         filename: outputFilePath,
       });
 
-      await writeFile(resolve(output, outputFilePath), code);
+      await safeWriteFile(join(output, outputFilePath), code);
     }
 
     for (const [bundleName, bundleContents] of Object.entries(combinedJSBundleContents)) {
@@ -175,7 +177,7 @@ export const yetiPlugin = (eleventyConfig: EleventyUserConfig, userConfig: Parti
       const transformConfig = config.js.deriveBundleTransformConfig(bundleName, config.js.defaultBundleTransformConfig);
       const transformResult = await transformJS(combinedCodeBytes, transformConfig);
 
-      await writeFile(resolve(output, outputFilePath), transformResult.code);
+      await safeWriteFile(join(output, outputFilePath), transformResult.code);
     }
 
     for (const [bundleName, importPaths] of Object.entries(combinedHTMLImportPaths)) {
@@ -219,7 +221,8 @@ export const yetiPlugin = (eleventyConfig: EleventyUserConfig, userConfig: Parti
         minify: transformConfig.minify,
       });
 
-      await writeFile(resolve(output, outputFilePath), renderedHTML);
+      const writeFilePath = join(output, outputFilePath);
+      await safeWriteFile(writeFilePath, renderedHTML);
     }
   });
 }

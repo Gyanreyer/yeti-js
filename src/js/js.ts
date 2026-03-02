@@ -105,6 +105,8 @@ export const js = (strings: TemplateStringsArray, ...values: unknown[]): JSTempl
               absPaths: ["metafile"],
               format: "esm",
               platform: "browser",
+              // esbuild needs an outdir to generate metafile data even when write is false, but we won't actually write any files to this directory
+              outdir: "out",
             });
             for (const inputFile in result.metafile.inputs) {
               dependencies.add(inputFile);

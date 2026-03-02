@@ -1,4 +1,4 @@
-import { html, css, js } from "../../../src/index.js";
+import { html, css, js } from "../../src/index.ts";
 
 export default function IndexPage() {
   return html`
@@ -7,7 +7,7 @@ export default function IndexPage() {
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Page With Bundle Imports Plugin Test</title>
-    <link rel="preload" as="style" href="${css.src(css.defaultBundleName)}" />
+    <link rel="preload" as="style" href="${css.src(css.getDefaultBundleName())}" />
     <link rel="stylesheet" href="${css.src("*")}" />
     <script type="module">
       ${js.inline("index")}
@@ -21,7 +21,7 @@ export default function IndexPage() {
   <body>
     <h1>Hello, Yeti!</h1>
    ${html.import("./partials/frag.html")}
-    <p>${html.import("./partials/some-text.txt", { escape: true })}</p>
+    <p>${html.import("./partials/some-text.txt", { shouldEscape: true })}</p>
     <script type="module" src="${js.src("*")}"></script>
   </body>
 </html>

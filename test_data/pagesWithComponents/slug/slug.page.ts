@@ -1,4 +1,4 @@
-import { css, Head, html, js } from "../../../../src/index.js";
+import { css, html, js, type YetiPageComponent } from "../../../src/index.ts";
 import { SayHi } from "../_components/SayHi.component.js";
 import BaseLayout from "../_layouts/base.layout.js"
 
@@ -9,25 +9,20 @@ export const config = {
     alias: "slug",
   },
   slugs: ["a", "b", "c"],
-  /**
-   * @param {{
-   *   slug: string;
-   * }} data
-   * @returns {string}
-   */
-  permalink: ({ slug }) => `slug/${slug}.html`,
+  permalink: ({ slug }: {
+    slug: string;
+  }) => `slug/${slug}.html`,
 }
 
-/**
- * @type {import("src/types").YetiPageComponent<{ slug: string }>}
- */
-const SlugPage = ({ slug, eleventy: {
+const SlugPage: YetiPageComponent<{ slug: string }> = ({ slug, eleventy: {
   generator,
 } }) => {
-  return html`<${BaseLayout} title="Page for slug: ${slug}" generator=${generator}>
-    <${Head}>
+  return html`<${BaseLayout}
+    title="Page for slug: ${slug}" 
+    generator=${generator}
+    head=${html`
       <meta name="description" content="This is a description override for slug: ${slug}" />
-    </>
+    `}>
     <h1>Page for slug: ${slug}</h1>
     <${SayHi} name=${slug} />
   </>`;
