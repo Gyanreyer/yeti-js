@@ -14,10 +14,7 @@ describe("renderHTML", () => {
 
     assert.strictEqual(
       result,
-      `<div>
-  <h1>Hello, World!</h1>
-  <p>This is a test.</p>
-</div>`
+      `<div><h1>Hello, World!</h1><p>This is a test.</p></div>`
     );
   });
 
@@ -35,13 +32,11 @@ describe("renderHTML", () => {
     const htmlRoot = await html`<!DOCTYPE html>
 <!-- This is a comment -->
 <div>Content</div>`;
-    const result = renderHTML(htmlRoot);
+    const result = renderHTML(htmlRoot, { shouldStripComments: false });
 
     assert.strictEqual(
       result,
-      `<!DOCTYPE html>
-<!-- This is a comment -->
-<div>Content</div>`
+      `<!DOCTYPE html><!-- This is a comment --><div>Content</div>`
     );
   });
 
@@ -55,6 +50,15 @@ describe("renderHTML", () => {
     );
   });
 
+  test("escapes attribute values properly", async () => {
+    const htmlRoot = await html`<input type="text" value='This is a "quote"'>`;
+    const result = renderHTML(htmlRoot);
+    assert.strictEqual(
+      result,
+      `<input type="text" value="This is a &quot;quote&quot;">`
+    );
+  });
+
   describe("minification", () => {
     test("minifies whitespace and strips comments", async () => {
       const htmlRoot = await html`<!DOCTYPE html>
@@ -63,7 +67,7 @@ describe("renderHTML", () => {
   <span>World</span>
   <!-- This is a comment -->
 </div>`;
-      const result = renderHTML(htmlRoot, { minify: true });
+      const result = renderHTML(htmlRoot, { indentation: null });
 
       assert.strictEqual(
         result,
@@ -78,7 +82,7 @@ describe("renderHTML", () => {
     It should preserve   whitespace.
   </pre>
 </div>`;
-      const result = renderHTML(htmlRoot, { minify: true });
+      const result = renderHTML(htmlRoot, { indentation: null });
 
       assert.strictEqual(
         result,
@@ -86,6 +90,39 @@ describe("renderHTML", () => {
     This is    preformatted   text.
     It should preserve   whitespace.
   </pre></div>`
+      );
+    });
+  });
+
+  describe("pretty printing", () => {
+    test("renders with indentation and newlines", async () => {
+      const htmlRoot = await html`<!DOCTYPE html>
+<html>
+  <head>
+    <title>Test</title>
+    <meta charset="UTF-8">
+  </head>
+  <body>
+    <h1>Hello, World!</h1>
+    <p>This is a test.</p>
+  </body>
+</html>`;
+
+      const result = renderHTML(htmlRoot, { indentation: "  " });
+
+      assert.strictEqual(
+        result,
+        `<!DOCTYPE html>
+<html>
+  <head>
+    <title>Test</title>
+    <meta charset="UTF-8">
+  </head>
+  <body>
+    <h1>Hello, World!</h1>
+    <p>This is a test.</p>
+  </body>
+</html>`
       );
     });
   });

@@ -2,9 +2,9 @@ import { readFile } from "node:fs/promises";
 
 import { lexHTML, TOKEN_TYPE } from "./lexHTML.ts";
 import { YETI_NODE_TYPE } from "./types.ts";
-import type { YetiNode, YetiRootNode, YetiElementNode, YetiCommentNode, YetiDoctypeNode, YetiChildNode, DocumentBundleAssets } from "./types.ts";
+import type { YetiRootNode, YetiElementNode, YetiCommentNode, YetiDoctypeNode, YetiChildNode } from "./types.ts";
 import { YetiHTMLParsingError } from "../error.ts";
-import { isVoidTag } from "./utils.ts";
+import { cleanUpChildWhitespace, isVoidTag, isYetiNode } from "./utils.ts";
 import { textEncoder } from "../utils/textEncoder.ts";
 import { isBundleImportObject, isBundleInlineObject, makeBundleInlineElementNode } from "../bundle/bundle.ts";
 import { mergeBundleSetMaps, mergeSets } from "../bundle/mergeBundleContents.ts";
@@ -22,10 +22,6 @@ type OpenComponentNode = {
   component: Function;
   attributes?: Record<string, unknown>;
   children?: YetiChildNode[];
-};
-
-const isYetiNode = (value: unknown): value is YetiNode => {
-  return typeof value === "object" && value !== null && "type" in value;
 };
 
 /**
@@ -78,7 +74,9 @@ export const parseHTML = async (htmlStringChars: Uint8Array, dynamicValues: unkn
           case YETI_NODE_TYPE.ROOT: {
             // Unwrap root nodes' children and insert them directly, since we don't want to nest root nodes inside other nodes.
             // We may get a root node from dynamic content like the return value from rendering a nested component.
-            parent.children.push(...unwrappedContent.children);
+            for (const child of unwrappedContent.children) {
+              await appendContentToNode(parent, child);
+            }
 
             if (unwrappedContent.assets) {
               rootNode.assets ??= {};
@@ -279,6 +277,11 @@ export const parseHTML = async (htmlStringChars: Uint8Array, dynamicValues: unkn
         }
       }
     } else {
+      // Perform a pass to clean up whitespace in the closing element's child text nodes.
+      // This will collapse consecutive whitespace characters into a single space/line break
+      // and trim off any leading or trailing whitespace at the start and end of the children array.
+      cleanUpChildWhitespace(closingParentNode);
+
       // For regular element nodes, we can just insert them directly.
       await appendContentToNode(nextParent, closingParentNode);
       const currentInstanceCount = currentOpenTreeTagnameAndComponentCounts.get(closingParentNode.tagName) ?? 0;
@@ -511,6 +514,9 @@ export const parseHTML = async (htmlStringChars: Uint8Array, dynamicValues: unkn
     // Keep closing any open nodes until we reach the root. This will ensure that all nodes are properly closed and appended to the tree, 
     // even if there are unclosed tags in the input HTML.
   }
+
+  // Now that the tree is finalized, perform one final pass to clean up whitespace in the root-level children.
+  cleanUpChildWhitespace(rootNode);
 
   return rootNode;
 }

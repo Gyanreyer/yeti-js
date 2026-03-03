@@ -62,19 +62,15 @@ var FancyComponent = class extends HTMLElement {
       htmlImportPaths: new Map(),
     });
 
-    assert.deepStrictEqual(dependencies, {
-      css: new Set([fileURLToPath(import.meta.resolve("../../test_data/simplePageWithAssets/Heading.component.css"))]),
-      js: new Set([
-        fileURLToPath(import.meta.resolve("../../test_data/simplePageWithAssets/fancy-component.js")),
-        fileURLToPath(import.meta.resolve("../../test_data/simplePageWithAssets/say-hello.ts")),
-      ]),
-      html: new Set([
-        fileURLToPath(import.meta.resolve("../../test_data/simplePageWithAssets/Heading.component.ts")),
-        fileURLToPath(import.meta.resolve("../../test_data/simplePageWithAssets/FancyComponent.component.ts")),
-        fileURLToPath(import.meta.resolve("../../test_data/simplePageWithAssets/Layout.component.ts")),
-        fileURLToPath(import.meta.resolve("../../test_data/simplePageWithAssets/MyPage.page.ts")),
-      ]),
-    });
+    assert.deepStrictEqual(dependencies, new Set([
+      fileURLToPath(import.meta.resolve("../../test_data/simplePageWithAssets/Heading.component.css")),
+      fileURLToPath(import.meta.resolve("../../test_data/simplePageWithAssets/fancy-component.js")),
+      fileURLToPath(import.meta.resolve("../../test_data/simplePageWithAssets/say-hello.ts")),
+      fileURLToPath(import.meta.resolve("../../test_data/simplePageWithAssets/Heading.component.ts")),
+      fileURLToPath(import.meta.resolve("../../test_data/simplePageWithAssets/FancyComponent.component.ts")),
+      fileURLToPath(import.meta.resolve("../../test_data/simplePageWithAssets/Layout.component.ts")),
+      fileURLToPath(import.meta.resolve("../../test_data/simplePageWithAssets/MyPage.page.ts")),
+    ]));
 
     assert.deepStrictEqual<YetiRootNode>(pageRootNode, {
       type: YETI_NODE_TYPE.ROOT,
@@ -84,10 +80,6 @@ var FancyComponent = class extends HTMLElement {
           content: "html",
         },
         {
-          type: YETI_NODE_TYPE.TEXT,
-          content: "\n",
-        },
-        {
           type: YETI_NODE_TYPE.ELEMENT,
           tagName: "html",
           attributes: {
@@ -95,17 +87,9 @@ var FancyComponent = class extends HTMLElement {
           },
           children: [
             {
-              type: YETI_NODE_TYPE.TEXT,
-              content: "\n  ",
-            },
-            {
               type: YETI_NODE_TYPE.ELEMENT,
               tagName: "head",
               children: [
-                {
-                  type: YETI_NODE_TYPE.TEXT,
-                  content: "\n    ",
-                },
                 {
                   type: YETI_NODE_TYPE.ELEMENT,
                   tagName: "meta",
@@ -114,20 +98,12 @@ var FancyComponent = class extends HTMLElement {
                   },
                 },
                 {
-                  type: YETI_NODE_TYPE.TEXT,
-                  content: "\n    ",
-                },
-                {
                   type: YETI_NODE_TYPE.ELEMENT,
                   tagName: "meta",
                   attributes: {
                     name: "viewport",
                     content: "width=device-width, initial-scale=1.0",
                   },
-                },
-                {
-                  type: YETI_NODE_TYPE.TEXT,
-                  content: "\n    ",
                 },
                 {
                   type: YETI_NODE_TYPE.ELEMENT,
@@ -140,30 +116,14 @@ var FancyComponent = class extends HTMLElement {
                   ],
                 },
                 {
-                  type: YETI_NODE_TYPE.TEXT,
-                  content: "\n    ",
-                },
-                {
                   type: YETI_NODE_TYPE.ELEMENT,
                   tagName: "style",
                   children: [
                     {
                       type: YETI_NODE_TYPE.TEXT,
-                      content: "\n      "
-                    },
-                    {
-                      type: YETI_NODE_TYPE.TEXT,
                       content: 'h1{font-family:sans-serif;font-size:5rem}',
                     },
-                    {
-                      type: YETI_NODE_TYPE.TEXT,
-                      content: "\n    ",
-                    },
                   ],
-                },
-                {
-                  type: YETI_NODE_TYPE.TEXT,
-                  content: "\n    ",
                 },
                 {
                   type: YETI_NODE_TYPE.ELEMENT,
@@ -174,27 +134,11 @@ var FancyComponent = class extends HTMLElement {
                   children: [
                     {
                       type: YETI_NODE_TYPE.TEXT,
-                      content: "\n      "
-                    },
-                    {
-                      type: YETI_NODE_TYPE.TEXT,
                       content: 'var message="Hello, World!";console.log(message);\n'
-                    },
-                    {
-                      type: YETI_NODE_TYPE.TEXT,
-                      content: "\n    ",
                     },
                   ],
                 },
-                {
-                  type: YETI_NODE_TYPE.TEXT,
-                  content: "\n  ",
-                },
               ],
-            },
-            {
-              type: YETI_NODE_TYPE.TEXT,
-              content: "\n  ",
             },
             // Body
             {
@@ -202,25 +146,13 @@ var FancyComponent = class extends HTMLElement {
               tagName: "body",
               children: [
                 {
-                  type: YETI_NODE_TYPE.TEXT,
-                  content: "\n    \n    ",
-                },
-                {
                   type: YETI_NODE_TYPE.ELEMENT,
                   tagName: "main",
                   children: [
                     {
-                      type: YETI_NODE_TYPE.TEXT,
-                      content: "\n      ",
-                    },
-                    {
                       type: YETI_NODE_TYPE.ELEMENT,
                       tagName: "header",
                       children: [
-                        {
-                          type: YETI_NODE_TYPE.TEXT,
-                          content: "\n  ",
-                        },
                         {
                           type: YETI_NODE_TYPE.ELEMENT,
                           tagName: "h1",
@@ -231,29 +163,13 @@ var FancyComponent = class extends HTMLElement {
                             },
                           ],
                         },
-                        {
-                          type: YETI_NODE_TYPE.TEXT,
-                          content: "\n",
-                        },
                       ],
-                    },
-                    {
-                      type: YETI_NODE_TYPE.TEXT,
-                      content: "\n      ",
                     },
                     {
                       type: YETI_NODE_TYPE.ELEMENT,
                       tagName: "fancy-component",
                     },
-                    {
-                      type: YETI_NODE_TYPE.TEXT,
-                      content: "\n    ",
-                    }
                   ],
-                },
-                {
-                  type: YETI_NODE_TYPE.TEXT,
-                  content: "\n  \n    ",
                 },
                 {
                   type: YETI_NODE_TYPE.ELEMENT,
@@ -263,10 +179,6 @@ var FancyComponent = class extends HTMLElement {
                   },
                 },
                 {
-                  type: YETI_NODE_TYPE.TEXT,
-                  content: "\n    ",
-                },
-                {
                   type: YETI_NODE_TYPE.ELEMENT,
                   tagName: "link",
                   attributes: {
@@ -274,15 +186,7 @@ var FancyComponent = class extends HTMLElement {
                     href: "/css/global.css",
                   },
                 },
-                {
-                  type: YETI_NODE_TYPE.TEXT,
-                  content: "\n  ",
-                }
               ],
-            },
-            {
-              type: YETI_NODE_TYPE.TEXT,
-              content: "\n",
             },
           ],
         },
@@ -301,14 +205,10 @@ var FancyComponent = class extends HTMLElement {
       htmlImportPaths: new Map(),
     });
 
-    assert.deepStrictEqual(dependencies, {
-      css: new Set(),
-      js: new Set(),
-      html: new Set([
-        fileURLToPath(import.meta.resolve("../../test_data/simplePageWithEmptyWildcards/Layout.component.ts")),
-        fileURLToPath(import.meta.resolve("../../test_data/simplePageWithEmptyWildcards/MyPage.page.ts")),
-      ]),
-    });
+    assert.deepStrictEqual(dependencies, new Set([
+      fileURLToPath(import.meta.resolve("../../test_data/simplePageWithEmptyWildcards/Layout.component.ts")),
+      fileURLToPath(import.meta.resolve("../../test_data/simplePageWithEmptyWildcards/MyPage.page.ts")),
+    ]));
 
     assert.deepStrictEqual<YetiRootNode>(pageRootNode, {
       type: YETI_NODE_TYPE.ROOT,
@@ -318,10 +218,6 @@ var FancyComponent = class extends HTMLElement {
           content: "html",
         },
         {
-          type: YETI_NODE_TYPE.TEXT,
-          content: "\n",
-        },
-        {
           type: YETI_NODE_TYPE.ELEMENT,
           tagName: "html",
           attributes: {
@@ -329,17 +225,9 @@ var FancyComponent = class extends HTMLElement {
           },
           children: [
             {
-              type: YETI_NODE_TYPE.TEXT,
-              content: "\n  ",
-            },
-            {
               type: YETI_NODE_TYPE.ELEMENT,
               tagName: "head",
               children: [
-                {
-                  type: YETI_NODE_TYPE.TEXT,
-                  content: "\n    ",
-                },
                 {
                   type: YETI_NODE_TYPE.ELEMENT,
                   tagName: "meta",
@@ -348,20 +236,12 @@ var FancyComponent = class extends HTMLElement {
                   },
                 },
                 {
-                  type: YETI_NODE_TYPE.TEXT,
-                  content: "\n    ",
-                },
-                {
                   type: YETI_NODE_TYPE.ELEMENT,
                   tagName: "meta",
                   attributes: {
                     name: "viewport",
                     content: "width=device-width, initial-scale=1.0",
                   },
-                },
-                {
-                  type: YETI_NODE_TYPE.TEXT,
-                  content: "\n    ",
                 },
                 {
                   type: YETI_NODE_TYPE.ELEMENT,
@@ -374,26 +254,9 @@ var FancyComponent = class extends HTMLElement {
                   ],
                 },
                 {
-                  type: YETI_NODE_TYPE.TEXT,
-                  content: "\n    ",
-                },
-                {
                   type: YETI_NODE_TYPE.ELEMENT,
                   tagName: "style",
-                  children: [
-                    {
-                      type: YETI_NODE_TYPE.TEXT,
-                      content: "\n      ",
-                    },
-                    {
-                      type: YETI_NODE_TYPE.TEXT,
-                      content: "\n    "
-                    },
-                  ],
-                },
-                {
-                  type: YETI_NODE_TYPE.TEXT,
-                  content: "\n    ",
+                  children: [],
                 },
                 {
                   type: YETI_NODE_TYPE.ELEMENT,
@@ -401,26 +264,9 @@ var FancyComponent = class extends HTMLElement {
                   attributes: {
                     type: "module",
                   },
-                  children: [
-                    {
-                      type: YETI_NODE_TYPE.TEXT,
-                      content: "\n      ",
-                    },
-                    {
-                      type: YETI_NODE_TYPE.TEXT,
-                      content: "\n    ",
-                    },
-                  ],
-                },
-                {
-                  type: YETI_NODE_TYPE.TEXT,
-                  content: "\n  ",
+                  children: [],
                 },
               ],
-            },
-            {
-              type: YETI_NODE_TYPE.TEXT,
-              content: "\n  ",
             },
             // Body
             {
@@ -428,30 +274,10 @@ var FancyComponent = class extends HTMLElement {
               tagName: "body",
               children: [
                 {
-                  type: YETI_NODE_TYPE.TEXT,
-                  content: "\n    \n    ",
-                },
-                {
                   type: YETI_NODE_TYPE.ELEMENT,
                   tagName: "main",
                 },
-                {
-                  content: '\n  \n    ',
-                  type: YETI_NODE_TYPE.TEXT,
-                },
-                {
-                  content: '\n    ',
-                  type: YETI_NODE_TYPE.TEXT,
-                },
-                {
-                  type: YETI_NODE_TYPE.TEXT,
-                  content: "\n  ",
-                },
               ],
-            },
-            {
-              type: YETI_NODE_TYPE.TEXT,
-              content: "\n",
             },
           ],
         },

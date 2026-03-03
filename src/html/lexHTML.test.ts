@@ -5,7 +5,9 @@ import {
 import assert from "node:assert/strict";
 import { lexHTML, TOKEN_TYPE } from "./lexHTML.ts";
 import type { LexerToken } from "./lexHTML.ts";
-import { calculateStringByteLength, DYNAMIC_VALUE_CHARACTER_SEQUENCE_BYTE_LENGTH, getDynamicValuePlaceholderByteSequence, textDecoder, textEncoder } from "./utils.ts";
+import { calculateStringByteLength, DYNAMIC_VALUE_CHARACTER_SEQUENCE_BYTE_LENGTH, getDynamicValuePlaceholderByteSequence } from "./utils.ts";
+import { textEncoder } from "../utils/textEncoder.ts";
+import { textDecoder } from '../utils/textDecoder.ts';
 import { YetiHTMLParsingError } from "../error.ts";
 
 const htmlTokens = async (strings: TemplateStringsArray, ...values: unknown[]): Promise<LexerToken[]> => {

@@ -1,4 +1,4 @@
-import { YETI_NODE_TYPE, type YetiNode } from "./types.ts";
+import { YETI_NODE_TYPE, type YetiElementNode, type YetiRootNode, type YetiNode } from "./types.ts";
 import { textEncoder } from "../utils/textEncoder.ts";
 
 export const CHAR_CODE_DYNAMIC_VALUE_PLACEHOLDER = 0;
@@ -193,6 +193,7 @@ const sanitizedHTMLEscapeCharMap: Record<number, string> = {
   [CHAR_CODE_SINGLE_QUOTE]: "&#39;",
 };
 
+
 export const sanitizeHTMLTextContent = (text: string): string => {
   let sanitizedText = "";
   let lastIndex = 0;
@@ -217,3 +218,120 @@ const yetiNodeTypes = new Set(Object.values(YETI_NODE_TYPE));
 export const isYetiNode = (value: unknown): value is YetiNode => {
   return typeof value === "object" && value !== null && "type" in value && yetiNodeTypes.has(value.type as any);
 }
+
+/**
+ * Collapses consecutive whitespace characters in a string into a single character.
+ * If the consecutive whitespace includes a newline character, it collapses to a single newline character.
+ * Otherwise, it collapses to a single space character.
+ * 
+ * @example
+ * collapseWhitespace("Hello   World") // returns "Hello World"
+ * collapseWhitespace("Line 1\n\nLine 2") // returns "Line 1\nLine 2"
+ * collapseWhitespace("   Leading and trailing whitespace   ") // returns " Leading and trailing whitespace "
+ */
+export const collapseWhitespace = (str: string): string => {
+  let result = "";
+  let currentChunkStartIndex = 0;
+  let currentChunkLength = 0;
+
+  let isInWhitespace = false;
+  let doesWhitespaceIncludeNewlines = false;
+
+  for (let i = 0; i < str.length; i++) {
+    const charCode = str.charCodeAt(i);
+    if (isWhiteSpaceCharCode(charCode)) {
+      isInWhitespace = true;
+      if (charCode === CHAR_CODE_NEWLINE) {
+        doesWhitespaceIncludeNewlines = true;
+      }
+
+      if (currentChunkLength > 0) {
+        result += str.slice(currentChunkStartIndex, currentChunkStartIndex + currentChunkLength);
+        currentChunkLength = 0;
+      }
+
+      currentChunkStartIndex = i + 1;
+    } else {
+      if (isInWhitespace) {
+        // If we were in whitespace and encounter a non-whitespace character, add a single space before the
+        // next chunk of non-whitespace characters
+        result += doesWhitespaceIncludeNewlines ? "\n" : " ";
+        isInWhitespace = false;
+        doesWhitespaceIncludeNewlines = false;
+      }
+      currentChunkLength++;
+    }
+  }
+
+  if (currentChunkLength > 0) {
+    result += str.slice(currentChunkStartIndex, currentChunkStartIndex + currentChunkLength);
+  } else if (isInWhitespace) {
+    // If the string ends with whitespace, add a single space at the end
+    result += doesWhitespaceIncludeNewlines ? "\n" : " ";
+  }
+
+  return result;
+};
+
+/**
+ * Cleans up whitespace in a node's children.
+ * 1. Collapses whitespace sequences into a single character.
+ * 2. Trims leading and trailing whitespace between an element node's opening/closing tags and its children.
+ * 3. Removes empty text nodes that may be left over after trimming.
+ */
+export const cleanUpChildWhitespace = (node: YetiRootNode | YetiElementNode): void => {
+  if (!node.children) {
+    return;
+  }
+
+  const isElementNode = node.type === YETI_NODE_TYPE.ELEMENT;
+
+  // Leading and trailing whitespace can be trimmed as long as the parent isn't a whitespace-significant tag like <pre> or <textarea>.
+  const canTrimWhiteSpace = !isElementNode || !isPreserveWhitespaceTag(node.tagName);
+  // Intermediate whitespace can be collapsed to a single space/line break as long as the parent isn't a whitespace-significant tag like <pre> or <textarea>,
+  // and also isn't a raw text content tag like <script> or <style> where whitespace should be preserved but leading/trailing whitespace can still be trimmed.
+  const shouldCollapseWhiteSpace = canTrimWhiteSpace && (!isElementNode || !isRawStringContentTag(node.tagName));
+
+  let childCount = node.children.length;
+  for (let i = 0; i < childCount; i++) {
+    const child = node.children[i];
+    if (child.type !== YETI_NODE_TYPE.TEXT) {
+      // Skip non-text nodes
+      continue;
+    }
+
+    if (canTrimWhiteSpace) {
+      if (i === 0) {
+        child.content = child.content.trimStart();
+      }
+      if (i === childCount - 1) {
+        child.content = child.content.trimEnd();
+      }
+    }
+
+    if (shouldCollapseWhiteSpace) {
+      child.content = collapseWhitespace(child.content);
+    }
+
+    if (child.content === "" || child.content === "\n") {
+      // If the text node is now empty after trimming, remove it from the children array to
+      // avoid unnecessary empty text nodes in the tree
+      node.children.splice(i, 1);
+      i--;
+      childCount--;
+      continue;
+    }
+  }
+
+  if (isElementNode && node.children?.length === 0) {
+    // Delete the children array if it's empty now
+    delete node.children;
+  }
+};
+
+const QUOTE_REGEX = /"/g;
+
+export const sanitizeAttributeValue = (value: unknown): string => {
+  const stringValue = typeof value === "string" ? value : String(value);
+  return stringValue.replace(QUOTE_REGEX, "&quot;");
+};

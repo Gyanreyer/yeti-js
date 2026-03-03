@@ -1,3 +1,1 @@
-{
-  console.log("This is other.js");
-}
+console.log("This is other.js");

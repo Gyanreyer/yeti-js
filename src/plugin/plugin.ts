@@ -84,7 +84,7 @@ export const yetiPlugin = (eleventyConfig: EleventyUserConfig, userConfig: Parti
         globalExternalBundleContents[inputPath] = externalBundles;
 
         return renderHTML(pageRootNode, {
-          minify: config.html.minify,
+          indentation: config.html.minify ? null : "  ",
         });
       };
     },
@@ -218,7 +218,7 @@ export const yetiPlugin = (eleventyConfig: EleventyUserConfig, userConfig: Parti
       }
 
       const renderedHTML = renderHTML(parsedBundleRootNode, {
-        minify: transformConfig.minify,
+        indentation: transformConfig.minify ? null : "  ",
       });
 
       const writeFilePath = join(output, outputFilePath);

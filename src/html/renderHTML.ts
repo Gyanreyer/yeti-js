@@ -1,14 +1,11 @@
 import { YETI_NODE_TYPE } from "./types.ts";
 import type { YetiRootNode, YetiElementNode, YetiTextNode, YetiCommentNode, YetiDoctypeNode, YetiChildNode } from "./types.ts";
-import { isPreserveWhitespaceTag, isRawStringContentTag, sanitizeHTMLTextContent } from "./utils.ts";
-
-const WHITESPACE_REGEX = /\s+/g;
-
-export const collapseWhitespace = (text: string): string => text.replace(WHITESPACE_REGEX, " ");
+import { isRawStringContentTag, isVoidTag, sanitizeAttributeValue, sanitizeHTMLTextContent } from "./utils.ts";
 
 interface RenderChildNodeOptions {
-  minify: boolean;
-  preserveWhitespace: boolean;
+  shouldStripComments: boolean;
+  indentation: string | null;
+  indentationLevel: number;
   shouldEscapeTextContent: boolean;
 }
 
@@ -20,47 +17,77 @@ const renderCommentNode = (node: YetiCommentNode): string => {
   return `<!-- ${node.content} -->`;
 };
 
-
-const renderTextNode = (node: YetiTextNode, { minify, preserveWhitespace, shouldEscapeTextContent }: RenderChildNodeOptions & {
+const renderTextNode = (node: YetiTextNode, { shouldEscapeTextContent }: RenderChildNodeOptions & {
   sanitize?: boolean;
 }): string => {
-  // Sanitize text content to prevent HTML injection vulnerabilities
-  const textContent = shouldEscapeTextContent ? sanitizeHTMLTextContent(node.content) : node.content;
-
-  if (!minify || preserveWhitespace) {
-    return textContent;
-  }
-
-  return collapseWhitespace(textContent.trim());
+  return shouldEscapeTextContent ? sanitizeHTMLTextContent(node.content) : node.content;
 };
 
 const renderAttributes = (attributes: Record<string, unknown>): string => {
-  return Object.entries(attributes)
-    .map(([key, value]) => {
-      if (value === true) {
-        return key; // Boolean attributes can be rendered as just the key
-      } else if (value === false || value == null) {
-        return ""; // False or null/undefined attributes should not be rendered
-      } else {
-        // For other values, render as key="value" with proper escaping
-        const escapedValue = String(value).replace(/"/g, "&quot;");
-        return `${key}="${escapedValue}"`;
-      }
-    })
-    .filter(attrStr => attrStr.length > 0) // Filter out empty attribute strings
-    .join(" ");
+  let attrStrs: string[] = [];
+
+  for (const attrName in attributes) {
+    const attrValue = attributes[attrName];
+    switch (attrValue) {
+      case true:
+        // True boolean attributes should be rendered as just the attribute name (e.g. "disabled")
+        attrStrs.push(attrName);
+        break;
+      case false:
+      case null:
+      case undefined:
+        // False or null/undefined attributes should not be rendered
+        break;
+      default:
+        // For other values, render as key="value".
+        // We'll sanitize the attribute value to ensure any " characters are properly escaped.
+        attrStrs.push(`${attrName}="${sanitizeAttributeValue(attrValue)}"`);
+        break;
+    }
+  }
+
+  return attrStrs.join(" ");
 };
+
+const NEWLINE_REGEX = /\n/g;
 
 const renderElementNode = (node: YetiElementNode, options: RenderChildNodeOptions): string => {
   const { tagName, attributes, children } = node;
-  const isRawContentTag = isRawStringContentTag(tagName);
-  const preserveWhitespace = options.preserveWhitespace || isRawContentTag || isPreserveWhitespaceTag(tagName);
-  const childOptions: RenderChildNodeOptions = {
-    minify: options.minify,
-    preserveWhitespace,
-    shouldEscapeTextContent: !isRawContentTag
-  };
-  const renderedChildren = children ? children.map(child => renderChildNode(child, childOptions)).join("") : "";
+
+  const renderedAttributes = attributes ? renderAttributes(attributes) : "";
+
+  if (isVoidTag(tagName)) {
+    // Void tags can't have child contents
+    return `<${tagName}${renderedAttributes ? ` ${renderedAttributes}` : ""}>`;
+  }
+
+  if (tagName === "html") {
+    debugger;
+  }
+
+  let renderedChildren = "";
+  if (children) {
+    const isRawContentTag = isRawStringContentTag(tagName);
+    const childOptions: RenderChildNodeOptions = {
+      ...options,
+      indentationLevel: options.indentationLevel + 1,
+      shouldEscapeTextContent: !isRawContentTag
+    };
+
+    let childStartIndentation = "";
+    let childEndIndentation = "";
+
+    const hasOneLineTextChild = children.length === 1 && children[0].type === YETI_NODE_TYPE.TEXT && !NEWLINE_REGEX.test(children[0].content);
+
+    if (options.indentation !== null && !hasOneLineTextChild) {
+      childStartIndentation = `\n${options.indentation.repeat(childOptions.indentationLevel)}`;
+      childEndIndentation = `\n${options.indentationLevel > 0 ? options.indentation.repeat(options.indentationLevel) : ""}`;
+    }
+
+    renderedChildren = `${childStartIndentation}${children.map(
+      (child) => renderChildNode(child, childOptions)
+    ).join(childStartIndentation)}${childEndIndentation}`;
+  }
 
   return `<${tagName}${attributes ? ` ${renderAttributes(attributes)}` : ""}>${renderedChildren}</${tagName}>`;
 };
@@ -72,7 +99,7 @@ const renderChildNode = (node: YetiChildNode, options: RenderChildNodeOptions): 
     case YETI_NODE_TYPE.ELEMENT:
       return renderElementNode(node, options);
     case YETI_NODE_TYPE.COMMENT:
-      if (options.minify) {
+      if (options.shouldStripComments) {
         // Strip comments entirely when minifying
         return "";
       }
@@ -86,14 +113,29 @@ const renderChildNode = (node: YetiChildNode, options: RenderChildNodeOptions): 
 
 export interface RenderHTMLOptions {
   /**
-   * Whether to minify the output HTML by collapsing whitespace and removing comments. Defaults to false.
+   * Whether to strip comments from the output HTML.
+   *
+   * @default true
    */
-  minify?: boolean;
+  shouldStripComments?: boolean;
+  /**
+   * The string to use for indentation when pretty-printing the HTML.
+   * Can be set to null to disable indentation and newlines entirely (i.e. minify the output).
+   * Indentation is disabled by default.
+   *
+   * @default null
+   */
+  indentation?: string | null;
 }
 
 /**
  * Renders a YetiRootNode object into an HTML string.
  */
-export const renderHTML = (rootNode: YetiRootNode, { minify = false }: RenderHTMLOptions = {}): string => {
-  return rootNode.children.map(child => renderChildNode(child, { minify, preserveWhitespace: false, shouldEscapeTextContent: true })).join("");
+export const renderHTML = (rootNode: YetiRootNode, { shouldStripComments = true, indentation = null }: RenderHTMLOptions = {}): string => {
+  return rootNode.children.map(child => renderChildNode(child, {
+    shouldStripComments,
+    indentation,
+    indentationLevel: 0,
+    shouldEscapeTextContent: true,
+  })).join(indentation !== null ? "\n" : "");
 };
