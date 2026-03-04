@@ -1801,7 +1801,7 @@ Line 3 with no indentation
           color: blue;
         }
 
-        ${css.import("../../test_data/external-styles.css", "other-bundle")};
+        ${css.import("../../test_data/css/external-styles.css", "other-bundle")};
       `;
 
       const Component2 = () => html`<my-component-2>Goodbye, world!</my-component-2>`;
@@ -1866,7 +1866,7 @@ Line 3 with no indentation
         ${js.bundle("component-scripts")};
         console.log("Hello from component 1");
 
-        ${js.import("../../test_data/external-script.js", "other-bundle")};
+        ${js.import("../../test_data/js/external-script.js", "other-bundle")};
       `;
 
       const Component2 = () => html`<my-component-2>Goodbye, world!</my-component-2>`;
@@ -1874,7 +1874,7 @@ Line 3 with no indentation
         ${js.bundle("component-scripts")};
         console.log("Hello from component 2");
 
-        ${js.import("../../test_data/external-script.js")};
+        ${js.import("../../test_data/js/external-script.js")};
       `;
 
       const result = await html`<div><${Component1} /><${Component2} /></div>`;

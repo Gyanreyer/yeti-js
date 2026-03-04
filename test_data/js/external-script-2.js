@@ -1,0 +1,1 @@
+window.alert("This is external-script-2.js");

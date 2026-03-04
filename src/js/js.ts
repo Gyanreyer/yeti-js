@@ -1,10 +1,12 @@
 import { build } from 'esbuild';
+import { getCallSites } from 'node:util';
 
 import { BUNDLE_TYPE, isBundleObject, makeCssOrJsBundleInlineObject, makeBundleSrcObject, makeBundleStartObject, makeCssOrJsBundleImportObject } from "../bundle/bundle.ts";
 import { resolveImportPath } from "../bundle/import.ts";
 import { getConfig } from "../config.ts";
 import { BundleError } from "../error.ts";
 import { textEncoder } from '../utils/textEncoder.ts';
+import { fileURLToPath } from 'node:url';
 
 export interface JSBundleResult {
   bundleName: string;
@@ -27,6 +29,10 @@ export const isJSTemplateResult = (obj: unknown): obj is JSTemplateResult => {
 };
 
 export const js = (strings: TemplateStringsArray, ...values: unknown[]): JSTemplateResult => {
+  // Get the file URL of the file which called this js template tag
+  // so we can use it for dependency tracking
+  const parentCallSiteURL = getCallSites()[1]?.scriptName;
+
   const rawJsBundles = new Map<string, string[]>();
   // Map of bundleName to array of import paths for that bundle{
   const bundleImportPaths = new Map<string, Set<string>>();
@@ -90,6 +96,11 @@ export const js = (strings: TemplateStringsArray, ...values: unknown[]): JSTempl
       cachedPromise = (async () => {
         const dependencies = new Set<string>();
         const codeChunks: Uint8Array[] = [];
+
+        if (parentCallSiteURL) {
+          const callerFilePath = fileURLToPath(parentCallSiteURL);
+          dependencies.add(callerFilePath);
+        }
 
         const importPaths = bundleImportPaths.get(bundleName);
         if (importPaths) {

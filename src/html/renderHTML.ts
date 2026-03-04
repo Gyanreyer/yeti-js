@@ -61,10 +61,6 @@ const renderElementNode = (node: YetiElementNode, options: RenderChildNodeOption
     return `<${tagName}${renderedAttributes ? ` ${renderedAttributes}` : ""}>`;
   }
 
-  if (tagName === "html") {
-    debugger;
-  }
-
   let renderedChildren = "";
   if (children) {
     const isRawContentTag = isRawStringContentTag(tagName);
