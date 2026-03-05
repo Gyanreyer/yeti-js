@@ -1,9 +1,13 @@
 import { bundleAsync } from 'lightningcss';
+import { getCallSites } from 'node:util';
+import { fileURLToPath } from 'node:url';
+
 import { BUNDLE_TYPE, isBundleObject, makeCssOrJsBundleInlineObject, makeBundleSrcObject, makeBundleStartObject, makeCssOrJsBundleImportObject } from "../bundle/bundle.ts";
 import { resolveImportPath } from "../bundle/import.ts";
 import { getConfig } from "../config.ts";
 import { BundleError } from "../error.ts";
 import { textEncoder } from '../utils/textEncoder.ts';
+import { dirname, resolve } from 'node:path';
 
 export interface CSSBundleResult {
   bundleName: string;
@@ -26,6 +30,10 @@ export const isCSSTemplateResult = (obj: unknown): obj is CSSTemplateResult => {
 };
 
 export const css = (strings: TemplateStringsArray, ...values: unknown[]): CSSTemplateResult => {
+  // Get the file URL of the file which called this js template tag
+  // so we can use it for dependency tracking
+  const parentCallSiteURL = getCallSites()[1]?.scriptName;
+
   const rawCssBundles = new Map<string, string[]>();
   // Map of bundleName to array of import paths for that bundle{
   const bundleImportPaths = new Map<string, Set<string>>();
@@ -77,6 +85,20 @@ export const css = (strings: TemplateStringsArray, ...values: unknown[]): CSSTem
     }
   }
 
+  // Filter out bundles that contain only whitespace
+  for (const bundleName of bundleNames) {
+    const rawChunks = rawCssBundles.get(bundleName);
+    if (!rawChunks || rawChunks.every(chunk => chunk.trimStart().length === 0)) {
+      // If the raw chunks are entirely composed of whitespace, drop that from the bundle
+      rawCssBundles.delete(bundleName);
+      const hasImports = (bundleImportPaths.get(bundleName)?.size ?? 0) > 0;
+      if (!hasImports) {
+        // If the bundle also has no imports, drop it entirely
+        bundleNames.delete(bundleName);
+      }
+    }
+  }
+
   const bundleGetterMap: CSSBundleGetterMap = new Map();
 
   for (const bundleName of bundleNames) {
@@ -102,12 +124,16 @@ export const css = (strings: TemplateStringsArray, ...values: unknown[]): CSSTem
             try {
               const result = await bundleAsync({
                 filename: importPath,
-              });
-              if (result.dependencies) {
-                for (const dependency of result.dependencies) {
-                  dependencies.add(dependency.url);
+                resolver: {
+                  // Resolve paths for @import statements in CSS files.
+                  // This lets us track any imported CSS files as dependencies.
+                  resolve: (specifier, from) => {
+                    const resolvedPath = resolve(dirname(from), specifier);
+                    dependencies.add(resolvedPath);
+                    return resolvedPath;
+                  },
                 }
-              }
+              });
               codeChunks.push(result.code);
             } catch (err) {
               throw new BundleError(`css.import() failed to import file "${importPath}" for bundle "${bundleName}".`, {
@@ -119,6 +145,10 @@ export const css = (strings: TemplateStringsArray, ...values: unknown[]): CSSTem
 
         const rawBundleChunks = rawCssBundles.get(bundleName);
         if (rawBundleChunks) {
+          if (parentCallSiteURL) {
+            const callerFilePath = fileURLToPath(parentCallSiteURL);
+            dependencies.add(callerFilePath);
+          }
           for (const chunk of rawBundleChunks) {
             codeChunks.push(textEncoder.encode(chunk));
           }

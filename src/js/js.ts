@@ -1,12 +1,12 @@
 import { build } from 'esbuild';
 import { getCallSites } from 'node:util';
+import { fileURLToPath } from 'node:url';
 
 import { BUNDLE_TYPE, isBundleObject, makeCssOrJsBundleInlineObject, makeBundleSrcObject, makeBundleStartObject, makeCssOrJsBundleImportObject } from "../bundle/bundle.ts";
 import { resolveImportPath } from "../bundle/import.ts";
 import { getConfig } from "../config.ts";
 import { BundleError } from "../error.ts";
 import { textEncoder } from '../utils/textEncoder.ts';
-import { fileURLToPath } from 'node:url';
 
 export interface JSBundleResult {
   bundleName: string;
@@ -83,6 +83,20 @@ export const js = (strings: TemplateStringsArray, ...values: unknown[]): JSTempl
     }
   }
 
+  // Filter out bundles that contain only whitespace
+  for (const bundleName of bundleNames) {
+    const rawChunks = rawJsBundles.get(bundleName);
+    if (!rawChunks || rawChunks.every(chunk => chunk.trimStart().length === 0)) {
+      // If the raw chunks are entirely composed of whitespace, drop that from the bundle
+      rawJsBundles.delete(bundleName);
+      const hasImports = (bundleImportPaths.get(bundleName)?.size ?? 0) > 0;
+      if (!hasImports) {
+        // If the bundle also has no imports, drop it entirely
+        bundleNames.delete(bundleName);
+      }
+    }
+  }
+
   const bundleGetterMap: JSBundleGetterMap = new Map();
 
   for (const bundleName of bundleNames) {
@@ -96,11 +110,6 @@ export const js = (strings: TemplateStringsArray, ...values: unknown[]): JSTempl
       cachedPromise = (async () => {
         const dependencies = new Set<string>();
         const codeChunks: Uint8Array[] = [];
-
-        if (parentCallSiteURL) {
-          const callerFilePath = fileURLToPath(parentCallSiteURL);
-          dependencies.add(callerFilePath);
-        }
 
         const importPaths = bundleImportPaths.get(bundleName);
         if (importPaths) {
@@ -135,6 +144,11 @@ export const js = (strings: TemplateStringsArray, ...values: unknown[]): JSTempl
 
         const rawBundleChunks = rawJsBundles.get(bundleName);
         if (rawBundleChunks) {
+          if (parentCallSiteURL) {
+            const callerFilePath = fileURLToPath(parentCallSiteURL);
+            dependencies.add(callerFilePath);
+          }
+
           for (const chunk of rawBundleChunks) {
             codeChunks.push(textEncoder.encode(chunk));
           }

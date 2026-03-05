@@ -1,0 +1,5 @@
+@import "./imported-styles.css";
+
+:root {
+  font-size: 100px;
+}

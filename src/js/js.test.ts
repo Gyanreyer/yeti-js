@@ -76,14 +76,12 @@ describe("js", () => {
       ${js.import("/test_data/js/external-script-2.js", "bundle2")}
     `;
 
-      assert.deepEqual(Array.from(result.bundles.keys()), ["global", "bundle1", "bundle2"]);
+      assert.deepEqual(Array.from(result.bundles.keys()), ["bundle1", "bundle2"]);
 
       const bundle1Getter = result.bundles.get("bundle1");
       const bundle2Getter = result.bundles.get("bundle2");
-      const globalBundleGetter = result.bundles.get("global");
       assert(bundle1Getter);
       assert(bundle2Getter);
-      assert(globalBundleGetter);
 
       const bundle1Result = await bundle1Getter();
       const bundle2Result = await bundle2Getter();
@@ -94,7 +92,6 @@ describe("js", () => {
 console.log("Hello, world!");
 `),
         dependencies: new Set([
-          import.meta.filename,
           fileURLToPath(import.meta.resolve("../../test_data/js/external-script.js")),
         ]),
       });
@@ -105,17 +102,8 @@ console.log("Hello, world!");
 window.alert("This is external-script-2.js");
 `),
         dependencies: new Set([
-          import.meta.filename,
           fileURLToPath(import.meta.resolve("../../test_data/js/external-script-2.js")),
         ]),
-      });
-
-      const globalBundleResult = await globalBundleGetter();
-      assert.deepStrictEqual(globalBundleResult, {
-        bundleName: "global",
-        // Global bundle just has the whitespace and newlines around the imports
-        code: textEncoder.encode(`\n      \n      \n    `),
-        dependencies: new Set([import.meta.filename]),
       });
     });
 
@@ -149,7 +137,6 @@ window.alert("This is external-script-2.js");
 console.log("Hello, world!");
 `),
         dependencies: new Set([
-          import.meta.filename,
           fileURLToPath(import.meta.resolve("../../test_data/js/external-script.js")),
         ]),
       });
@@ -179,7 +166,7 @@ window.alert("This is external-script-2.js");
     test("A js template with imports for a file with sub-dependencies is bundled as expected", async () => {
       const result = js`${js.import("/test_data/js/file-with-import.js", "bundle1")}`;
 
-      assert.deepEqual(Array.from(result.bundles.keys()), ["global", "bundle1"]);
+      assert.deepEqual(Array.from(result.bundles.keys()), ["bundle1"]);
 
       const bundle1Getter = result.bundles.get("bundle1");
       assert(bundle1Getter);
@@ -197,9 +184,36 @@ var sayHello = (name) => {
 sayHello("Alice");
 `),
         dependencies: new Set([
-          import.meta.filename,
           fileURLToPath(import.meta.resolve("../../test_data/js/file-with-import.js")),
           fileURLToPath(import.meta.resolve("../../test_data/js/imported-file.ts")),
+        ]),
+      });
+    });
+
+    test("Bundles with imports are kept even if raw content is only whitespace", async () => {
+      const result = js`
+        ${js.import("/test_data/js/external-script.js", "my-bundle")}
+        ${js.bundle("my-bundle")}
+
+
+      `;
+
+      assert(isJSTemplateResult(result));
+      assert.deepStrictEqual(Array.from(result.bundles.keys()), ["my-bundle"]);
+
+      const myBundleGetter = result.bundles.get("my-bundle");
+      assert(myBundleGetter);
+
+      const myBundleResult = await myBundleGetter();
+
+      assert.deepStrictEqual(myBundleResult, {
+        bundleName: "my-bundle",
+        code: textEncoder.encode(`// test_data/js/external-script.js
+console.log("Hello, world!");
+`),
+        dependencies: new Set([
+          fileURLToPath(import.meta.resolve("../../test_data/js/external-script.js")),
+          // The caller file is not a dependency since we dropped the whitespace-only content
         ]),
       });
     });
@@ -224,7 +238,7 @@ sayHello("Alice");
       }
     });
 
-    test("A js template with a css import throws an error", async () => {
+    test("A js template with a css or html import throws an error", async () => {
       assert.throws(
         () => js`${css.import("../../test_data/css/style.css")}`,
         new BundleError(
@@ -238,6 +252,19 @@ sayHello("Alice");
           `Encountered bundle object with asset type "html" in js template. Expected asset type "js".`
         ),
       );
+    });
+
+    test("JS template results are cached, and the bundle getters return the same results on multiple calls", async () => {
+      const result = js`${js.import("../../test_data/js/external-script.js", "bundle1")}`;
+
+      assert(isJSTemplateResult(result));
+      const bundle1Getter = result.bundles.get("bundle1");
+      assert(bundle1Getter);
+
+      const bundle1Result1 = await bundle1Getter();
+      const bundle1Result2 = await bundle1Getter();
+
+      assert.strictEqual(bundle1Result1, bundle1Result2);
     });
   });
 
