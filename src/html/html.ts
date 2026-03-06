@@ -2,15 +2,29 @@ import { getCallSites } from 'node:util';
 import { fileURLToPath } from 'node:url';
 
 import { parseHTML } from './parseHTML.ts';
-import { calculateStringByteLength, DYNAMIC_VALUE_CHARACTER_SEQUENCE_BYTE_LENGTH, getDynamicValuePlaceholderByteSequence } from './utils.ts';
+import { DYNAMIC_VALUE_CHARACTER_SEQUENCE_BYTE_LENGTH, getDynamicValuePlaceholderByteSequence } from './utils.ts';
 import { textEncoder } from '../utils/textEncoder.ts';
 import type { YetiRootNode } from './types.ts';
 import { WILDCARD_BUNDLE_NAME, type HTMLBundleImportObject, makeBundleSrcObject, makeHTMLBundleInlineObject, makeHTMLBundleImportObject } from '../bundle/bundle.ts';
 import { resolveImportPath } from '../bundle/import.ts';
 
-// Cache call site URLs by template strings array object. Tagged template literals reuse the same
-// strings array reference across calls, so this avoids a V8 stack walk on every html`` invocation.
+// Tagged template literals reuse the same strings array reference across calls (per ECMAScript spec).
+// Both caches below are keyed on that reference, so their entries are computed once per unique
+// template literal in source and reused on every subsequent render.
+
+// Caches the call site URL (avoiding a V8 stack walk on every html`` invocation).
 const callSiteCache = new WeakMap<TemplateStringsArray, string | undefined>();
+
+type CachedTemplateStatics = {
+  // Pre-encoded UTF-8 bytes for each static string segment between interpolations.
+  // Avoids re-encoding (and re-scanning for byte length) on every render.
+  encodedStrings: ReadonlyArray<Uint8Array>;
+  // Total byte length of the buffer needed: sum of encoded string lengths +
+  // one 3-byte placeholder sequence per dynamic value slot.
+  totalByteLength: number;
+};
+// Caches per-template static encoding work (byte-length calculation + UTF-8 encoding).
+const templateStaticsCache = new WeakMap<TemplateStringsArray, CachedTemplateStatics>();
 
 export const html = async (strings: TemplateStringsArray, ...values: unknown[]): Promise<YetiRootNode> => {
   // Get the file URL of the file which called this html template tag
@@ -23,20 +37,18 @@ export const html = async (strings: TemplateStringsArray, ...values: unknown[]):
     callSiteCache.set(strings, parentCallSiteURL);
   }
 
-  const stringsCount = strings.length;
-  const valuesCount = values.length;
-
-  // Pre-calculate the total length of the combined string with dynamic value placeholders
-  // to optimize memory allocation.
-  let totalByteLength = 0;
-  for (let i = 0; i < stringsCount; i++) {
-    totalByteLength += calculateStringByteLength(strings[i]);
-    if (i < valuesCount) {
-      totalByteLength += DYNAMIC_VALUE_CHARACTER_SEQUENCE_BYTE_LENGTH;
-    }
+  let statics = templateStaticsCache.get(strings);
+  if (!statics) {
+    const encodedStrings = Array.from(strings, s => textEncoder.encode(s));
+    const totalByteLength =
+      encodedStrings.reduce((sum, b) => sum + b.byteLength, 0) +
+      (strings.length - 1) * DYNAMIC_VALUE_CHARACTER_SEQUENCE_BYTE_LENGTH;
+    statics = { encodedStrings, totalByteLength };
+    templateStaticsCache.set(strings, statics);
   }
 
-  const textCharBuffer = new Uint8Array(totalByteLength);
+  const valuesCount = values.length;
+  const textCharBuffer = new Uint8Array(statics.totalByteLength);
 
   // Use a map to de-dupe dynamic values and assign them unique indices for placeholders
   const uniqueValuesIndexMap = new Map<unknown, number>();
@@ -44,11 +56,10 @@ export const html = async (strings: TemplateStringsArray, ...values: unknown[]):
 
   let offset = 0;
 
-  for (let i = 0; i < stringsCount; i++) {
-    const str = strings[i];
-
-    const { written } = textEncoder.encodeInto(str, textCharBuffer.subarray(offset));
-    offset += written;
+  for (let i = 0; i < statics.encodedStrings.length; i++) {
+    const encodedString = statics.encodedStrings[i];
+    textCharBuffer.set(encodedString, offset);
+    offset += encodedString.byteLength;
 
     if (i < valuesCount) {
       const value = values[i];
