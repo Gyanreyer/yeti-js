@@ -28,10 +28,20 @@ export const isJSTemplateResult = (obj: unknown): obj is JSTemplateResult => {
     jsTemplateResultSymbol in obj;
 };
 
+// Cache call site URLs by template strings array object. Tagged template literals reuse the same
+// strings array reference across calls, so this avoids a V8 stack walk on every js`` invocation.
+const callSiteCache = new WeakMap<TemplateStringsArray, string | undefined>();
+
 export const js = (strings: TemplateStringsArray, ...values: unknown[]): JSTemplateResult => {
   // Get the file URL of the file which called this js template tag
   // so we can use it for dependency tracking
-  const parentCallSiteURL = getCallSites()[1]?.scriptName;
+  let parentCallSiteURL: string | undefined;
+  if (callSiteCache.has(strings)) {
+    parentCallSiteURL = callSiteCache.get(strings);
+  } else {
+    parentCallSiteURL = getCallSites()[1]?.scriptName;
+    callSiteCache.set(strings, parentCallSiteURL);
+  }
 
   const rawJsBundles = new Map<string, string[]>();
   // Map of bundleName to array of import paths for that bundle{

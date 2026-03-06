@@ -24,14 +24,15 @@ const renderTextNode = (node: YetiTextNode, { shouldEscapeTextContent }: RenderC
 };
 
 const renderAttributes = (attributes: Record<string, unknown>): string => {
-  let attrStrs: string[] = [];
+  let result = "";
 
   for (const attrName in attributes) {
     const attrValue = attributes[attrName];
     switch (attrValue) {
       case true:
         // True boolean attributes should be rendered as just the attribute name (e.g. "disabled")
-        attrStrs.push(attrName);
+        if (result) result += " ";
+        result += attrName;
         break;
       case false:
       case null:
@@ -41,12 +42,13 @@ const renderAttributes = (attributes: Record<string, unknown>): string => {
       default:
         // For other values, render as key="value".
         // We'll sanitize the attribute value to ensure any " characters are properly escaped.
-        attrStrs.push(`${attrName}="${sanitizeAttributeValue(attrValue)}"`);
+        if (result) result += " ";
+        result += `${attrName}="${sanitizeAttributeValue(attrValue)}"`;
         break;
     }
   }
 
-  return attrStrs.join(" ");
+  return result;
 };
 
 const NEWLINE_REGEX = /\n/g;
@@ -85,7 +87,7 @@ const renderElementNode = (node: YetiElementNode, options: RenderChildNodeOption
     ).join(childStartIndentation)}${childEndIndentation}`;
   }
 
-  return `<${tagName}${attributes ? ` ${renderAttributes(attributes)}` : ""}>${renderedChildren}</${tagName}>`;
+  return `<${tagName}${renderedAttributes ? ` ${renderedAttributes}` : ""}>${renderedChildren}</${tagName}>`;
 };
 
 const renderChildNode = (node: YetiChildNode, options: RenderChildNodeOptions): string => {

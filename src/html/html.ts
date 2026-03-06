@@ -8,10 +8,20 @@ import type { YetiRootNode } from './types.ts';
 import { WILDCARD_BUNDLE_NAME, type HTMLBundleImportObject, makeBundleSrcObject, makeHTMLBundleInlineObject, makeHTMLBundleImportObject } from '../bundle/bundle.ts';
 import { resolveImportPath } from '../bundle/import.ts';
 
+// Cache call site URLs by template strings array object. Tagged template literals reuse the same
+// strings array reference across calls, so this avoids a V8 stack walk on every html`` invocation.
+const callSiteCache = new WeakMap<TemplateStringsArray, string | undefined>();
+
 export const html = async (strings: TemplateStringsArray, ...values: unknown[]): Promise<YetiRootNode> => {
   // Get the file URL of the file which called this html template tag
   // so we can use it for dependency tracking
-  const parentCallSiteURL = getCallSites()[1]?.scriptName;
+  let parentCallSiteURL: string | undefined;
+  if (callSiteCache.has(strings)) {
+    parentCallSiteURL = callSiteCache.get(strings);
+  } else {
+    parentCallSiteURL = getCallSites()[1]?.scriptName;
+    callSiteCache.set(strings, parentCallSiteURL);
+  }
 
   const stringsCount = strings.length;
   const valuesCount = values.length;

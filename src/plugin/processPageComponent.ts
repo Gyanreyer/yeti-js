@@ -1,6 +1,6 @@
 import { transform as transformCSS, type TransformOptions as LightningCSSTransformOptions, type CustomAtRules, transform } from "lightningcss";
 import { transform as transformJS, type TransformOptions as ESBuildTransformOptions } from 'esbuild';
-import { open, type FileHandle } from "node:fs/promises";
+import { open } from "node:fs/promises";
 
 import { getExternalBundleFilePath, isBundleSrcObject, isInlinedBundleElementNode, WILDCARD_BUNDLE_NAME } from "../bundle/bundle.ts";
 import { YETI_NODE_TYPE } from "../html/types.ts";
@@ -49,24 +49,24 @@ export const processPageComponent = async (pageComponent: YetiPageComponent, pag
   const pageDependencies = new Set<string>();
 
   if (isCSSTemplateResult(pageComponent.css)) {
-    for (const [bundleName, bundleGetter] of pageComponent.css.bundles) {
+    await Promise.all(Array.from(pageComponent.css.bundles.entries()).map(async ([bundleName, bundleGetter]) => {
       const result = await bundleGetter();
       pageCssBundleCode.set(bundleName, new Set([result.code]));
       for (const dependency of result.dependencies) {
         pageDependencies.add(dependency);
       }
-    }
+    }));
   }
   const pageJsBundleCode = new Map<string, Set<Uint8Array>>();
 
   if (isJSTemplateResult(pageComponent.js)) {
-    for (const [bundleName, bundleGetter] of pageComponent.js.bundles) {
+    await Promise.all(Array.from(pageComponent.js.bundles.entries()).map(async ([bundleName, bundleGetter]) => {
       const result = await bundleGetter();
       pageJsBundleCode.set(bundleName, new Set([result.code]));
       for (const dependency of result.dependencies) {
         pageDependencies.add(dependency);
       }
-    }
+    }));
   }
 
   const pageRootNode = await pageComponent(pageProps);
@@ -78,13 +78,13 @@ export const processPageComponent = async (pageComponent: YetiPageComponent, pag
           bundleGetters = new Set();
           pageCssBundleCode.set(bundleName, bundleGetters);
         }
-        for (const bundleGetter of bundleGetterSet) {
+        await Promise.all(Array.from(bundleGetterSet).map(async (bundleGetter) => {
           const result = await bundleGetter();
           bundleGetters.add(result.code);
           for (const dependency of result.dependencies) {
             pageDependencies.add(dependency);
           }
-        }
+        }));
       }
     }
     if (pageRootNode.assets.js) {
@@ -94,13 +94,13 @@ export const processPageComponent = async (pageComponent: YetiPageComponent, pag
           bundleGetters = new Set();
           pageJsBundleCode.set(bundleName, bundleGetters);
         }
-        for (const bundleGetter of bundleGetterSet) {
+        await Promise.all(Array.from(bundleGetterSet).map(async (bundleGetter) => {
           const result = await bundleGetter();
           bundleGetters.add(result.code);
           for (const dependency of result.dependencies) {
             pageDependencies.add(dependency);
           }
-        }
+        }));
       }
     }
     if (pageRootNode.assets.html?.dependencies) {
@@ -190,32 +190,24 @@ export const processPageComponent = async (pageComponent: YetiPageComponent, pag
       return null;
     }
 
-    const fileHandles = new Array<FileHandle>(bundleImportPathsSet.size);
-    let bundleContentBuffer: Uint8Array;
-
+    // Open all file handles and stat them in parallel, then read sequentially into a pre-allocated buffer
+    const fileEntries = await Promise.all(
+      Array.from(bundleImportPathsSet).map(async (importPath) => {
+        const fh = await open(importPath, "r");
+        const { size } = await fh.stat();
+        return { fh, size };
+      })
+    );
+    const bundleByteLength = fileEntries.reduce((sum, { size }) => sum + size, 0);
+    const bundleContentBuffer = new Uint8Array(bundleByteLength);
     try {
-      let handleIndex = 0;
-
-      let bundleByteLength = 0;
-      for (const importPath of bundleImportPathsSet) {
-        const fileHandle = await open(importPath, "r");
-        const stats = await fileHandle.stat();
-        bundleByteLength += stats.size;
-        fileHandles[handleIndex++] = fileHandle;
-      }
-
-      bundleContentBuffer = new Uint8Array(bundleByteLength);
       let offset = 0;
-      for (const fileHandle of fileHandles) {
-        const { bytesRead } = await fileHandle.read(bundleContentBuffer, offset);
-        offset += bytesRead;
+      for (const { fh, size } of fileEntries) {
+        await fh.read(bundleContentBuffer, offset, size);
+        offset += size;
       }
     } finally {
-      for (const fileHandle of fileHandles) {
-        if (fileHandle) {
-          await fileHandle.close();
-        }
-      }
+      await Promise.all(fileEntries.map(({ fh }) => fh.close()));
     }
 
     let parsedBundleRootNode = await parseHTML(bundleContentBuffer);
@@ -392,17 +384,17 @@ export const processPageComponent = async (pageComponent: YetiPageComponent, pag
     }
 
     if ((node.type === YETI_NODE_TYPE.ROOT || node.type === YETI_NODE_TYPE.ELEMENT) && node.children) {
-      // Recursively process child nodes
-      for (let i = 0; i < node.children.length; i++) {
-        const childNode = node.children[i];
-        const result = await processTreeNode(childNode, node);
+      // Recursively process child nodes in parallel — children are independent of each other
+      const childResults = await Promise.all(node.children.map(child => processTreeNode(child, node)));
+      const newChildren: YetiChildNode[] = [];
+      for (const result of childResults) {
         if (Array.isArray(result)) {
-          node.children.splice(i, 1, ...result);
-          i += result.length - 1;
+          newChildren.push(...result);
         } else {
-          node.children[i] = result;
+          newChildren.push(result);
         }
       }
+      node.children = newChildren;
     }
 
     return node;
@@ -500,7 +492,11 @@ export const processPageComponent = async (pageComponent: YetiPageComponent, pag
         }
       }
 
-      parent.children.splice(parentChildIndex, 1, ...replacementNodes);
+      if (replacementNodes.length === 1) {
+        parent.children[parentChildIndex] = replacementNodes[0];
+      } else {
+        parent.children.splice(parentChildIndex, 1, ...replacementNodes);
+      }
       // We've consumed all the bundles for this wildcard node, so we can clear
       // the set to prevent any future wildcard nodes from using the same bundles
       bundleNamesToUse.clear();

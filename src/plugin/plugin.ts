@@ -3,7 +3,7 @@ import { transform as transformCSS } from 'lightningcss';
 import { transform as transformJS } from 'esbuild';
 
 import { resolve, join } from 'node:path';
-import { open, type FileHandle } from 'node:fs/promises';
+import { open } from 'node:fs/promises';
 
 import { updateConfig, type YetiConfig } from '../config.ts';
 import { logError } from '../log.ts';
@@ -134,95 +134,89 @@ export const yetiPlugin = (eleventyConfig: EleventyUserConfig, userConfig: Parti
       }
     }
 
-    for (const [bundleName, bundleContents] of Object.entries(combinedCSSBundleContents)) {
-      let combinedContentsByteSize = 0;
-      for (const content of bundleContents) {
-        combinedContentsByteSize += content.byteLength;
-      }
-
-      const combinedCodeBytes = new Uint8Array(combinedContentsByteSize);
-      let offset = 0;
-      for (const content of bundleContents) {
-        combinedCodeBytes.set(content, offset);
-        offset += content.byteLength;
-      }
-
-      const outputFilePath = config.css.deriveBundleFilePath(bundleName);
-
-      const transformConfig = config.css.deriveBundleTransformConfig(bundleName, config.css.defaultBundleTransformConfig);
-      const { code } = transformCSS({
-        ...transformConfig,
-        code: combinedCodeBytes,
-        filename: outputFilePath,
-      });
-
-      await safeWriteFile(join(output, outputFilePath), code);
-    }
-
-    for (const [bundleName, bundleContents] of Object.entries(combinedJSBundleContents)) {
-      let combinedContentsByteSize = 0;
-      for (const content of bundleContents) {
-        combinedContentsByteSize += content.byteLength;
-      }
-
-      const combinedCodeBytes = new Uint8Array(combinedContentsByteSize);
-      let offset = 0;
-      for (const content of bundleContents) {
-        combinedCodeBytes.set(content, offset);
-        offset += content.byteLength;
-      }
-
-      const outputFilePath = config.js.deriveBundleFilePath(bundleName);
-
-      const transformConfig = config.js.deriveBundleTransformConfig(bundleName, config.js.defaultBundleTransformConfig);
-      const transformResult = await transformJS(combinedCodeBytes, transformConfig);
-
-      await safeWriteFile(join(output, outputFilePath), transformResult.code);
-    }
-
-    for (const [bundleName, importPaths] of Object.entries(combinedHTMLImportPaths)) {
-      const outputFilePath = config.html.deriveBundleFilePath(bundleName);
-
-      const fileHandles = new Array<FileHandle>(importPaths.size);
-      let combinedBundleBytes: Uint8Array;
-
-      try {
-        let handleIndex = 0;
-        let bundleByteLength = 0;
-        for (const importPath of importPaths) {
-          const fileHandle = await open(importPath, "r");
-          const stats = await fileHandle.stat();
-          bundleByteLength += stats.size;
-          fileHandles[handleIndex++] = fileHandle;
+    await Promise.all([
+      ...Object.entries(combinedCSSBundleContents).map(async ([bundleName, bundleContents]) => {
+        let combinedContentsByteSize = 0;
+        for (const content of bundleContents) {
+          combinedContentsByteSize += content.byteLength;
         }
 
-        combinedBundleBytes = new Uint8Array(bundleByteLength);
+        const combinedCodeBytes = new Uint8Array(combinedContentsByteSize);
         let offset = 0;
-        for (const fileHandle of fileHandles) {
-          const { bytesRead } = await fileHandle.read(combinedBundleBytes, offset);
-          offset += bytesRead;
+        for (const content of bundleContents) {
+          combinedCodeBytes.set(content, offset);
+          offset += content.byteLength;
         }
-      } finally {
-        for (const fileHandle of fileHandles) {
-          await fileHandle.close();
+
+        const outputFilePath = config.css.deriveBundleFilePath(bundleName);
+
+        const transformConfig = config.css.deriveBundleTransformConfig(bundleName, config.css.defaultBundleTransformConfig);
+        const { code } = transformCSS({
+          ...transformConfig,
+          code: combinedCodeBytes,
+          filename: outputFilePath,
+        });
+
+        await safeWriteFile(join(output, outputFilePath), code);
+      }),
+      ...Object.entries(combinedJSBundleContents).map(async ([bundleName, bundleContents]) => {
+        let combinedContentsByteSize = 0;
+        for (const content of bundleContents) {
+          combinedContentsByteSize += content.byteLength;
         }
-      }
 
-      const transformConfig = config.html.deriveBundleTransformConfig(bundleName, config.html.defaultBundleTransformConfig);
-      let parsedBundleRootNode = await parseHTML(combinedBundleBytes);
-      if (transformConfig.processNodeTree) {
-        parsedBundleRootNode = await transformConfig.processNodeTree(parsedBundleRootNode);
-        if (!isYetiNode(parsedBundleRootNode) || parsedBundleRootNode.type !== YETI_NODE_TYPE.ROOT) {
-          throw new Error(`Expected processNodeTree function to return a YetiRootNode for bundle ${bundleName}. Received: ${JSON.stringify(parsedBundleRootNode)}`);
+        const combinedCodeBytes = new Uint8Array(combinedContentsByteSize);
+        let offset = 0;
+        for (const content of bundleContents) {
+          combinedCodeBytes.set(content, offset);
+          offset += content.byteLength;
         }
-      }
 
-      const renderedHTML = renderHTML(parsedBundleRootNode, {
-        indentation: transformConfig.minify ? null : "  ",
-      });
+        const outputFilePath = config.js.deriveBundleFilePath(bundleName);
 
-      const writeFilePath = join(output, outputFilePath);
-      await safeWriteFile(writeFilePath, renderedHTML);
-    }
+        const transformConfig = config.js.deriveBundleTransformConfig(bundleName, config.js.defaultBundleTransformConfig);
+        const transformResult = await transformJS(combinedCodeBytes, transformConfig);
+
+        await safeWriteFile(join(output, outputFilePath), transformResult.code);
+      }),
+      ...Object.entries(combinedHTMLImportPaths).map(async ([bundleName, importPaths]) => {
+        const outputFilePath = config.html.deriveBundleFilePath(bundleName);
+
+        // Open all file handles and stat them in parallel, then read sequentially into a pre-allocated buffer
+        const fileEntries = await Promise.all(
+          Array.from(importPaths).map(async (importPath) => {
+            const fh = await open(importPath, "r");
+            const { size } = await fh.stat();
+            return { fh, size };
+          })
+        );
+        const bundleByteLength = fileEntries.reduce((sum, { size }) => sum + size, 0);
+        const combinedBundleBytes = new Uint8Array(bundleByteLength);
+        try {
+          let offset = 0;
+          for (const { fh, size } of fileEntries) {
+            await fh.read(combinedBundleBytes, offset, size);
+            offset += size;
+          }
+        } finally {
+          await Promise.all(fileEntries.map(({ fh }) => fh.close()));
+        }
+
+        const transformConfig = config.html.deriveBundleTransformConfig(bundleName, config.html.defaultBundleTransformConfig);
+        let parsedBundleRootNode = await parseHTML(combinedBundleBytes);
+        if (transformConfig.processNodeTree) {
+          parsedBundleRootNode = await transformConfig.processNodeTree(parsedBundleRootNode);
+          if (!isYetiNode(parsedBundleRootNode) || parsedBundleRootNode.type !== YETI_NODE_TYPE.ROOT) {
+            throw new Error(`Expected processNodeTree function to return a YetiRootNode for bundle ${bundleName}. Received: ${JSON.stringify(parsedBundleRootNode)}`);
+          }
+        }
+
+        const renderedHTML = renderHTML(parsedBundleRootNode, {
+          indentation: transformConfig.minify ? null : "  ",
+        });
+
+        await safeWriteFile(join(output, outputFilePath), renderedHTML);
+      }),
+    ]);
   });
 }
