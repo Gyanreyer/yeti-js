@@ -344,7 +344,7 @@ export const processPageComponent = async (pageComponent: YetiPageComponent, pag
           } else {
             const getSrcValueForBundle = () => {
               const bundleFilePath = getExternalBundleFilePath(bundleName, assetType);
-              return attrValue.transformSrc ? attrValue.transformSrc(bundleFilePath) : bundleFilePath;
+              return `${attrValue.beforeContent ?? ""}${bundleFilePath}${attrValue.afterContent ?? ""}`;
             };
 
             switch (assetType) {

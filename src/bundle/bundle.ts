@@ -121,21 +121,23 @@ export interface BundleSrcObject<TAssetType extends AssetType, TBundleName exten
    */
   bundleName: TBundleName;
   /**
-   * Callback called with the base src string for the bundle and returns the final src string to be used in the HTML.
-   * This can be used to do things like add a cache-busting query parameter to the bundle file path.
+   * Optional string representing content that should be prepended before the bundle src
+   * value when this object is processed. (ie, a domain name)
    */
-  transformSrc?: (src: string) => string;
+  beforeContent?: string;
+  /**
+   * Optional string representing content that should be appended after the bundle src
+   * value when this object is processed. (ie, a query param or hash to append to the bundle file path)
+   */
+  afterContent?: string;
 }
 
-export const makeBundleSrcObject = <TAssetType extends AssetType, TBundleName extends string>(assetType: TAssetType, bundleName: TBundleName, options?: { transformSrc?: (src: string) => string }): BundleSrcObject<TAssetType, TBundleName> => {
+export const makeBundleSrcObject = <TAssetType extends AssetType, TBundleName extends string>(assetType: TAssetType, bundleName: TBundleName): BundleSrcObject<TAssetType, TBundleName> => {
   const srcObject: BundleSrcObject<TAssetType, TBundleName> = {
     [BUNDLE_TYPE]: "src",
     assetType,
     bundleName,
   };
-  if (options?.transformSrc) {
-    srcObject.transformSrc = options.transformSrc;
-  }
   return srcObject;
 };
 

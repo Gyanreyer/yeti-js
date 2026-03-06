@@ -113,6 +113,4 @@ html.import = (importPath: string, options: {
 
 html.inline = <TBundleName extends string>(bundleName: TBundleName, options?: { shouldEscape?: boolean }) => makeHTMLBundleInlineObject(bundleName, options);
 
-html.src = <TBundleName extends string>(bundleName: TBundleName, transformSrc?: (src: string) => string) => makeBundleSrcObject("html", bundleName, {
-  transformSrc,
-});
+html.src = <TBundleName extends string>(bundleName: TBundleName) => makeBundleSrcObject("html", bundleName);

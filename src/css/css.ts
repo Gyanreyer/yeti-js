@@ -209,4 +209,4 @@ css.import = (importPath: string, bundleName?: string) => {
 
 css.inline = <TBundleName extends string>(bundleName: TBundleName) => makeCssOrJsBundleInlineObject("css", bundleName);
 
-css.src = <TBundleName extends string>(bundleName: TBundleName, transformSrc?: (src: string) => string) => makeBundleSrcObject("css", bundleName, { transformSrc });
+css.src = <TBundleName extends string>(bundleName: TBundleName) => makeBundleSrcObject("css", bundleName);

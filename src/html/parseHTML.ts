@@ -6,10 +6,11 @@ import type { YetiRootNode, YetiElementNode, YetiCommentNode, YetiDoctypeNode, Y
 import { YetiHTMLParsingError } from "../error.ts";
 import { cleanUpChildWhitespace, isVoidTag, isYetiNode } from "./utils.ts";
 import { textEncoder } from "../utils/textEncoder.ts";
-import { isBundleImportObject, isBundleInlineObject, makeBundleInlineElementNode } from "../bundle/bundle.ts";
+import { isBundleImportObject, isBundleInlineObject, isBundleSrcObject, makeBundleInlineElementNode } from "../bundle/bundle.ts";
 import { mergeBundleSetMaps, mergeSets } from "../bundle/mergeBundleContents.ts";
 import { isCSSTemplateResult } from "../css/css.ts";
 import { isJSTemplateResult } from "../js/js.ts";
+import { getConfig } from "../config.ts";
 
 // Node type to identify a component node
 const COMPONENT_NODE_TYPE = 1000;
@@ -162,18 +163,30 @@ export const parseHTML = async (htmlStringChars: Uint8Array, dynamicValues: unkn
           }
         } else {
           // Read the file contents and figure out what to do with them
-          const fileContents = await readFile(unwrappedContent.importPath, "utf-8");
+          const rawFileContents = await readFile(unwrappedContent.importPath, "utf-8");
+          const processImport = getConfig().html.processImport;
+          const processImportResult = processImport ? await processImport(unwrappedContent.importPath, rawFileContents) : rawFileContents;
           // If no bundle name is specified, we will insert the imported HTML content directly into the tree at the location of the import statement.
-          if (unwrappedContent.options?.shouldEscape) {
-            // If the shouldEscape option is true, we will insert the raw HTML text as a text node
-            await appendContentToNode(parent, {
-              type: YETI_NODE_TYPE.TEXT,
-              content: fileContents,
-            });
+          if (isYetiNode(processImportResult)) {
+            // If processImport returned a YetiRootNode, use it directly to skip redundant parsing
+            await appendContentToNode(parent, processImportResult);
+          } else if (typeof processImportResult === "string") {
+            if (unwrappedContent.options?.shouldEscape) {
+              // If the shouldEscape option is true, we will insert the raw HTML text as a text node
+              await appendContentToNode(parent, {
+                type: YETI_NODE_TYPE.TEXT,
+                content: processImportResult,
+              });
+            } else {
+              // If the shouldEscape option is false, we will parse the imported HTML content and insert the resulting nodes directly into the tree
+              const parsedImportedHTML = await parseHTML(textEncoder.encode(processImportResult), []);
+              await appendContentToNode(parent, parsedImportedHTML);
+            }
+          } else if (processImportResult === null || processImportResult === undefined) {
+            // If processImport returned null or undefined, we will just skip the import and not insert anything into the tree.
+            return;
           } else {
-            // If the shouldEscape option is false, we will parse the imported HTML content and insert the resulting nodes directly into the tree
-            const parsedImportedHTML = await parseHTML(textEncoder.encode(fileContents), []);
-            await appendContentToNode(parent, parsedImportedHTML);
+            throw new YetiHTMLParsingError(`Unsupported return type from html.processImport for import at path "${unwrappedContent.importPath}". Expected a string or YetiNode, but got type "${typeof processImportResult}".`);
           }
         }
         return;
@@ -414,7 +427,20 @@ export const parseHTML = async (htmlStringChars: Uint8Array, dynamicValues: unkn
           const currentAttrValue = currentParent.attributes[openAttributeName];
           // Concatenate the new value with the existing value. ATTR_VALUE tokens can represent multiple parts of the
           // same attribute value if there is a mix of dynamic and static content
-          currentParent.attributes[openAttributeName] = String(currentAttrValue) + String(tokenValue);
+          if (isBundleSrcObject(tokenValue)) {
+            // For a bundle src object, we want to be able to concatenate the resolved
+            // src value with the strings surrounding it
+            tokenValue.beforeContent = String(currentAttrValue);
+            currentParent.attributes[openAttributeName] = tokenValue;
+          } else if (isBundleSrcObject(currentAttrValue)) {
+            // If the current attribute value is already a bundle src object,
+            // we want to concatenate the new value to the end of the resolved src value
+            currentAttrValue.afterContent ??= "";
+            currentAttrValue.afterContent += String(tokenValue);
+          } else {
+            // For anything else, just convert the old and new values to strings and concatenate them
+            currentParent.attributes[openAttributeName] = String(currentAttrValue) + String(tokenValue);
+          }
         } else {
           currentParent.attributes[openAttributeName] = tokenValue;
         }

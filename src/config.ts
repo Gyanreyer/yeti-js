@@ -1,7 +1,7 @@
 import type { CustomAtRules, TransformOptions as LightningCSSTransformOptions } from 'lightningcss';
 import type { TransformOptions as EsbuildTransformOptions } from 'esbuild';
 
-import { type YetiRootNode } from './html/types.ts';
+import { YetiNode, type YetiRootNode } from './html/types.ts';
 import type { DeepPartial } from './utils/utilityTypes.ts';
 
 export type JSBundleTransformConfig = Omit<EsbuildTransformOptions, "sourcefile" | "sourcesContent" | "sourceRoot">;
@@ -172,7 +172,34 @@ export type YetiConfig = {
     deriveBundleFilePath: (bundleName: string) => string;
     defaultBundleTransformConfig: HTMLBundleTransformConfig;
     deriveBundleTransformConfig: (bundleName: string, defaultConfig: HTMLBundleTransformConfig) => HTMLBundleTransformConfig;
-
+    /**
+     * Hook to apply custom processing to the raw content of directly imported files (i.e. `html.import()` calls without a `bundleName`).
+     * Called with the resolved file path and raw file content string before the content is parsed as HTML.
+     * Return a transformed string which will be used in place of the raw file content.
+     *
+     * This is useful for pre-processing files in formats other than HTML, such as Markdown.
+     *
+     * @param {string} importPath - The absolute resolved path of the imported file
+     * @param {string} content - The raw content of the imported file
+     * @returns {string | Promise<string>} The transformed content to use instead
+     *
+     * @example Parsing Markdown imports as HTML
+     * ```ts
+     * import { marked } from 'marked';
+     *
+     * eleventyConfig.addPlugin(yetiPlugin, {
+     *   html: {
+     *     processImport: (importPath, content) => {
+     *       if (importPath.endsWith('.md')) {
+     *         return marked.parse(content);
+     *       }
+     *       return content;
+     *     },
+     *   },
+     * });
+     * ```
+     */
+    processImport?: (importPath: string, content: string) => string | YetiRootNode | Promise<string | YetiNode>;
   };
   /**
    * The file extension used for Yeti page template files.

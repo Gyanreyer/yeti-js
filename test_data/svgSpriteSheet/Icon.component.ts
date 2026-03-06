@@ -5,6 +5,6 @@ export const Icon: YetiComponent<{
 }> = ({ name }) => {
   return html`${html.import(`./icons/${name}.svg`, { bundleName: "icons" })}
   <svg>
-    <use href="${html.src("icons", (src) => `${src.replace(".html", ".svg")}#${name}`)}" />
+    <use href="${html.src("icons")}#${name}" />
   </svg>`;
 };
