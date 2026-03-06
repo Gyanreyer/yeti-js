@@ -342,11 +342,15 @@ export const processPageComponent = async (pageComponent: YetiPageComponent, pag
               });
             }
           } else {
+            const getSrcValueForBundle = () => {
+              const bundleFilePath = getExternalBundleFilePath(bundleName, assetType);
+              return attrValue.transformSrc ? attrValue.transformSrc(bundleFilePath) : bundleFilePath;
+            };
+
             switch (assetType) {
               case "css": {
                 if (pageCssBundleCode.has(bundleName)) {
-                  const bundleFilePath = getExternalBundleFilePath(bundleName, assetType);
-                  node.attributes[attrName] = bundleFilePath;
+                  node.attributes[attrName] = getSrcValueForBundle();
                   usedCSSBundleNames.add(bundleName);
                 } else {
                   delete node.attributes[attrName];
@@ -356,8 +360,7 @@ export const processPageComponent = async (pageComponent: YetiPageComponent, pag
               }
               case "js": {
                 if (pageJsBundleCode.has(bundleName)) {
-                  const bundleFilePath = getExternalBundleFilePath(bundleName, assetType);
-                  node.attributes[attrName] = bundleFilePath;
+                  node.attributes[attrName] = getSrcValueForBundle();
                   usedJSBundleNames.add(bundleName);
                 } else {
                   delete node.attributes[attrName];
@@ -367,8 +370,7 @@ export const processPageComponent = async (pageComponent: YetiPageComponent, pag
               }
               case "html": {
                 if (htmlBundleImportPaths.has(bundleName)) {
-                  const bundleFilePath = getExternalBundleFilePath(bundleName, assetType);
-                  node.attributes[attrName] = bundleFilePath;
+                  node.attributes[attrName] = getSrcValueForBundle();
                   usedHTMLBundleNames.add(bundleName);
                 } else {
                   delete node.attributes[attrName];

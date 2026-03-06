@@ -120,13 +120,24 @@ export interface BundleSrcObject<TAssetType extends AssetType, TBundleName exten
    * The name of the bundle which should be written to an external file and whose file path should be placed at this location in the HTML.
    */
   bundleName: TBundleName;
+  /**
+   * Callback called with the base src string for the bundle and returns the final src string to be used in the HTML.
+   * This can be used to do things like add a cache-busting query parameter to the bundle file path.
+   */
+  transformSrc?: (src: string) => string;
 }
 
-export const makeBundleSrcObject = <TAssetType extends AssetType, TBundleName extends string>(assetType: TAssetType, bundleName: TBundleName): BundleSrcObject<TAssetType, TBundleName> => ({
-  [BUNDLE_TYPE]: "src",
-  assetType,
-  bundleName,
-});
+export const makeBundleSrcObject = <TAssetType extends AssetType, TBundleName extends string>(assetType: TAssetType, bundleName: TBundleName, options?: { transformSrc?: (src: string) => string }): BundleSrcObject<TAssetType, TBundleName> => {
+  const srcObject: BundleSrcObject<TAssetType, TBundleName> = {
+    [BUNDLE_TYPE]: "src",
+    assetType,
+    bundleName,
+  };
+  if (options?.transformSrc) {
+    srcObject.transformSrc = options.transformSrc;
+  }
+  return srcObject;
+};
 
 interface BundleImportObject<TAssetType extends AssetType> extends BaseBundleObject<TAssetType, "import"> {
   /**

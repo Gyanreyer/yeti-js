@@ -11,8 +11,10 @@ import {
   Eleventy
 } from "@11ty/eleventy";
 import type UserConfig from '@11ty/eleventy/src/UserConfig.js';
-import type { YetiConfig } from '../config.ts';
+
+import type { HTMLBundleTransformConfig, YetiConfig } from '../config.ts';
 import type { DeepPartial } from '../utils/utilityTypes.ts';
+import { YETI_NODE_TYPE, type YetiRootNode, type YetiElementNode } from "../html/types.ts";
 
 import { yetiPlugin } from "./plugin.ts";
 
@@ -39,7 +41,7 @@ const getEleventyInstance = (inputDir: string, outputDir: string, config: DeepPa
 /**
  * @param {string} inputDirPath
  */
-const testInputDir = async (inputDirPath: string) => {
+const testInputDir = async (inputDirPath: string, config: DeepPartial<YetiConfig> = {}) => {
   const resolvedInputDir = fileURLToPath(import.meta.resolve(inputDirPath));
   const siteOutputDir = resolve(
     resolvedInputDir,
@@ -72,6 +74,7 @@ const testInputDir = async (inputDirPath: string) => {
         minify: false,
       },
     },
+    ...config,
   });
   await eleventy.write();
   const actualSiteFiles = (await Array.fromAsync(glob(`${siteOutputDir}/**/*.*`))).map((filePath) =>
@@ -111,5 +114,62 @@ describe("Yeti Plugin", () => {
 
   test("Page with HTML Bundle Inline", async () => {
     await testInputDir("../../test_data/pageWithHTMLBundleInline");
+  });
+
+  test("SVG sprite sheets with HTML bundle transform", async () => {
+    await testInputDir("../../test_data/svgSpriteSheet", {
+      html: {
+        minify: false,
+        deriveBundleFilePath: (bundleName: string) => {
+          if (bundleName === "icons") {
+            return "/assets/icons.svg";
+          }
+        },
+        defaultBundleTransformConfig: {
+          minify: false,
+        },
+        deriveBundleTransformConfig: (bundleName: string, defaultConfig: HTMLBundleTransformConfig) => {
+          if (bundleName === "icons") {
+            return {
+              ...defaultConfig,
+              processNodeTree: (rawRootNode: YetiRootNode) => {
+                const defsElement: YetiElementNode = {
+                  type: YETI_NODE_TYPE.ELEMENT,
+                  tagName: "defs",
+                  attributes: {},
+                  children: [],
+                };
+
+                for (const childNode of rawRootNode.children) {
+                  if (childNode.type === YETI_NODE_TYPE.ELEMENT && childNode.tagName === "svg") {
+                    defsElement.children!.push({
+                      type: YETI_NODE_TYPE.ELEMENT,
+                      tagName: "symbol",
+                      attributes: {
+                        viewBox: childNode.attributes?.viewBox,
+                        id: childNode.attributes?.id,
+                      },
+                      children: childNode.children,
+                    });
+                  }
+                }
+
+                return {
+                  type: YETI_NODE_TYPE.ROOT,
+                  children: [{
+                    type: YETI_NODE_TYPE.ELEMENT,
+                    tagName: "svg",
+                    attributes: {
+                      xmlns: "http://www.w3.org/2000/svg",
+                    },
+                    children: [defsElement],
+                  }],
+                };
+              },
+            };
+          }
+        },
+      },
+    });
   });
 });
