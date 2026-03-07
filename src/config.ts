@@ -1,7 +1,7 @@
 import type { CustomAtRules, TransformOptions as LightningCSSTransformOptions } from 'lightningcss';
 import type { TransformOptions as EsbuildTransformOptions } from 'esbuild';
 
-import { YetiNode, type YetiRootNode } from './html/types.ts';
+import type { YetiNode, YetiRootNode } from './html/types.ts';
 import type { DeepPartial } from './utils/utilityTypes.ts';
 
 export type JSBundleTransformConfig = Omit<EsbuildTransformOptions, "sourcefile" | "sourcesContent" | "sourceRoot">;
@@ -208,6 +208,8 @@ export type YetiConfig = {
   pageTemplateFileExtension: string | string[];
 }
 
+export type PartialYetiConfig = DeepPartial<YetiConfig>;
+
 const config: YetiConfig = {
   inputDir: "",
   outputDir: "",
@@ -263,7 +265,7 @@ const mergeConfigs = <T extends Record<string, any>>(baseConfig: T, newConfig: D
 /**
  * Merges new config settings into the base Yeti config.
  */
-export const updateConfig = (newConfig: DeepPartial<YetiConfig>) => {
+export const updateConfig = (newConfig: PartialYetiConfig) => {
   const merged = mergeConfigs(config, newConfig);
   return Object.assign(config, merged);
 };
