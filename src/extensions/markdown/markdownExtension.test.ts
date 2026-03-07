@@ -125,7 +125,7 @@ describe("parseMarkdown", () => {
       const code = pre.children?.[0];
       assert.ok(code?.type === YETI_NODE_TYPE.ELEMENT);
       assert.strictEqual((code as any).tagName, "code");
-      assert.deepStrictEqual((code as any).attributes, { class: "language-js" });
+      assert.deepStrictEqual((code as any).attributes, { "data-lang": "js", class: "language-js" });
       assert.deepStrictEqual((code as any).children, [{ type: YETI_NODE_TYPE.TEXT, content: "console.log('hi');" }]);
     });
 
