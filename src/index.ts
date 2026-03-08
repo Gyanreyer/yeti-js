@@ -1,5 +1,5 @@
 // Site utils
-export * from "./extensions/markdown/markdownExtension.ts";
+export * from "./markdown/parseMarkdown.ts";
 export * from "./html/html.ts";
 export * from './html/types.ts';
 export * from "./css/css.ts";

@@ -1,8 +1,8 @@
 import { describe, test } from "node:test";
 import assert from "node:assert/strict";
-import { parseMarkdown } from "./markdownExtension.ts";
-import { YETI_NODE_TYPE } from "../../html/types.ts";
-import type { YetiRootNode } from "../../html/types.ts";
+import { parseMarkdown } from "./parseMarkdown.ts";
+import { YETI_NODE_TYPE } from "../html/types.ts";
+import type { YetiRootNode } from "../html/types.ts";
 
 describe("parseMarkdown", () => {
   describe("headings", () => {

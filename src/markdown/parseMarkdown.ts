@@ -1,9 +1,9 @@
 import { Lexer } from "marked";
 import type { Token, MarkedToken } from "marked";
-import { parseHTML } from "../../html/parseHTML.ts";
-import { textEncoder } from "../../utils/textEncoder.ts";
-import { YETI_NODE_TYPE } from "../../html/types.ts";
-import type { YetiRootNode, YetiChildNode, YetiTextNode, YetiElementNode } from "../../html/types.ts";
+import { parseHTML } from "../html/parseHTML.ts";
+import { textEncoder } from "../utils/textEncoder.ts";
+import { YETI_NODE_TYPE } from "../html/types.ts";
+import type { YetiRootNode, YetiChildNode, YetiTextNode, YetiElementNode } from "../html/types.ts";
 
 const el = (
   tagName: string,
