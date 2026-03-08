@@ -26,6 +26,11 @@ Some *italic* text (or _this_ also works)
 2. List
 3. Items
 
+- [ ] Checkbox
+- [ ] TODO
+- [x] Done
+- [ ] Not yet
+
 #### Title Level 4
 
 Some `inline code` here.

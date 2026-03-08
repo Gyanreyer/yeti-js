@@ -95,6 +95,28 @@ describe("renderHTML", () => {
   });
 
   describe("pretty printing", () => {
+    test("does not add line breaks around inline elements mixed with text", async () => {
+      const htmlRoot = await html`<div>
+  <p>Hello <strong>world</strong> and <em>everyone</em>!</p>
+</div>`;
+      const result = renderHTML(htmlRoot, { indentation: "  " });
+
+      assert.strictEqual(
+        result,
+        `<div>\n  <p>Hello <strong>world</strong> and <em>everyone</em>!</p>\n</div>`
+      );
+    });
+
+    test("adds line breaks if the first child is an element", async () => {
+      const htmlRoot = await html`<p><a href="/about">About <span>us</span></a></p>`;
+      const result = renderHTML(htmlRoot, { indentation: "  " });
+
+      assert.strictEqual(
+        result,
+        "<p>\n  <a href=\"/about\">About <span>us</span></a>\n</p>"
+      );
+    });
+
     test("renders with indentation and newlines", async () => {
       const htmlRoot = await html`<!DOCTYPE html>
 <html>

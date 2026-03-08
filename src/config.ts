@@ -248,7 +248,7 @@ const isObject = (value: unknown): value is Record<string, any> => {
 /**
  * Deeply merges two config objects, with values from the new config taking precedence over the base config.
  */
-const mergeConfigs = <T extends Record<string, any>>(baseConfig: T, newConfig: DeepPartial<T>): T => {
+export const mergeConfigs = <T extends Record<string, any>>(baseConfig: T, newConfig: DeepPartial<T>): T => {
   const mergedConfig = { ...baseConfig };
   for (const key in newConfig) {
     const newValue = newConfig[key] as any;

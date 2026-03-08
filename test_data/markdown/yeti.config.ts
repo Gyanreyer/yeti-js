@@ -3,6 +3,10 @@ import { parseMarkdown } from "../../src/index.ts";
 
 const config: PartialYetiConfig = {
   html: {
+    minify: false,
+    defaultBundleTransformConfig: {
+      minify: false,
+    },
     processImport(importPath, content) {
       if (importPath.endsWith(".md")) {
         return parseMarkdown(content);
@@ -11,3 +15,5 @@ const config: PartialYetiConfig = {
     }
   }
 }
+
+export default config;
