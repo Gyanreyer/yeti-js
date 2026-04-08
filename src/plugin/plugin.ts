@@ -2,7 +2,7 @@ import type EleventyUserConfig from '@11ty/eleventy/src/UserConfig.js';
 import { transform as transformCSS } from 'lightningcss';
 import { transform as transformJS } from 'esbuild';
 
-import { resolve, join } from 'node:path';
+import { resolve, join, matchesGlob } from 'node:path';
 import { open } from 'node:fs/promises';
 
 import { updateConfig, type YetiConfig } from '../config.ts';
@@ -14,6 +14,12 @@ import { renderHTML } from '../html/renderHTML.ts';
 import { processPageComponent } from './processPageComponent.ts';
 import { parseHTML } from '../html/parseHTML.ts';
 import { safeWriteFile } from '../utils/safeWriteFile.ts';
+import {
+  resetUsedExternalSpecifiers,
+  getUsedExternalSpecifiers,
+  buildSingleExternalBundle,
+  buildCodeSplitExternalBundles
+} from '../js/externalDependencies.ts';
 
 export const yetiPlugin = (eleventyConfig: EleventyUserConfig, userConfig: Partial<YetiConfig> = {}) => {
   // Update the Yeti config with any user-provided values
@@ -39,6 +45,8 @@ export const yetiPlugin = (eleventyConfig: EleventyUserConfig, userConfig: Parti
       quietMode: eleventyConfig.quietMode,
       ...userConfig,
     });
+
+    resetUsedExternalSpecifiers();
   });
 
   eleventyConfig.addTemplateFormats(config.pageTemplateFileExtension);
@@ -218,5 +226,59 @@ export const yetiPlugin = (eleventyConfig: EleventyUserConfig, userConfig: Parti
         await safeWriteFile(join(output, outputFilePath), renderedHTML);
       }),
     ]);
+
+    // Build and write external dependency bundles
+    const { externalDependencies } = config.js;
+    if (externalDependencies) {
+      const usedSpecifiers = getUsedExternalSpecifiers();
+      if (usedSpecifiers.size > 0) {
+        // Group used specifiers by which config entry pattern they matched
+        const entries = Object.entries(externalDependencies);
+
+        // Map of config entry pattern → { outputTarget, specifiers }
+        const groups = new Map<string, { outputTarget: string; specifiers: string[] }>();
+        for (const specifier of usedSpecifiers) {
+          for (const [pattern, outputTarget] of entries) {
+            if (matchesGlob(specifier, pattern)) {
+              let group = groups.get(pattern);
+              if (!group) {
+                group = { outputTarget, specifiers: [] };
+                groups.set(pattern, group);
+              }
+              group.specifiers.push(specifier);
+              break;
+            }
+          }
+        }
+
+        await Promise.all(
+          Array.from(groups.entries()).map(async ([pattern, { outputTarget, specifiers }]) => {
+            const isDirectory = outputTarget.endsWith('/');
+
+            if (isDirectory) {
+              const outputFiles = await buildCodeSplitExternalBundles(
+                specifiers,
+                outputTarget,
+                externalDependencies,
+                output,
+              );
+              await Promise.all(
+                outputFiles.map(file => safeWriteFile(file.path, file.contents))
+              );
+            } else {
+              if (specifiers.length > 1) {
+                logError(
+                  `External dependency pattern "${pattern}" matched ${specifiers.length} specifiers
+       ${specifiers.join(', ')}), but the output path "${outputTarget}" is a file path.
+       Use a directory path (with trailing "/") to support multiple matched specifiers with code splitting.`
+                );
+              }
+              const code = await buildSingleExternalBundle(specifiers[0], externalDependencies);
+              await safeWriteFile(join(output, outputTarget), code);
+            }
+          })
+        );
+      }
+    }
   });
 }

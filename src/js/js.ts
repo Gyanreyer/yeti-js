@@ -1,4 +1,4 @@
-import { build } from 'esbuild';
+import { build, type Plugin } from 'esbuild';
 import { getCallSites } from 'node:util';
 import { fileURLToPath } from 'node:url';
 
@@ -7,6 +7,7 @@ import { resolveImportPath } from "../bundle/import.ts";
 import { getConfig } from "../config.ts";
 import { BundleError } from "../error.ts";
 import { textEncoder } from '../utils/textEncoder.ts';
+import { createExternalDependenciesEsbuildPlugin } from './externalDependencies.ts';
 
 export interface JSBundleResult {
   bundleName: string;
@@ -125,6 +126,11 @@ export const js = (strings: TemplateStringsArray, ...values: unknown[]): JSTempl
         if (importPaths) {
           // Use esbuild to bundle imported files together and get a list of all input files for dependency tracking
           try {
+            const { externalDependencies } = getConfig().js;
+            const esbuildPlugins = externalDependencies ? [
+              createExternalDependenciesEsbuildPlugin(externalDependencies, true)
+            ] : undefined;
+
             const result = await build({
               entryPoints: Array.from(importPaths),
               bundle: true,
@@ -137,6 +143,7 @@ export const js = (strings: TemplateStringsArray, ...values: unknown[]): JSTempl
               platform: "browser",
               // esbuild needs an outdir to generate metafile data even when write is false, but we won't actually write any files to this directory
               outdir: "out",
+              plugins: esbuildPlugins,
             });
             for (const inputFile in result.metafile.inputs) {
               dependencies.add(inputFile);

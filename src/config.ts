@@ -111,6 +111,36 @@ export type YetiConfig = {
      */
     defaultBundleTransformConfig: JSBundleTransformConfig;
     deriveBundleTransformConfig: (bundleName: string, defaultConfig: JSBundleTransformConfig) => JSBundleTransformConfig;
+    /**
+     * Configure dependencies that should be bundled separately from your application code.
+     * Instead of duplicating dependency code in every bundle that uses it, each external dependency
+     * is bundled once into its own file, and imports are rewritten to reference that file.
+     *
+     * Keys are glob patterns matched against import specifiers using `path.matchesGlob()`.
+     * A plain string like `"alpinejs"` matches exactly that specifier.
+     *
+     * Values determine where the bundled output is written:
+     * - **File path** (no trailing `/`): The dependency is bundled into a single file at that path.
+     *   If the pattern matches more than one specifier, an error is thrown.
+     * - **Directory path** (trailing `/`): All matched specifiers are built together with esbuild
+     *   code splitting. Each specifier gets its own entry file in the directory, with shared code
+     *   extracted into chunk files.
+     *
+     * @example
+     * ```ts
+     * eleventyConfig.addPlugin(yetiPlugin, {
+     *   js: {
+     *     externalDependencies: {
+     *       // Single specifier → single file
+     *       "alpinejs": "/js/ext/alpine.js",
+     *       // Multiple specifiers → code-split output directory
+     *       "{lit,lit/**}": "/js/ext/",
+     *     }
+     *   }
+     * });
+     * ```
+     */
+    externalDependencies?: Record<string, string>;
   };
   css: {
     /**

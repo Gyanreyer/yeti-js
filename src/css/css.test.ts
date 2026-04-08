@@ -124,7 +124,6 @@ describe("css", () => {
       const bundle3Getter = result.bundles.get("bundle-3");
       assert(bundle3Getter);
       const bundle3Result = await bundle3Getter();
-      debugger;
       assert.deepStrictEqual(bundle3Result, {
         bundleName: "bundle-3",
         code: textEncoder.encode(`:root {
