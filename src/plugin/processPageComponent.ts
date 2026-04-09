@@ -15,6 +15,7 @@ import { logWarning } from "../log.ts";
 import { aOrAn } from "../utils/aOrAn.ts";
 import { textDecoder } from "../utils/textDecoder.ts";
 import { mergeHeadContent } from "../html/mergeHeadContent.ts";
+import { makeBundleVersionPlaceholder } from "./bundleVersionPlaceholder.ts";
 
 /**
  * Takes a page component and its props, renders the component to a Yeti node tree, processes any CSS/JS/HTML asset bundles used by the component,
@@ -349,7 +350,11 @@ export const processPageComponent = async (pageComponent: YetiPageComponent, pag
           } else {
             const getSrcValueForBundle = () => {
               const bundleFilePath = getExternalBundleFilePath(bundleName, assetType);
-              return `${attrValue.beforeContent ?? ""}${bundleFilePath}${attrValue.afterContent ?? ""}`;
+              // Use URL to parse any user-provided trailing content into query/hash components,
+              // merge in the version placeholder, and reconstruct the full value
+              const url = new URL(`${bundleFilePath}${attrValue.afterContent ?? ""}`, "http://y");
+              url.searchParams.set("v", makeBundleVersionPlaceholder(assetType, bundleName));
+              return `${attrValue.beforeContent ?? ""}${url.pathname}${url.search}${url.hash}`;
             };
 
             switch (assetType) {
@@ -492,7 +497,10 @@ export const processPageComponent = async (pageComponent: YetiPageComponent, pag
         } else {
           const newNode = { ...node, attributes: { ...node.attributes } };
           for (const attrName of wildCardNode.attrNames) {
-            newNode.attributes[attrName] = getExternalBundleFilePath(bundleName, assetType);
+            const bundleFilePath = getExternalBundleFilePath(bundleName, assetType);
+            const url = new URL(bundleFilePath, "http://y");
+            url.searchParams.set("v", makeBundleVersionPlaceholder(assetType, bundleName));
+            newNode.attributes[attrName] = `${url.pathname}${url.search}${url.hash}`;
           }
           replacementNodes.push(newNode);
           usedExternalBundleNames[assetType].add(bundleName);

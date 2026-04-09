@@ -3,7 +3,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Page With Bundle Imports Plugin Test</title>
-    <link rel="preload" as="style" href="/css/global.css">
+    <link rel="preload" as="style" href="/css/global.css?v=c0cc8fa5">
     <script type="module">console.log("Hello from index.js");
 console.log("Hello, Yeti from JavaScript!");
 
@@ -14,13 +14,13 @@ console.log("Hello, Yeti from JavaScript!");
 }
 
     </style>
-    <script src="/js/other.js"></script>
-    <link rel="stylesheet" href="/css/other.css">
+    <script src="/js/other.js?v=6c8def98"></script>
+    <link rel="stylesheet" href="/css/other.css?v=b3835924">
   </head>
   <body>
     <h1>Hello, Yeti!</h1>
     <p>I&#39;m an imported fragment!</p>
     <p>I&#39;m some &lt;strong&gt;escaped text&lt;/strong&gt; in a text file.</p>
-    <script type="module" src="/js/global.js"></script>
+    <script type="module" src="/js/global.js?v=a0cc159e"></script>
   </body>
 </html>

@@ -175,7 +175,7 @@ var FancyComponent = class extends HTMLElement {
                   type: YETI_NODE_TYPE.ELEMENT,
                   tagName: "script",
                   attributes: {
-                    src: "/js/global.js",
+                    src: "/js/global.js?v=--YETI__js__global--",
                   },
                 },
                 {
@@ -183,7 +183,7 @@ var FancyComponent = class extends HTMLElement {
                   tagName: "link",
                   attributes: {
                     rel: "stylesheet",
-                    href: "/css/global.css",
+                    href: "/css/global.css?v=--YETI__css__global--",
                   },
                 },
               ],

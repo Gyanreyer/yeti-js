@@ -3,7 +3,8 @@ import { transform as transformCSS } from 'lightningcss';
 import { transform as transformJS } from 'esbuild';
 
 import { resolve, join, matchesGlob } from 'node:path';
-import { open } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
+import { open, readFile, writeFile } from 'node:fs/promises';
 
 import { updateConfig, type YetiConfig } from '../config.ts';
 import { logError } from '../log.ts';
@@ -20,6 +21,7 @@ import {
   buildSingleExternalBundle,
   buildCodeSplitExternalBundles
 } from '../js/externalDependencies.ts';
+import { makeBundleVersionPlaceholder } from './bundleVersionPlaceholder.ts';
 
 export const yetiPlugin = (eleventyConfig: EleventyUserConfig, userConfig: Partial<YetiConfig> = {}) => {
   // Update the Yeti config with any user-provided values
@@ -98,16 +100,14 @@ export const yetiPlugin = (eleventyConfig: EleventyUserConfig, userConfig: Parti
     },
   });
 
-  const bundleFileHashes: {
-    [bundleFilePath: string]: string;
-  } = {};
-
   eleventyConfig.on("eleventy.after", async ({
-    directories: { output }
+    directories: { output },
+    results,
   }: {
     directories: {
       output: string;
-    }
+    };
+    results: Array<{ outputPath: string }>;
   }) => {
     const combinedCSSBundleContents: {
       [bundleName: string]: Set<Uint8Array>;
@@ -142,6 +142,9 @@ export const yetiPlugin = (eleventyConfig: EleventyUserConfig, userConfig: Parti
       }
     }
 
+    // Map of placeholder token → content hash, populated as bundles are transformed and written
+    const bundleContentHashes = new Map<string, string>();
+
     await Promise.all([
       ...Object.entries(combinedCSSBundleContents).map(async ([bundleName, bundleContents]) => {
         let combinedContentsByteSize = 0;
@@ -165,6 +168,10 @@ export const yetiPlugin = (eleventyConfig: EleventyUserConfig, userConfig: Parti
           filename: outputFilePath,
         });
 
+        bundleContentHashes.set(
+          makeBundleVersionPlaceholder("css", bundleName),
+          createHash("sha256").update(code).digest("hex").slice(0, 8),
+        );
         await safeWriteFile(join(output, outputFilePath), code);
       }),
       ...Object.entries(combinedJSBundleContents).map(async ([bundleName, bundleContents]) => {
@@ -185,6 +192,10 @@ export const yetiPlugin = (eleventyConfig: EleventyUserConfig, userConfig: Parti
         const transformConfig = config.js.deriveBundleTransformConfig(bundleName, config.js.defaultBundleTransformConfig);
         const transformResult = await transformJS(combinedCodeBytes, transformConfig);
 
+        bundleContentHashes.set(
+          makeBundleVersionPlaceholder("js", bundleName),
+          createHash("sha256").update(transformResult.code).digest("hex").slice(0, 8),
+        );
         await safeWriteFile(join(output, outputFilePath), transformResult.code);
       }),
       ...Object.entries(combinedHTMLImportPaths).map(async ([bundleName, importPaths]) => {
@@ -223,9 +234,32 @@ export const yetiPlugin = (eleventyConfig: EleventyUserConfig, userConfig: Parti
           indentation: transformConfig.minify ? null : "  ",
         });
 
+        bundleContentHashes.set(
+          makeBundleVersionPlaceholder("html", bundleName),
+          createHash("sha256").update(renderedHTML).digest("hex").slice(0, 8),
+        );
         await safeWriteFile(join(output, outputFilePath), renderedHTML);
       }),
     ]);
+
+    // Rewrite page HTML files to replace bundle version placeholder tokens with actual content hashes.
+    if (bundleContentHashes.size > 0) {
+      await Promise.all(
+        results.map(async ({ outputPath }) => {
+          let htmlContent = await readFile(outputPath, "utf-8");
+          const originalLength = htmlContent.length;
+          for (const [placeholder, hash] of bundleContentHashes) {
+            htmlContent = htmlContent.replaceAll(placeholder, hash);
+          }
+          if (htmlContent.length !== originalLength) {
+            // Any replacements will change the length of the content
+            // (hashes are 8 characters, the static contents of placeholder strings alone are at least 12 characters)
+            // So we can use that as a faster heuristic for whether we have changes that need to be written
+            await writeFile(outputPath, htmlContent);
+          }
+        })
+      );
+    }
 
     // Build and write external dependency bundles
     const { externalDependencies } = config.js;

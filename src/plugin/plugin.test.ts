@@ -10,7 +10,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import {
   Eleventy
 } from "@11ty/eleventy";
-import type UserConfig from '@11ty/eleventy/src/UserConfig.js';
+import type UserConfig from '@11ty/eleventy/UserConfig';
 
 import { mergeConfigs, type YetiConfig } from '../config.ts';
 import type { DeepPartial } from '../utils/utilityTypes.ts';
