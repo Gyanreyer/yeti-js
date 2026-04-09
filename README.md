@@ -124,7 +124,7 @@ Again, this is a bug that I would like to fix, but it will require forking HTM a
 ## Page components
 
 The Yeti plugin uses 11ty's file-based routing. Every page file must have the [page file extension defined in your plugin config](#pagetemplatefileextension).
-By default, this extension is `.page.js`.
+By default, the supported extensions are `.page.js` and `.page.ts`.
 
 A page file must expose the page component as a default export.
 Each page component will automatically receive `eleventy`, `page`, and `collections` props which
@@ -180,79 +180,6 @@ const NamePage: YetiPageComponent<{ name: string; }> = ({
 
 See [11ty's data configuration docs](https://www.11ty.dev/docs/data-configuration/) for more
 details on ways to configure your page's output.
-
-## Core Components
-
-### Head Component
-
-The `Head` component is a special component which allows you to inject content into the HTML document's `<head>` section from anywhere within your component tree. This is particularly useful for components that need to add page-specific meta tags, titles, or other head content without requiring you to pass that data up through component props.
-
-```ts
-import { html, Head } from 'yeti-js';
-
-const ArticlePage = ({ article }) => {
-  return html`<${Layout}>
-    <${Head}>
-      <title>${article.title} - My Blog</title>
-      <meta name="description" content="${article.excerpt}" />
-      <meta property="og:title" content="${article.title}" />
-      <meta property="og:description" content="${article.excerpt}" />
-    <//>
-    
-    <article>
-      <h1>${article.title}</h1>
-      <p>${article.content}</p>
-    </article>
-  <//>`;
-};
-```
-
-Any tags included within the `Head` component will be merged into the page's `<head>` section. If there are conflicting tags (like multiple `<title>` tags), the ones from `Head` components will take priority and override any that were defined directly in the page's head.
-
-You can use multiple `Head` components throughout your component tree, and all of their contents will be collected and merged into the final document head:
-
-```ts
-const Layout = ({ children, title }) => {
-  return html`<html>
-    <head>
-      <title>Default Title</title>
-      <meta name="description" content="Default description" />
-      <meta name="viewport" content="width=device-width, initial-scale=1" />
-    </head>
-    <body>
-      ${children}
-    </body>
-  </html>`;
-};
-
-const BlogPost = ({ post }) => {
-  return html`<${Layout}>
-    <${Head}>
-      <title>${post.title} - My Blog</title>
-      <meta name="description" content="${post.excerpt}" />
-    <//>
-    
-    <article>
-      <h1>${post.title}</h1>
-      <p>${post.content}</p>
-    </article>
-  <//>`;
-};
-
-/**
- * Expected output:
- * <html>
- *  <head>
- *    <title>Title - My Blog</title>
- *    <meta name="description" content="My excerpt">
- *    <meta name="viewport" content="width=device-width, initial-scale=1">
- *  <body>
- *    <h1>Title</h1>
- *    <p>My blog content</p>
- *  </body>
- * </html>
- */
-```
 
 ## Asset Bundling
 
@@ -456,9 +383,9 @@ const HomePage = () => html`<html>
  *    </style>
  *  </head>
  *  <body>
- *    <script>
+ *    <style>
  *      // Inlined CSS from the "global" bundle
- *    </script>
+ *    </style>
  *  </body>
  * </html>
  */
@@ -474,7 +401,7 @@ import { html, css } from 'yeti-js';
 const HomePage = () => html`<html>
   <body>
     <style>
-      ${js.inline("*")}
+      ${css.inline("*")}
     </style>
   </body>
 </html>`;
@@ -704,13 +631,13 @@ const MyComponent = () => html`
 
 #### Importing text content
 
-By default, imported HTML files are included as-is and will be parsed as raw HTML. If you want to import text content that should be escaped for safe display, you can set the `escape` option to `true`:
+By default, imported HTML files are included as-is and will be parsed as raw HTML. If you want to import text content that should be escaped for safe display, you can set the `shouldEscape` option to `true`:
 
 ```js
 import { html } from 'yeti-js';
 
 const CodeExample = () => html`
-  <pre><code>${html.import('./examples/code-snippet.txt', { escape: true })}</code></pre>
+  <pre><code>${html.import('./examples/code-snippet.txt', { shouldEscape: true })}</code></pre>
 `;
 ```
 
@@ -790,16 +717,76 @@ const Layout = ({ children }) => html`
 `;
 ```
 
+You can also pass a `shouldEscape` option to `html.inline()` to escape the bundled HTML content as plain text instead of inserting it as raw HTML:
+
+```js
+import { html } from 'yeti-js';
+
+const Layout = ({ children }) => html`
+  <html>
+    <body>
+      <pre><code>${html.inline('code-examples', { shouldEscape: true })}</code></pre>
+    </body>
+  </html>
+`;
+```
+
+#### `html.src()`
+
+To output an HTML bundle into an external file and get a path to it, you can use `html.src()` with the bundle name. In the plugin processing step, the bundle will be written to a file and the call will be replaced with a path that points to it.
+This is mainly useful for generating SVG spritesheets.
+
+```js
+import { html } from 'yeti-js';
+
+const MenuIcon = ({ children }) => html`
+  <svg>
+    <use href="${html.src('svg-sprites')}#menu-icon"></use>
+  </svg>
+`;
+
+/**
+ * Expected output:
+ * <svg>
+ *   <use href="/assets/svg-sprites.svg#menu-icon"></use>
+ * </svg>
+ */
+```
+
+## Markdown
+
+Yeti exports a `parseMarkdown` utility function which parses a Markdown string into a Yeti node tree. This is useful for rendering Markdown content within your components.
+
+```ts
+import { html, parseMarkdown } from 'yeti-js';
+import { readFileSync } from 'node:fs';
+
+const BlogPost = async ({ postPath }) => {
+  const markdown = readFileSync(postPath, 'utf-8');
+  const content = await parseMarkdown(markdown);
+
+  return html`<article>
+    ${content}
+  </article>`;
+};
+```
+
+`parseMarkdown` supports standard Markdown features including headings, paragraphs, blockquotes, code blocks (with language annotations), lists (ordered, unordered, and task lists), tables, emphasis, links, images, and inline HTML.
+
+You can also use `parseMarkdown` in combination with the `html.processImport` plugin config option to automatically parse Markdown files that are included via `html.import()`. See [`html.processImport`](#htmlprocessimport) for more details.
+
 ## Plugin Config
 
 The Yeti plugin supports some optional config options for customization of the build output:
 
 ### `pageTemplateFileExtension`
 
-This allows you to configure the file extension to use to identify any Yeti page files which should be processed by the plugin and output as pages in the built site.
-By default, this extension will be `.page.js`.
+This allows you to configure the file extension(s) to use to identify any Yeti page files which should be processed by the plugin and output as pages in the built site.
+By default, the supported extensions are `.page.js` and `.page.ts`.
 
 For example, if our input directory is `src` and our output is `dist`, the plugin will process `src/index.page.js` and write the output to `dist/index.html`.
+
+You can pass a single string or an array of strings.
 
 ```js
 eleventyConfig.addPlugin(yetiPlugin, {
@@ -810,51 +797,6 @@ eleventyConfig.addPlugin(yetiPlugin, {
 ### `js`
 
 The plugin offers some options for customizing how bundled JavaScript assets are processed and output.
-
-#### `js.minify`
-
-Boolean indicating whether bundled JavaScript assets should be minified.
-`true` by default.
-
-```js
-eleventyConfig.addPlugin(yetiPlugin, {
-  js: {
-    minify: false,
-  }
-});
-```
-
-#### `js.sourceMaps`
-
-Boolean indicating whether we should also generate a sourcemap for all bundled minified JavaScript assets.
-This setting will be ignored and sourcemaps will not be emitted if `js.minify` is set to `false`.
-`false` by default.
-
-
-```js
-eleventyConfig.addPlugin(yetiPlugin, {
-  js: {
-    sourceMaps: true,
-  },
-})
-```
-
-#### `js.outputDir`
-
-String indicating the directory that bundled JavaScript assets should be written to relative to the site's root.
-Defaults to `"/js"`.
-
-For example, setting `"/scripts"` as the JS output directory means that the `global` JavaScript bundle will be served from `https://my-url.com/scripts/global.js`.
-
-Note that leading and trailing slashes are optional.
-
-```js
-eleventyConfig.addPlugin(yetiPlugin, {
-  js: {
-    outputDir: "/scripts",
-  },
-});
-```
 
 #### `js.defaultBundleName`
 
@@ -869,54 +811,86 @@ eleventyConfig.addPlugin(yetiPlugin, {
 });
 ```
 
+#### `js.deriveBundleFilePath`
+
+Function to derive custom file paths for where external JavaScript bundle files should be written.
+This function will be called for each bundle with the bundle name, and should return a string representing
+the path relative to the site's root where the bundle should be written.
+Defaults to `` `/js/${bundleName}.js` ``.
+
+Leading slashes are optional.
+
+```js
+eleventyConfig.addPlugin(yetiPlugin, {
+  js: {
+    // Bundle files should go in the "assets/js" directory with a `.bundle.js` suffix
+    deriveBundleFilePath: (bundleName) => `assets/js/${bundleName}.bundle.js`,
+  },
+});
+```
+
+#### `js.defaultBundleTransformConfig`
+
+Default [esbuild transform options](https://esbuild.github.io/api/#transform) to use when processing JavaScript bundles. This allows you to specify custom esbuild options like minification, target environments, and more.
+
+By default, bundles are minified:
+
+```js
+eleventyConfig.addPlugin(yetiPlugin, {
+  js: {
+    defaultBundleTransformConfig: {
+      minify: false,
+    },
+  },
+});
+```
+
+#### `js.deriveBundleTransformConfig`
+
+Function to derive custom esbuild transform options on a per-bundle basis. This function is called with the bundle name and the default transform config, and should return the config to use for that bundle.
+
+```js
+eleventyConfig.addPlugin(yetiPlugin, {
+  js: {
+    deriveBundleTransformConfig: (bundleName, defaultConfig) => {
+      if (bundleName === "vendor") {
+        return { ...defaultConfig, minify: false };
+      }
+      return defaultConfig;
+    },
+  },
+});
+```
+
+#### `js.externalDependencies`
+
+Configure dependencies that should be bundled separately from your application code.
+Instead of duplicating dependency code in every bundle that uses it, each external dependency
+is bundled once into its own file, and imports are rewritten to reference that file.
+
+Keys are glob patterns matched against import specifiers. Values determine where the bundled output is written:
+- **File path** (no trailing `/`): The dependency is bundled into a single file at that path.
+  If the pattern matches more than one specifier, an error is thrown.
+- **Directory path** (trailing `/`): All matched specifiers are built together with esbuild
+  code splitting. Each specifier gets its own entry file in the directory, with shared code
+  extracted into chunk files.
+
+```js
+eleventyConfig.addPlugin(yetiPlugin, {
+  js: {
+    externalDependencies: {
+      // Single specifier -> single file
+      "alpinejs": "/js/ext/alpine.js",
+      // Multiple specifiers -> code-split output directory
+      "{lit,lit/**}": "/js/ext/",
+    },
+  },
+});
+```
+
 ### `css`
 
 The plugin offers some options for customizing how bundled CSS assets are processed and output.
-
-#### `css.minify`
-
-Boolean indicating whether bundled CSS assets should be minified.
-`true` by default.
-
-```js
-eleventyConfig.addPlugin(yetiPlugin, {
-  css: {
-    minify: false,
-  },
-});
-```
-
-#### `css.sourceMaps`
-
-Boolean indicating whether we should also generate a sourcemap for all bundled minified CSS assets.
-This setting will be ignored and sourcemaps will not be emitted if `css.minify` is set to `false`.
-`false` by default.
-
-
-```js
-eleventyConfig.addPlugin(yetiPlugin, {
-  css: {
-    sourceMaps: true,
-  },
-})
-```
-
-#### `css.outputDir`
-
-String indicating the directory that bundled CSS assets should be written to relative to the site's root.
-Defaults to `"/css"`.
-
-For example, setting `"/styles"` as the CSS output directory means that the `home` CSS bundle will be served from `https://my-url.com/styles/home.css`.
-
-Note that leading and trailing slashes are optional.
-
-```js
-eleventyConfig.addPlugin(yetiPlugin, {
-  css: {
-    outputDir: "/styles",
-  },
-});
-```
 
 #### `css.defaultBundleName`
 
@@ -927,6 +901,175 @@ Defaults to `"global"`.
 eleventyConfig.addPlugin(yetiPlugin, {
   css: {
     defaultBundleName: "styles",
+  },
+});
+```
+
+#### `css.deriveBundleFilePath`
+
+Function to derive custom file paths for where external CSS bundle files should be written.
+This function will be called for each bundle with the bundle name, and should return a string representing
+the path relative to the site's root where the bundle should be written.
+Defaults to `` `/css/${bundleName}.css` ``.
+
+Leading slashes are optional.
+
+```js
+eleventyConfig.addPlugin(yetiPlugin, {
+  css: {
+    // Bundle files should go in the "assets/css" directory with a `.bundle.css` suffix
+    deriveBundleFilePath: (bundleName) => `assets/css/${bundleName}.bundle.css`,
+  },
+});
+```
+
+#### `css.defaultBundleTransformConfig`
+
+Default [lightningcss transform options](https://lightningcss.dev/docs.html) to use when processing CSS bundles. This allows you to specify custom lightningcss options like minification, browser targets, and more.
+
+By default, bundles are minified:
+
+```js
+eleventyConfig.addPlugin(yetiPlugin, {
+  css: {
+    defaultBundleTransformConfig: {
+      minify: false,
+    },
+  },
+});
+```
+
+#### `css.deriveBundleTransformConfig`
+
+Function to derive custom lightningcss transform options on a per-bundle basis. This function is called with the bundle name and the default transform config, and should return the config to use for that bundle.
+
+```js
+eleventyConfig.addPlugin(yetiPlugin, {
+  css: {
+    deriveBundleTransformConfig: (bundleName, defaultConfig) => {
+      if (bundleName === "critical") {
+        return { ...defaultConfig, minify: true };
+      }
+      return defaultConfig;
+    },
+  },
+});
+```
+
+### `html`
+
+The plugin offers some options for customizing how page HTML output and bundled HTML assets are processed.
+
+#### `html.minify`
+
+Boolean indicating whether the page HTML output should be minified.
+`true` by default.
+
+```js
+eleventyConfig.addPlugin(yetiPlugin, {
+  html: {
+    minify: false,
+  },
+});
+```
+
+#### `html.deriveBundleFilePath`
+
+Function to derive custom file paths for where external HTML bundle files should be written.
+This function will be called for each bundle with the bundle name, and should return a string representing
+the path relative to the site's root where the bundle should be written.
+Defaults to `` `/html/${bundleName}.html` ``.
+
+Leading slashes are optional.
+
+```js
+eleventyConfig.addPlugin(yetiPlugin, {
+  html: {
+    // "spritesheet" bundle should get a `.svg` extension instead of the default `.html`
+    deriveBundleFilePath: (bundleName) =>
+      bundleName === "spritesheet" ? `/icons/spritesheet.svg` : `/html/${bundleName}.html`,
+  },
+});
+```
+
+#### `html.defaultBundleTransformConfig`
+
+Default transform config to use when processing HTML bundles. This includes a `minify` boolean and an optional `processNodeTree` function.
+
+The `processNodeTree` function receives the parsed Yeti node tree for a bundle and can transform it before the bundle is inserted into the final output. This is useful for transformations like converting `<svg>` elements into `<symbol>` elements for SVG sprite generation.
+
+```ts
+import { YETI_NODE_TYPE, yetiPlugin } from 'yeti-js';
+
+eleventyConfig.addPlugin(yetiPlugin, {
+  html: {
+    defaultBundleTransformConfig: {
+      minify: true,
+      processNodeTree: (rootNode) => {
+        // Transform each <svg> element into a <symbol> for sprite usage
+        for (const child of rootNode.children) {
+          if (child.type === YETI_NODE_TYPE.ELEMENT && child.tagName === 'svg') {
+            child.tagName = 'symbol';
+          }
+        }
+        return rootNode;
+      },
+    },
+  },
+});
+```
+
+#### `html.deriveBundleTransformConfig`
+
+Function to derive custom HTML transform config on a per-bundle basis. This function is called with the bundle name and the default transform config, and should return the config to use for that bundle.
+
+This is particularly useful when you only want to apply `processNodeTree` transformations to specific bundles:
+
+```ts
+import { YETI_NODE_TYPE, yetiPlugin } from 'yeti-js';
+
+eleventyConfig.addPlugin(yetiPlugin, {
+  html: {
+    deriveBundleTransformConfig: (bundleName, defaultConfig) => {
+      if (bundleName === "svg-sprites") {
+        return {
+          ...defaultConfig,
+          processNodeTree: (rootNode) => {
+            for (const child of rootNode.children) {
+              if (child.type === YETI_NODE_TYPE.ELEMENT && child.tagName === 'svg') {
+                child.tagName = 'symbol';
+                if (child.attributes?.xmlns) {
+                  delete child.attributes.xmlns;
+                }
+              }
+            }
+            return rootNode;
+          },
+        };
+      }
+      return defaultConfig;
+    },
+  },
+});
+```
+
+#### `html.processImport`
+
+Hook to apply custom processing to the raw content of directly imported files (i.e. `html.import()` calls without a `bundleName`). Called with the resolved file path and raw file content string before the content is parsed as HTML.
+
+This is useful for pre-processing files in formats other than HTML, such as Markdown:
+
+```ts
+import { parseMarkdown, yetiPlugin } from 'yeti-js';
+
+eleventyConfig.addPlugin(yetiPlugin, {
+  html: {
+    processImport: async (importPath, content) => {
+      if (importPath.endsWith('.md')) {
+        return parseMarkdown(content);
+      }
+      return content;
+    },
   },
 });
 ```
