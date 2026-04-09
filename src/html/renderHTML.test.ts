@@ -59,6 +59,25 @@ describe("renderHTML", () => {
     );
   });
 
+  test("escapes special characters in dynamic attribute values", async () => {
+    const malicious = `"><script>alert('xss')</script>`;
+    const htmlRoot = await html`<div data-value="${malicious}"></div>`;
+    const result = renderHTML(htmlRoot);
+    assert.strictEqual(
+      result,
+      `<div data-value="&quot;&gt;&lt;script&gt;alert(&#39;xss&#39;)&lt;/script&gt;"></div>`
+    );
+  });
+
+  test("escapes ampersands in attribute values", async () => {
+    const htmlRoot = await html`<a href=${"https://example.com?a=1&b=2"}></a>`;
+    const result = renderHTML(htmlRoot);
+    assert.strictEqual(
+      result,
+      `<a href="https://example.com?a=1&amp;b=2"></a>`
+    );
+  });
+
   describe("minification", () => {
     test("minifies whitespace and strips comments", async () => {
       const htmlRoot = await html`<!DOCTYPE html>

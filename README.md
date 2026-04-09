@@ -39,7 +39,7 @@ See [Plugin Config](#plugin-config) for more details on available options for co
 
 ## Authoring a Yeti Component
 
-Yeti uses [HTM](https://github.com/developit/htm) and a forked and heavily modified version of [VHTML](https://github.com/developit/vhtml) to allow you to write components with a JSX-like syntax in an `html` tagged template string.
+Yeti uses a custom HTML parser to allow you to write components with a JSX-like syntax in an `html` tagged template string.
 
 ```ts
 // index.page.js
@@ -61,65 +61,19 @@ const IndexPage: YetiPageComponent = () => {
 export default IndexPage;
 ```
 
-### HTM syntax
+### Template syntax
 
-- You can render a component in your html by by inserting the component function into your
+- You can render a component in your html by inserting the component function into your
 html like an html tag name like `<${MyComponent}>`.
-  - Any child tags wrapped in a component will be passed to the component in a `children` prop. To close a component tag, you must use a special `<//>` component end tag.
-    - Example: `<${MyComponent}>I am child text content!<//>`
+  - Any child tags wrapped in a component will be passed to the component in a `children` prop. To close a component tag, you can use the component reference `</${MyComponent}>` or a shorthand `</>` closing tag.
+    - Example: `<${MyComponent}>I am child text content!</>`
 - Component tags can be self-closed if they don't have children.
 - Any attributes set on the component tag will be passed to the component as props.
   - Boolean attributes are supported, so `<${MyComponent} active />` will
     render `MyComponent` with `{ active: true }` props.
 - You can spread props with the following syntax: `<div ...${props}>`
-- HTML comments are supported.
-- You can use self-closing tags for any element.
-
-#### Known HTM Caveats
-
-##### `<!DOCTYPE>` declaration tags
-
-Unfortunately, at this time `<!DOCTYPE>` tags will cause HTM to silently produce weird broken output. This is a deliberate choice
-by the HTM maintainer to align closer to JSX, which also does not support `<!DOCTYPE>`, but frankly I disagree with that philosophy, especially when there are no safeguards
-to tell you something is wrong if you do include a `<!DOCTYPE>` tag in your html.
-I am considering making a custom forked version of HTM to fix that, but for now I will just flag this as a known issue.
-Note that a `<!DOCTYPE>` tag will be automatically inserted at the top of every page in the built output from this plugin.
-
-##### Issues with injecting non-string content at the root level of an HTML template
-
-HTM includes a nice improvement over JSX in that it supports having multiple root-level elements in your HTML without needing to wrap them
-in a fragment. However, things break down if you do this with non-element content like a Yeti asset import or some other non-string content
-that you are hoping will be stringified in the final output.
-
-For example, the following will cause builds to break with errors that are difficult to track the source of:
-
-```js
-/**
- * @type {import("yeti-js").YetiComponent}
- */
-const MyComponent = () => {
-  return html`
-    <div>Hello!</div>
-    ${html.import("./imported-html.html")}
-  `;
-};
-```
-
-To solve this, you can wrap the contents with `<>...</>` fragment tags:
-
-```js
-/**
- * @type {import("yeti-js").YetiComponent}
- */
-const MyComponent = () => {
-  return html`<>
-    <div>Hello!</div>
-    ${html.import("./imported-html.html")}
-  </>`;
-};
-```
-
-Again, this is a bug that I would like to fix, but it will require forking HTM and rolling a new custom implementation.
+- `<!DOCTYPE>` declarations, HTML comments, and self-closing tags are all supported.
+- Multiple root-level elements are supported without requiring a fragment wrapper.
 
 ## Page components
 

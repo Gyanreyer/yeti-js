@@ -329,9 +329,7 @@ export const cleanUpChildWhitespace = (node: YetiRootNode | YetiElementNode): vo
   }
 };
 
-const QUOTE_REGEX = /"/g;
-
 export const sanitizeAttributeValue = (value: unknown): string => {
   const stringValue = typeof value === "string" ? value : String(value);
-  return stringValue.replace(QUOTE_REGEX, "&quot;");
+  return sanitizeHTMLTextContent(stringValue);
 };

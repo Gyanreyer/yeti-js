@@ -13,6 +13,9 @@
   "scripts": {
     "test": "node --test"
   },
+  "peerDependencies": {
+    "@11ty/eleventy": ">=3.0.0"
+  },
   "devDependencies": {
     "@11ty/eleventy": "^3.1.2",
     "@types/node": "^24.12.2",
@@ -20,9 +23,7 @@
   },
   "dependencies": {
     "esbuild": "^0.25.11",
-    "htm": "^3.1.1",
     "lightningcss": "^1.30.2",
-    "marked": "^15.0.12",
-    "parse5": "^8.0.0"
+    "marked": "^15.0.12"
   }
 }
