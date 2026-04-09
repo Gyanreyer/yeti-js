@@ -1,4 +1,4 @@
-import type EleventyUserConfig from '@11ty/eleventy/src/UserConfig.js';
+import type EleventyUserConfig from '@11ty/eleventy/UserConfig';
 import { transform as transformCSS } from 'lightningcss';
 import { transform as transformJS } from 'esbuild';
 

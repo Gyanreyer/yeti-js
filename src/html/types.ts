@@ -31,6 +31,11 @@ export interface DocumentBundleAssets {
     bundleImportPaths?: Map<string, Set<string>>;
     dependencies?: Set<string>;
   };
+  /**
+   * Collected children from Head components, in document order.
+   * Merged into the page's `<head>` element during page processing.
+   */
+  head?: YetiChildNode[];
 }
 
 export interface YetiRootNode extends BaseYetiNode {

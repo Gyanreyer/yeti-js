@@ -181,6 +181,69 @@ const NamePage: YetiPageComponent<{ name: string; }> = ({
 See [11ty's data configuration docs](https://www.11ty.dev/docs/data-configuration/) for more
 details on ways to configure your page's output.
 
+## Head Component
+
+Yeti provides a built-in `Head` component that allows you to declare `<head>` content from any component in the tree, similar to libraries like React Helmet. Content placed inside `Head` is automatically hoisted and merged into the document's `<head>` element.
+
+```ts
+import { html, Head } from 'yeti-js';
+
+const MyPage = () => {
+  return html`<${Layout}>
+    <${Head}>
+      <title>My Page!</title>
+      <meta name="description" content="A description of my page" />
+    </${Head}>
+    <main>Hello!</main>
+  </${Layout}>`;
+};
+export default MyPage;
+```
+
+This is useful when a layout component defines default `<head>` content (like a fallback `<title>` or common `<meta>` tags), but individual pages or deeply nested components need to customize it.
+
+### How it works
+
+- `Head` can be used anywhere in the component tree, at any nesting depth.
+- Nothing is rendered in place — all `Head` content is collected and merged into the document's primary `<head>` element.
+- If no `<head>` element exists in the page, one will be created automatically.
+- Multiple `Head` components are supported; their content is merged in document order.
+
+### Merging rules
+
+When the page's existing `<head>` and `Head` component content overlap, the following deduplication rules apply:
+
+| Element | Dedupe key | Behavior |
+|---------|-----------|----------|
+| `<title>` | Tag name | Last one wins |
+| `<meta>` | `name`, `property`, or `http-equiv` attribute | Last one wins |
+| `<link>` | `rel` + `href` attributes | Last one wins |
+| `<script>` (with `src`) | `src` attribute | Last one wins |
+| `<script>` (inline), `<style>`, others | — | Always appended |
+
+"Last one wins" means that content appearing later in document order takes priority. Since a layout component's `<head>` renders before `Head` component content is merged in, page-level `Head` content will naturally override layout defaults:
+
+```ts
+// Layout.component.ts
+const Layout = ({ children }) => html`<html>
+  <head>
+    <title>My Site</title>
+    <meta name="description" content="Default description" />
+  </head>
+  <body>${children}</body>
+</html>`;
+
+// MyPage.page.ts — title and description override the layout's defaults
+const MyPage = () => html`<${Layout}>
+  <${Head}>
+    <title>About Us</title>
+    <meta name="description" content="Learn about us" />
+  </${Head}>
+  <main>About page content</main>
+</${Layout}>`;
+export default MyPage;
+```
+
 ## Asset Bundling
 
 Yeti provides helpful bundling capabilities which allow you to attach JavaScript and CSS to

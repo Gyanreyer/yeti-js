@@ -14,6 +14,7 @@ import { getConfig } from "../config.ts";
 import { logWarning } from "../log.ts";
 import { aOrAn } from "../utils/aOrAn.ts";
 import { textDecoder } from "../utils/textDecoder.ts";
+import { mergeHeadContent } from "../html/mergeHeadContent.ts";
 
 /**
  * Takes a page component and its props, renders the component to a Yeti node tree, processes any CSS/JS/HTML asset bundles used by the component,
@@ -70,6 +71,10 @@ export const processPageComponent = async (pageComponent: YetiPageComponent, pag
   }
 
   const pageRootNode = await pageComponent(pageProps);
+
+  // Merge any collected Head component content into the document's <head> element
+  mergeHeadContent(pageRootNode);
+
   if (pageRootNode.assets) {
     if (pageRootNode.assets.css) {
       for (const [bundleName, bundleGetterSet] of pageRootNode.assets.css) {

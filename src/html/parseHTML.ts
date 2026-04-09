@@ -11,6 +11,7 @@ import { mergeBundleSetMaps, mergeSets } from "../bundle/mergeBundleContents.ts"
 import { isCSSTemplateResult } from "../css/css.ts";
 import { isJSTemplateResult } from "../js/js.ts";
 import { getConfig } from "../config.ts";
+import { Head } from "./Head.ts";
 
 // Node type to identify a component node
 const COMPONENT_NODE_TYPE = 1000;
@@ -111,6 +112,10 @@ export const parseHTML = async (htmlStringChars: Uint8Array, dynamicValues: unkn
                 if (mergedDependencies) {
                   rootNode.assets.html.dependencies = mergedDependencies;
                 }
+              }
+              if (unwrappedContent.assets.head && unwrappedContent.assets.head.length > 0) {
+                rootNode.assets.head ??= [];
+                rootNode.assets.head.push(...unwrappedContent.assets.head);
               }
             }
             break;
@@ -251,6 +256,24 @@ export const parseHTML = async (htmlStringChars: Uint8Array, dynamicValues: unkn
     const nextParent = getCurrentOpenParent();
 
     if (closingParentNode.type === COMPONENT_NODE_TYPE) {
+      if (closingParentNode.component === Head) {
+        // Built-in Head component: collect children for head merging instead of rendering
+        // Clean up whitespace in collected children the same way we do for regular elements
+        cleanUpChildWhitespace(closingParentNode as unknown as YetiElementNode);
+        if (closingParentNode.children && closingParentNode.children.length > 0) {
+          rootNode.assets ??= {};
+          rootNode.assets.head ??= [];
+          rootNode.assets.head.push(...closingParentNode.children);
+        }
+        const currentInstanceCount = currentOpenTreeTagnameAndComponentCounts.get(closingParentNode.component) ?? 0;
+        if (currentInstanceCount <= 1) {
+          currentOpenTreeTagnameAndComponentCounts.delete(closingParentNode.component);
+        } else {
+          currentOpenTreeTagnameAndComponentCounts.set(closingParentNode.component, currentInstanceCount - 1);
+        }
+        return closingParentNode;
+      }
+
       const componentContent = closingParentNode.component({
         children: closingParentNode.children,
         ...closingParentNode.attributes,
