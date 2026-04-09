@@ -1,10 +1,7 @@
 import type EleventyUserConfig from '@11ty/eleventy/UserConfig';
-import { transform as transformCSS } from 'lightningcss';
-import { transform as transformJS } from 'esbuild';
 
 import { resolve, join, matchesGlob } from 'node:path';
-import { createHash } from 'node:crypto';
-import { open, readFile, writeFile } from 'node:fs/promises';
+import { readFile, writeFile } from 'node:fs/promises';
 
 import { updateConfig, type YetiConfig } from '../config.ts';
 import { logError } from '../log.ts';
@@ -13,7 +10,6 @@ import { YETI_NODE_TYPE } from '../html/types.ts';
 import { isYetiNode } from '../html/utils.ts';
 import { renderHTML } from '../html/renderHTML.ts';
 import { processPageComponent } from './processPageComponent.ts';
-import { parseHTML } from '../html/parseHTML.ts';
 import { safeWriteFile } from '../utils/safeWriteFile.ts';
 import {
   resetUsedExternalSpecifiers,
@@ -21,7 +17,12 @@ import {
   buildSingleExternalBundle,
   buildCodeSplitExternalBundles
 } from '../js/externalDependencies.ts';
-import { makeBundleVersionPlaceholder } from './bundleVersionPlaceholder.ts';
+import { mergeBundleSetMaps } from '../bundle/mergeBundleContents.ts';
+import {
+  processAndWriteExternalCSSBundle,
+  processAndWriteExternalJSBundle,
+  processAndWriteExternalHTMLBundle,
+} from './processExternalBundles.ts';
 
 export const yetiPlugin = (eleventyConfig: EleventyUserConfig, userConfig: Partial<YetiConfig> = {}) => {
   // Update the Yeti config with any user-provided values
@@ -109,137 +110,31 @@ export const yetiPlugin = (eleventyConfig: EleventyUserConfig, userConfig: Parti
     };
     results: Array<{ outputPath: string }>;
   }) => {
-    const combinedCSSBundleContents: {
-      [bundleName: string]: Set<Uint8Array>;
-    } = {};
-    const combinedJSBundleContents: {
-      [bundleName: string]: Set<Uint8Array>;
-    } = {};
-    const combinedHTMLImportPaths: {
-      [bundleName: string]: Set<string>;
-    } = {};
+    // Combine the contents of the bundles with the same name across different pages so we can transform
+    // and write them out as single bundles in the output directory
+    const combinedCSSBundleContents = new Map<string, Set<Uint8Array>>();
+    const combinedJSBundleContents = new Map<string, Set<Uint8Array>>();
+    const combinedHTMLImportPaths = new Map<string, Set<string>>();
 
     for (const { css, js, htmlImportPaths } of Object.values(globalExternalBundleContents)) {
-      // Combine the contents of the bundles with the same name across different pages so we can transform
-      // and write them out as single bundles in the output directory
-      for (const [bundleName, bundleContents] of css) {
-        combinedCSSBundleContents[bundleName] ??= new Set();
-        for (const bundleContent of bundleContents) {
-          combinedCSSBundleContents[bundleName].add(bundleContent);
-        }
-      }
-      for (const [bundleName, bundleContents] of js) {
-        combinedJSBundleContents[bundleName] ??= new Set();
-        for (const bundleContent of bundleContents) {
-          combinedJSBundleContents[bundleName].add(bundleContent);
-        }
-      }
-      for (const [bundleName, importPaths] of htmlImportPaths) {
-        combinedHTMLImportPaths[bundleName] ??= new Set();
-        for (const importPath of importPaths) {
-          combinedHTMLImportPaths[bundleName].add(importPath);
-        }
-      }
+      mergeBundleSetMaps(combinedCSSBundleContents, css);
+      mergeBundleSetMaps(combinedJSBundleContents, js);
+      mergeBundleSetMaps(combinedHTMLImportPaths, htmlImportPaths);
     }
 
     // Map of placeholder token → content hash, populated as bundles are transformed and written
     const bundleContentHashes = new Map<string, string>();
 
     await Promise.all([
-      ...Object.entries(combinedCSSBundleContents).map(async ([bundleName, bundleContents]) => {
-        let combinedContentsByteSize = 0;
-        for (const content of bundleContents) {
-          combinedContentsByteSize += content.byteLength;
-        }
-
-        const combinedCodeBytes = new Uint8Array(combinedContentsByteSize);
-        let offset = 0;
-        for (const content of bundleContents) {
-          combinedCodeBytes.set(content, offset);
-          offset += content.byteLength;
-        }
-
-        const outputFilePath = config.css.deriveBundleFilePath(bundleName);
-
-        const transformConfig = config.css.deriveBundleTransformConfig(bundleName, config.css.defaultBundleTransformConfig);
-        const { code } = transformCSS({
-          ...transformConfig,
-          code: combinedCodeBytes,
-          filename: outputFilePath,
-        });
-
-        bundleContentHashes.set(
-          makeBundleVersionPlaceholder("css", bundleName),
-          createHash("sha256").update(code).digest("hex").slice(0, 8),
-        );
-        await safeWriteFile(join(output, outputFilePath), code);
-      }),
-      ...Object.entries(combinedJSBundleContents).map(async ([bundleName, bundleContents]) => {
-        let combinedContentsByteSize = 0;
-        for (const content of bundleContents) {
-          combinedContentsByteSize += content.byteLength;
-        }
-
-        const combinedCodeBytes = new Uint8Array(combinedContentsByteSize);
-        let offset = 0;
-        for (const content of bundleContents) {
-          combinedCodeBytes.set(content, offset);
-          offset += content.byteLength;
-        }
-
-        const outputFilePath = config.js.deriveBundleFilePath(bundleName);
-
-        const transformConfig = config.js.deriveBundleTransformConfig(bundleName, config.js.defaultBundleTransformConfig);
-        const transformResult = await transformJS(combinedCodeBytes, transformConfig);
-
-        bundleContentHashes.set(
-          makeBundleVersionPlaceholder("js", bundleName),
-          createHash("sha256").update(transformResult.code).digest("hex").slice(0, 8),
-        );
-        await safeWriteFile(join(output, outputFilePath), transformResult.code);
-      }),
-      ...Object.entries(combinedHTMLImportPaths).map(async ([bundleName, importPaths]) => {
-        const outputFilePath = config.html.deriveBundleFilePath(bundleName);
-
-        // Open all file handles and stat them in parallel, then read sequentially into a pre-allocated buffer
-        const fileEntries = await Promise.all(
-          Array.from(importPaths).map(async (importPath) => {
-            const fh = await open(importPath, "r");
-            const { size } = await fh.stat();
-            return { fh, size };
-          })
-        );
-        const bundleByteLength = fileEntries.reduce((sum, { size }) => sum + size, 0);
-        const combinedBundleBytes = new Uint8Array(bundleByteLength);
-        try {
-          let offset = 0;
-          for (const { fh, size } of fileEntries) {
-            await fh.read(combinedBundleBytes, offset, size);
-            offset += size;
-          }
-        } finally {
-          await Promise.all(fileEntries.map(({ fh }) => fh.close()));
-        }
-
-        const transformConfig = config.html.deriveBundleTransformConfig(bundleName, config.html.defaultBundleTransformConfig);
-        let parsedBundleRootNode = await parseHTML(combinedBundleBytes);
-        if (transformConfig.processNodeTree) {
-          parsedBundleRootNode = await transformConfig.processNodeTree(parsedBundleRootNode);
-          if (!isYetiNode(parsedBundleRootNode) || parsedBundleRootNode.type !== YETI_NODE_TYPE.ROOT) {
-            throw new Error(`Expected processNodeTree function to return a YetiRootNode for bundle ${bundleName}. Received: ${JSON.stringify(parsedBundleRootNode)}`);
-          }
-        }
-
-        const renderedHTML = renderHTML(parsedBundleRootNode, {
-          indentation: transformConfig.minify ? null : "  ",
-        });
-
-        bundleContentHashes.set(
-          makeBundleVersionPlaceholder("html", bundleName),
-          createHash("sha256").update(renderedHTML).digest("hex").slice(0, 8),
-        );
-        await safeWriteFile(join(output, outputFilePath), renderedHTML);
-      }),
+      ...Array.from(combinedCSSBundleContents, ([bundleName, bundleContents]) =>
+        processAndWriteExternalCSSBundle(bundleName, bundleContents, output, config, bundleContentHashes)
+      ),
+      ...Array.from(combinedJSBundleContents, ([bundleName, bundleContents]) =>
+        processAndWriteExternalJSBundle(bundleName, bundleContents, output, config, bundleContentHashes)
+      ),
+      ...Array.from(combinedHTMLImportPaths, ([bundleName, importPaths]) =>
+        processAndWriteExternalHTMLBundle(bundleName, importPaths, output, config, bundleContentHashes)
+      ),
     ]);
 
     // Rewrite page HTML files to replace bundle version placeholder tokens with actual content hashes.

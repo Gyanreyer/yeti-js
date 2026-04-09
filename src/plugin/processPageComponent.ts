@@ -1,5 +1,5 @@
-import { transform as transformCSS, type TransformOptions as LightningCSSTransformOptions, type CustomAtRules, transform } from "lightningcss";
-import { transform as transformJS, type TransformOptions as ESBuildTransformOptions } from 'esbuild';
+import { transform as transformCSS } from "lightningcss";
+import { transform as transformJS } from 'esbuild';
 import { open } from "node:fs/promises";
 
 import { getExternalBundleFilePath, isBundleSrcObject, isInlinedBundleElementNode, WILDCARD_BUNDLE_NAME } from "../bundle/bundle.ts";
@@ -13,6 +13,7 @@ import { isYetiNode } from '../html/utils.ts';
 import { getConfig } from "../config.ts";
 import { logWarning } from "../log.ts";
 import { aOrAn } from "../utils/aOrAn.ts";
+import { concatUint8Arrays } from "../utils/concatUint8Arrays.ts";
 import { textDecoder } from "../utils/textDecoder.ts";
 import { mergeHeadContent } from "../html/mergeHeadContent.ts";
 import { makeBundleVersionPlaceholder } from "./bundleVersionPlaceholder.ts";
@@ -130,16 +131,7 @@ export const processPageComponent = async (pageComponent: YetiPageComponent, pag
       return null;
     }
 
-    let combinedCodeLength = 0;
-    for (const chunk of bundleContentSet) {
-      combinedCodeLength += chunk.length;
-    }
-    const combinedRawCode = new Uint8Array(combinedCodeLength);
-    let offset = 0;
-    for (const chunk of bundleContentSet) {
-      combinedRawCode.set(chunk, offset);
-      offset += chunk.length;
-    }
+    const combinedRawCode = concatUint8Arrays(bundleContentSet);
 
     const transformConfig = config.css.deriveBundleTransformConfig(bundleName, config.css.defaultBundleTransformConfig);
     const transformResult = transformCSS({
@@ -165,16 +157,7 @@ export const processPageComponent = async (pageComponent: YetiPageComponent, pag
       return null;
     }
 
-    let combinedCodeLength = 0;
-    for (const chunk of bundleContentSet) {
-      combinedCodeLength += chunk.length;
-    }
-    const combinedRawCode = new Uint8Array(combinedCodeLength);
-    let offset = 0;
-    for (const chunk of bundleContentSet) {
-      combinedRawCode.set(chunk, offset);
-      offset += chunk.length;
-    }
+    const combinedRawCode = concatUint8Arrays(bundleContentSet);
 
     const transformConfig = config.js.deriveBundleTransformConfig(bundleName, config.js.defaultBundleTransformConfig);
     const transformResult = await transformJS(combinedRawCode, transformConfig);

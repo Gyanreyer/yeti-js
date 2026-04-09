@@ -7,6 +7,7 @@ import { resolveImportPath } from "../bundle/import.ts";
 import { getConfig } from "../config.ts";
 import { BundleError } from "../error.ts";
 import { textEncoder } from '../utils/textEncoder.ts';
+import { concatUint8Arrays } from '../utils/concatUint8Arrays.ts';
 import { createExternalDependenciesEsbuildPlugin } from './externalDependencies.ts';
 
 export interface JSBundleResult {
@@ -171,20 +172,9 @@ export const js = (strings: TemplateStringsArray, ...values: unknown[]): JSTempl
           }
         }
 
-        let combinedCodeLength = 0;
-        for (const chunk of codeChunks) {
-          combinedCodeLength += chunk.length;
-        }
-        const combinedCode = new Uint8Array(combinedCodeLength);
-        let offset = 0;
-        for (const chunk of codeChunks) {
-          combinedCode.set(chunk, offset);
-          offset += chunk.length;
-        }
-
         return {
           bundleName,
-          code: combinedCode,
+          code: concatUint8Arrays(codeChunks),
           dependencies,
         };
       })();

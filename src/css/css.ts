@@ -1,13 +1,14 @@
 import { bundleAsync } from 'lightningcss';
 import { getCallSites } from 'node:util';
 import { fileURLToPath } from 'node:url';
+import { dirname, resolve } from 'node:path';
 
 import { BUNDLE_TYPE, isBundleObject, makeCssOrJsBundleInlineObject, makeBundleSrcObject, makeBundleStartObject, makeCssOrJsBundleImportObject } from "../bundle/bundle.ts";
 import { resolveImportPath } from "../bundle/import.ts";
 import { getConfig } from "../config.ts";
 import { BundleError } from "../error.ts";
 import { textEncoder } from '../utils/textEncoder.ts';
-import { dirname, resolve } from 'node:path';
+import { concatUint8Arrays } from '../utils/concatUint8Arrays.ts';
 
 export interface CSSBundleResult {
   bundleName: string;
@@ -164,20 +165,9 @@ export const css = (strings: TemplateStringsArray, ...values: unknown[]): CSSTem
           }
         }
 
-        let combinedCodeLength = 0;
-        for (const chunk of codeChunks) {
-          combinedCodeLength += chunk.length;
-        }
-        const combinedCode = new Uint8Array(combinedCodeLength);
-        let offset = 0;
-        for (const chunk of codeChunks) {
-          combinedCode.set(chunk, offset);
-          offset += chunk.length;
-        }
-
         return {
           bundleName,
-          code: combinedCode,
+          code: concatUint8Arrays(codeChunks),
           dependencies,
         };
       })();
