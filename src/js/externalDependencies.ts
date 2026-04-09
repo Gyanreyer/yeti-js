@@ -3,6 +3,8 @@ import { join, matchesGlob, parse as parsePath } from 'node:path';
 
 import { getConfig } from '../config.ts';
 import { BundleError } from '../error.ts';
+import { logError } from '../log.ts';
+import { safeWriteFile } from '../utils/safeWriteFile.ts';
 
 /**
  * Derives the output file path for a specifier matched by a directory-style external dependency entry.
@@ -173,4 +175,63 @@ export const buildCodeSplitExternalBundles = async (
     path: file.path,
     contents: file.contents,
   }));
+};
+
+/**
+ * Groups used external dependency specifiers by their matching config pattern,
+ * builds each group, and writes the output files to disk.
+ */
+export const buildAndWriteExternalDependencies = async (
+  externalDependencies: Record<string, string>,
+  output: string,
+) => {
+  const usedSpecifiers = getUsedExternalSpecifiers();
+  if (usedSpecifiers.size === 0) {
+    return;
+  }
+
+  // Group used specifiers by which config entry pattern they matched
+  const entries = Object.entries(externalDependencies);
+  const groups = new Map<string, { outputTarget: string; specifiers: string[] }>();
+  for (const specifier of usedSpecifiers) {
+    for (const [pattern, outputTarget] of entries) {
+      if (matchesGlob(specifier, pattern)) {
+        let group = groups.get(pattern);
+        if (!group) {
+          group = { outputTarget, specifiers: [] };
+          groups.set(pattern, group);
+        }
+        group.specifiers.push(specifier);
+        break;
+      }
+    }
+  }
+
+  await Promise.all(
+    Array.from(groups.entries()).map(async ([pattern, { outputTarget, specifiers }]) => {
+      const isDirectory = outputTarget.endsWith('/');
+
+      if (isDirectory) {
+        const outputFiles = await buildCodeSplitExternalBundles(
+          specifiers,
+          outputTarget,
+          externalDependencies,
+          output,
+        );
+        await Promise.all(
+          outputFiles.map(file => safeWriteFile(file.path, file.contents))
+        );
+      } else {
+        if (specifiers.length > 1) {
+          logError(
+            `External dependency pattern "${pattern}" matched ${specifiers.length} specifiers
+       ${specifiers.join(', ')}), but the output path "${outputTarget}" is a file path.
+       Use a directory path (with trailing "/") to support multiple matched specifiers with code splitting.`
+          );
+        }
+        const code = await buildSingleExternalBundle(specifiers[0], externalDependencies);
+        await safeWriteFile(join(output, outputTarget), code);
+      }
+    })
+  );
 };
