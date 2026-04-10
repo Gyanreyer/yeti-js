@@ -2,6 +2,8 @@
 import { styleText } from 'node:util';
 import { getConfig } from "./config.ts";
 
+export const yetiLogPrefix = styleText("gray", "[Yeti]");
+
 /**
  * Log a message to the console, prefixed with a gray "[Yeti]" tag. Respects quiet mode.
  */
@@ -10,7 +12,7 @@ export const log = (...logValues: any[]) => {
     return;
   }
 
-  console.log(styleText("gray", "[Yeti]"), ...logValues);
+  console.log(yetiLogPrefix, ...logValues);
 };
 
 /**
@@ -21,7 +23,7 @@ export const logWarning = (...logValues: any[]) => {
     return;
   }
 
-  console.warn(styleText("gray", "[Yeti]"), ...logValues);
+  console.warn(yetiLogPrefix, ...logValues);
 };
 
 /**
@@ -29,5 +31,5 @@ export const logWarning = (...logValues: any[]) => {
  */
 export const logError = (...logValues: any[]) => {
   // Errors should always be shown, even in quiet mode
-  console.error(styleText("gray", "[Yeti]"), ...logValues);
+  console.error(yetiLogPrefix, ...logValues);
 };

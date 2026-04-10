@@ -3,6 +3,8 @@ import type { TransformOptions as EsbuildTransformOptions } from 'esbuild';
 
 import type { YetiNode, YetiRootNode } from './html/types.ts';
 import type { DeepPartial } from './utils/utilityTypes.ts';
+import { YetiConfigError } from './error.ts';
+import { logWarning } from './log.ts';
 
 export type JSBundleTransformConfig = Omit<EsbuildTransformOptions, "sourcefile" | "sourcesContent" | "sourceRoot">;
 export type CSSBundleTransformConfig = Omit<LightningCSSTransformOptions<CustomAtRules>, "code" | "filename" | "inputSourceMap" | "analyzeDependencies">;
@@ -233,7 +235,9 @@ export type YetiConfig = {
   };
   /**
    * The file extension used for Yeti page template files.
-   * @default [".page.js", ".page.ts"]
+   * Values must not include a leading dot — Eleventy's `addTemplateFormats`/`addExtension`
+   * APIs will silently fail to register extensions that start with `.`.
+   * @default ["page.js", "page.ts"]
    */
   pageTemplateFileExtension: string | string[];
 }
@@ -276,26 +280,474 @@ const isObject = (value: unknown): value is Record<string, any> => {
 }
 
 /**
+ * Returns a human-readable type label for a value, suitable for error messages.
+ * Distinguishes `null` and arrays from plain objects, which `typeof` conflates as `"object"`.
+ */
+const describeType = (value: unknown): string => {
+  if (value === null) {
+    return "null";
+  }
+  if (Array.isArray(value)) {
+    return "array";
+  }
+  return typeof value;
+}
+
+const validateJSConfig = (jsConfig: PartialYetiConfig["js"]): {
+  errors: string[] | null;
+  warnings: string[] | null;
+} => {
+  let errors: string[] | null = null;
+  let warnings: string[] | null = null;
+
+  if (jsConfig) {
+    for (const key of Object.keys(jsConfig) as (keyof YetiConfig["js"])[]) {
+      switch (key) {
+        case "defaultBundleName": {
+          const value = jsConfig[key];
+          if (value === undefined) {
+            // undefined is permitted
+            break;
+          } else if (typeof value === "string") {
+            // Must be a non-empty string
+            if (value.length === 0) {
+              (errors ??= []).push(
+                `"js.defaultBundleName" must be a non-empty string, got ""`
+              );
+            }
+          } else {
+            (errors ??= []).push(
+              `"js.defaultBundleName" must be a string, got ${describeType(value)}`
+            );
+          }
+          break;
+        }
+        case "defaultBundleTransformConfig": {
+          const value = jsConfig[key];
+          if (value === undefined) {
+            // undefined is permitted
+            break;
+          } else if (!isObject(value)) {
+            // Must be an object if defined
+            (errors ??= []).push(`"js.defaultBundleTransformConfig" must be an object, got ${describeType(value)}`);
+          }
+          // Not validating the object shape here; we can leave that to esbuild
+          break;
+        }
+        case "deriveBundleFilePath": {
+          const value = jsConfig[key];
+          if (value === undefined) {
+            // undefined is permitted
+            break;
+          } else if (typeof value !== "function") {
+            // Must be a function
+            (errors ??= []).push(`"js.deriveBundleFilePath" must be a function, got ${describeType(value)}`);
+          }
+          break;
+        }
+        case "deriveBundleTransformConfig": {
+          const value = jsConfig[key];
+          if (value === undefined) {
+            // undefined is permitted
+            break;
+          } else if (typeof value !== "function") {
+            // Must be a function
+            (errors ??= []).push(`"js.deriveBundleTransformConfig" must be a function, got ${describeType(value)}`);
+          }
+          break;
+        }
+        case "externalDependencies": {
+          const value = jsConfig[key];
+          if (value === undefined) {
+            // undefined is permitted
+            break;
+          } else if (!isObject(value)) {
+            // Must be an object if defined
+            (errors ??= []).push(`"js.externalDependencies" must be an object, got ${describeType(value)}`);
+          } else {
+            for (const [depKey, depValue] of Object.entries(value)) {
+              if (typeof depKey !== "string") {
+                (errors ??= []).push(`"js.externalDependencies" keys must be strings, got ${describeType(depKey)}`);
+              }
+              if (typeof depValue !== "string") {
+                (errors ??= []).push(`"js.externalDependencies.${depKey}" must be a string, got ${describeType(depValue)}`);
+              }
+            }
+          }
+          break;
+        }
+        default: {
+          (warnings ??= []).push(
+            `Unrecognized config key "js.${key}" will be ignored.`
+          );
+          break;
+        }
+      }
+    }
+  }
+
+  return { errors, warnings };
+}
+const validateCSSConfig = (cssConfig: PartialYetiConfig["css"] | undefined): {
+  errors: string[] | null;
+  warnings: string[] | null;
+} => {
+  let errors: string[] | null = null;
+  let warnings: string[] | null = null;
+
+  if (cssConfig) {
+    for (const key of Object.keys(cssConfig) as (keyof YetiConfig["css"])[]) {
+      switch (key) {
+        case "defaultBundleName": {
+          const value = cssConfig[key];
+          if (value === undefined) {
+            // undefined is permitted
+            break;
+          } else if (typeof value === "string") {
+            // Must be a non-empty string
+            if (value.length === 0) {
+              (errors ??= []).push(
+                `"css.defaultBundleName" must be a non-empty string, got ""`
+              );
+            }
+          } else {
+            (errors ??= []).push(
+              `"css.defaultBundleName" must be a string, got ${describeType(value)}`
+            );
+          }
+          break;
+        }
+        case "defaultBundleTransformConfig": {
+          const value = cssConfig[key];
+          if (value === undefined) {
+            // undefined is permitted
+            break;
+          } else if (!isObject(value)) {
+            // Must be an object if defined
+            (errors ??= []).push(`"css.defaultBundleTransformConfig" must be an object, got ${describeType(value)}`);
+          }
+          // Not validating the object shape here; we can leave that to lightningcss
+          break;
+        }
+        case "deriveBundleFilePath": {
+          const value = cssConfig[key];
+          if (value === undefined) {
+            // undefined is permitted
+            break;
+          } else if (typeof value !== "function") {
+            // Must be a function
+            (errors ??= []).push(`"css.deriveBundleFilePath" must be a function, got ${describeType(value)}`);
+          }
+          break;
+        }
+        case "deriveBundleTransformConfig": {
+          const value = cssConfig[key];
+          if (value === undefined) {
+            // undefined is permitted
+            break;
+          } else if (typeof value !== "function") {
+            // Must be a function
+            (errors ??= []).push(`"css.deriveBundleTransformConfig" must be a function, got ${describeType(value)}`);
+          }
+          break;
+        }
+        default: {
+          (warnings ??= []).push(
+            `Unrecognized config key "css.${key}" will be ignored.`
+          );
+          break;
+        }
+      }
+    }
+  }
+
+  return { errors, warnings };
+};
+const validateHTMLConfig = (htmlConfig: PartialYetiConfig["html"] | undefined): {
+  errors: string[] | null;
+  warnings: string[] | null;
+} => {
+  let errors: string[] | null = null;
+  let warnings: string[] | null = null;
+
+  if (htmlConfig) {
+    for (const key of Object.keys(htmlConfig) as (keyof YetiConfig["html"])[]) {
+      switch (key) {
+        case "minify": {
+          const value = htmlConfig[key];
+          if (value === undefined) {
+            // undefined is permitted
+            break;
+          } else if (typeof value !== "boolean") {
+            (errors ??= []).push(
+              `"html.minify" must be a boolean, got ${describeType(value)}`
+            );
+          }
+          break;
+        }
+        case "defaultBundleTransformConfig": {
+          const value = htmlConfig[key];
+          if (value === undefined) {
+            // undefined is permitted
+            break;
+          } else if (!isObject(value)) {
+            // Must be an object if defined
+            (errors ??= []).push(`"html.defaultBundleTransformConfig" must be an object, got ${describeType(value)}`);
+          }
+          break;
+        }
+        case "deriveBundleFilePath": {
+          const value = htmlConfig[key];
+          if (value === undefined) {
+            // undefined is permitted
+            break;
+          } else if (typeof value !== "function") {
+            // Must be a function
+            (errors ??= []).push(`"html.deriveBundleFilePath" must be a function, got ${describeType(value)}`);
+          }
+          break;
+        }
+        case "deriveBundleTransformConfig": {
+          const value = htmlConfig[key];
+          if (value === undefined) {
+            // undefined is permitted
+            break;
+          } else if (typeof value !== "function") {
+            // Must be a function
+            (errors ??= []).push(`"html.deriveBundleTransformConfig" must be a function, got ${describeType(value)}`);
+          }
+          break;
+        }
+        case "processImport": {
+          const value = htmlConfig[key];
+          if (value === undefined) {
+            // undefined is permitted
+            break;
+          } else if (typeof value !== "function") {
+            // Must be a function
+            (errors ??= []).push(`"html.processImport" must be a function, got ${describeType(value)}`);
+          }
+          break;
+        }
+        default: {
+          (warnings ??= []).push(
+            `Unrecognized config key "html.${key}" will be ignored.`
+          );
+          break;
+        }
+      }
+    }
+  }
+
+  return { errors, warnings };
+};
+
+export const validateConfig = (newConfig: PartialYetiConfig) => {
+  let errors: string[] | null = null;
+  let warnings: string[] | null = null;
+
+  for (const key of Object.keys(newConfig) as (keyof PartialYetiConfig)[]) {
+    switch (key) {
+      case "inputDir": {
+        const value = newConfig[key];
+        if (value === undefined) {
+          // undefined is permitted
+          break;
+        } else if (typeof value === "string") {
+          // Must be a non-empty string
+          if (value.length === 0) {
+            (errors ??= []).push(
+              `"inputDir" must be a non-empty string, got ""`
+            );
+          }
+        } else {
+          (errors ??= []).push(
+            `"inputDir" must be a string, got ${describeType(value)}`
+          );
+        }
+        break;
+      }
+      case "outputDir": {
+        const value = newConfig[key];
+        if (value === undefined) {
+          // undefined is permitted
+          break;
+        } else if (typeof value === "string") {
+          // Must be a non-empty string
+          if (value.length === 0) {
+            (errors ??= []).push(
+              `"outputDir" must be a non-empty string, got ""`
+            );
+          }
+        } else {
+          (errors ??= []).push(
+            `"outputDir" must be a string, got ${describeType(value)}`
+          );
+        }
+        break;
+      }
+      case "quietMode": {
+        const value = newConfig[key];
+        if (value === undefined) {
+          // undefined is permitted
+          break;
+        } else if (typeof value !== "boolean") {
+          (errors ??= []).push(
+            `"quietMode" must be a boolean, got ${describeType(value)}`
+          );
+        }
+        break;
+      }
+      case "pageTemplateFileExtension": {
+        const value = newConfig[key];
+        if (value === undefined) {
+          // undefined is permitted
+          break;
+        } else if (typeof value === "string") {
+          // Must be a non-empty string without a leading dot
+          if (value.length === 0) {
+            (errors ??= []).push(
+              `"pageTemplateFileExtension" must be a non-empty string, got ""`
+            );
+          } else if (value.startsWith(".")) {
+            (errors ??= []).push(
+              `"pageTemplateFileExtension" must not start with a leading dot, got "${value}"`
+            );
+          }
+        } else if (Array.isArray(value)) {
+          // Must be an array of non-empty strings without leading dots
+          for (let i = 0; i < value.length; i++) {
+            if (typeof value[i] !== "string") {
+              (errors ??= []).push(
+                `"pageTemplateFileExtension[${i}]" must be a string, got ${describeType(value[i])}`
+              );
+            } else if (value[i].length === 0) {
+              (errors ??= []).push(
+                `"pageTemplateFileExtension[${i}]" must be a non-empty string, got ""`
+              );
+            } else if (value[i].startsWith(".")) {
+              (errors ??= []).push(
+                `"pageTemplateFileExtension[${i}]" must not start with a leading dot, got "${value[i]}"`
+              );
+            }
+          }
+        } else {
+          (errors ??= []).push(
+            `"pageTemplateFileExtension" must be a string or array of strings, got ${describeType(value)}`
+          );
+        }
+        break;
+      }
+      case "css": {
+        const value = newConfig[key];
+        if (value === undefined) {
+          // undefined is permitted
+          break;
+        } else if (!isObject(value)) {
+          (errors ??= []).push(
+            `"css" config must be an object, got ${describeType(value)}`
+          );
+          break;
+        }
+
+        const { errors: cssErrors, warnings: cssWarnings } = validateCSSConfig(value);
+        if (cssErrors) {
+          (errors ??= []).push(...cssErrors);
+        }
+        if (cssWarnings) {
+          (warnings ??= []).push(...cssWarnings);
+        }
+        break;
+      }
+      case "html": {
+        const value = newConfig[key];
+        if (value === undefined) {
+          // undefined is permitted
+          break;
+        } else if (!isObject(value)) {
+          (errors ??= []).push(
+            `"html" config must be an object, got ${describeType(value)}`
+          );
+          break;
+        }
+
+        const { errors: htmlErrors, warnings: htmlWarnings } = validateHTMLConfig(value);
+        if (htmlErrors) {
+          (errors ??= []).push(...htmlErrors);
+        }
+        if (htmlWarnings) {
+          (warnings ??= []).push(...htmlWarnings);
+        }
+        break;
+      }
+      case "js": {
+        const value = newConfig[key];
+        if (value === undefined) {
+          // undefined is permitted
+          break;
+        } else if (!isObject(value)) {
+          (errors ??= []).push(
+            `"js" config must be an object, got ${describeType(value)}`
+          );
+          break;
+        }
+
+        const { errors: jsErrors, warnings: jsWarnings } = validateJSConfig(value);
+        if (jsErrors) {
+          (errors ??= []).push(...jsErrors);
+        }
+        if (jsWarnings) {
+          (warnings ??= []).push(...jsWarnings);
+        }
+        break;
+      }
+      default: {
+        (warnings ??= []).push(
+          `Unrecognized config key "${key}" will be ignored.`
+        );
+      }
+    }
+  }
+
+  if (warnings && warnings.length > 0) {
+    for (const warning of warnings) {
+      logWarning(warning);
+    }
+  }
+  if (errors && errors.length > 0) {
+    throw new YetiConfigError(
+      `Invalid Yeti config:\n${errors.map((e) => `  - ${e}`).join("\n")}`
+    );
+  }
+};
+
+/**
  * Deeply merges two config objects, with values from the new config taking precedence over the base config.
  */
 export const mergeConfigs = <T extends Record<string, any>>(baseConfig: T, newConfig: DeepPartial<T>): T => {
-  const mergedConfig = { ...baseConfig };
-  for (const key in newConfig) {
-    const newValue = newConfig[key] as any;
-    const baseValue = baseConfig[key];
+  const mergedConfig: Record<string, any> = { ...baseConfig };
+  const newConfigRecord = newConfig as Record<string, any>;
+  for (const key in newConfigRecord) {
+    const newValue = newConfigRecord[key];
+    // Treat explicit undefined the same as an omitted key: retain the existing value.
+    if (newValue === undefined) {
+      continue;
+    }
+    const baseValue = mergedConfig[key];
     if (isObject(newValue) && isObject(baseValue)) {
       mergedConfig[key] = mergeConfigs(baseValue, newValue);
     } else {
       mergedConfig[key] = newValue;
     }
   }
-  return mergedConfig;
+  return mergedConfig as T;
 };
 
 /**
  * Merges new config settings into the base Yeti config.
  */
 export const updateConfig = (newConfig: PartialYetiConfig) => {
+  validateConfig(newConfig);
   const merged = mergeConfigs(config, newConfig);
   return Object.assign(config, merged);
 };

@@ -5,3 +5,7 @@ export class YetiHTMLParsingError extends Error {
 export class BundleError extends Error {
   name = "BundleError";
 }
+
+export class YetiConfigError extends Error {
+  name = "YetiConfigError";
+}

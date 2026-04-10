@@ -799,15 +799,18 @@ The Yeti plugin supports some optional config options for customization of the b
 ### `pageTemplateFileExtension`
 
 This allows you to configure the file extension(s) to use to identify any Yeti page files which should be processed by the plugin and output as pages in the built site.
-By default, the supported extensions are `.page.js` and `.page.ts`.
+By default, the supported extensions are `page.js` and `page.ts`.
 
 For example, if our input directory is `src` and our output is `dist`, the plugin will process `src/index.page.js` and write the output to `dist/index.html`.
 
-You can pass a single string or an array of strings.
+You can pass a single string or an array of strings. **Values must not include a leading dot** — Eleventy's template-format registration APIs silently fail to pick up extensions that start with `.`, which will leave your page files unprocessed.
 
 ```js
 eleventyConfig.addPlugin(yetiPlugin, {
-  pageTemplateFileExtension: ".yeti.js",
+  pageTemplateFileExtension: "yeti.js",
+});
+eleventyConfig.addPlugin(yetiPlugin, {
+  pageTemplateFileExtension: ["yeti.js", "yeti.ts"],
 });
 ```
 
