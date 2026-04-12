@@ -1,5 +1,4 @@
-import type { CSSBundleGetter } from "../css/css.ts";
-import type { JSBundleGetter } from "../js/js.ts";
+import type { BundleContribution } from "../bundle/bundle.ts";
 
 // Using symbols for node types to ensure uniqueness and prevent potential conflicts with user-defined content
 // We have to declare them outside of the YETI_NODE_TYPE object because otherwise they
@@ -25,8 +24,8 @@ export interface BaseYetiNode {
 }
 
 export interface DocumentBundleAssets {
-  css?: Map<string, Set<CSSBundleGetter>>;
-  js?: Map<string, Set<JSBundleGetter>>;
+  css?: Map<string, Set<BundleContribution>>;
+  js?: Map<string, Set<BundleContribution>>;
   html?: {
     bundleImportPaths?: Map<string, Set<string>>;
     dependencies?: Set<string>;

@@ -1,27 +1,24 @@
-import { bundleAsync } from 'lightningcss';
 import { getCallSites } from 'node:util';
 import { fileURLToPath } from 'node:url';
-import { dirname, resolve } from 'node:path';
 
-import { BUNDLE_TYPE, isBundleObject, makeCssOrJsBundleInlineObject, makeBundleSrcObject, makeBundleStartObject, makeCssOrJsBundleImportObject } from "../bundle/bundle.ts";
+import {
+  BUNDLE_TYPE,
+  isBundleObject,
+  makeCssOrJsBundleInlineObject,
+  makeBundleSrcObject,
+  makeBundleStartObject,
+  makeCssOrJsBundleImportObject,
+  type BundleContribution,
+} from "../bundle/bundle.ts";
 import { resolveImportPath } from "../bundle/import.ts";
 import { getConfig } from "../config.ts";
 import { BundleError } from "../error.ts";
 import { textEncoder } from '../utils/textEncoder.ts';
-import { concatUint8Arrays } from '../utils/concatUint8Arrays.ts';
 
-export interface CSSBundleResult {
-  bundleName: string;
-  code: Uint8Array;
-  dependencies: Set<string>;
-}
-
-export type CSSBundleGetter = () => Promise<CSSBundleResult>;
-export type CSSBundleGetterMap = Map<string, CSSBundleGetter>;
 export const cssTemplateResultSymbol = Symbol("CSS_TEMPLATE_RESULT");
 
 export type CSSTemplateResult = {
-  bundles: CSSBundleGetterMap;
+  bundles: Map<string, BundleContribution>;
   [cssTemplateResultSymbol]: true;
 }
 
@@ -44,13 +41,12 @@ export const css = (strings: TemplateStringsArray, ...values: unknown[]): CSSTem
     parentCallSiteURL = getCallSites()[1]?.scriptName;
     callSiteCache.set(strings, parentCallSiteURL);
   }
+  const callerFilePath = parentCallSiteURL ? fileURLToPath(parentCallSiteURL) : undefined;
 
   const rawCssBundles = new Map<string, string[]>();
-  // Map of bundleName to array of import paths for that bundle{
   const bundleImportPaths = new Map<string, Set<string>>();
 
   let currentBundleName = css.getDefaultBundleName();
-
   const bundleNames = new Set<string>([currentBundleName]);
 
   const stringCount = strings.length;
@@ -96,88 +92,33 @@ export const css = (strings: TemplateStringsArray, ...values: unknown[]): CSSTem
     }
   }
 
-  // Filter out bundles that contain only whitespace
+  // Filter out bundles that contain only whitespace AND have no imports.
   for (const bundleName of bundleNames) {
     const rawChunks = rawCssBundles.get(bundleName);
     if (!rawChunks || rawChunks.every(chunk => chunk.trimStart().length === 0)) {
-      // If the raw chunks are entirely composed of whitespace, drop that from the bundle
       rawCssBundles.delete(bundleName);
       const hasImports = (bundleImportPaths.get(bundleName)?.size ?? 0) > 0;
       if (!hasImports) {
-        // If the bundle also has no imports, drop it entirely
         bundleNames.delete(bundleName);
       }
     }
   }
 
-  const bundleGetterMap: CSSBundleGetterMap = new Map();
-
+  // Materialize the final BundleContribution map.
+  const bundles = new Map<string, BundleContribution>();
   for (const bundleName of bundleNames) {
-    let cachedPromise: Promise<CSSBundleResult> | null = null;
-
-    bundleGetterMap.set(bundleName, () => {
-      if (cachedPromise) {
-        return cachedPromise;
-      }
-
-      cachedPromise = (async () => {
-        const dependencies = new Set<string>();
-        // We'll gather the code for the bundle in an array of Uint8Arrays (code chunks)
-        // and then stitch them together into a single Uint8Array at the end to return as the bundle result.
-        const codeChunks: Uint8Array[] = [];
-
-        const importPaths = bundleImportPaths.get(bundleName);
-        if (importPaths) {
-          // Use lightningcss to bundle each imported file and its dependencies,
-          // and collect the resulting code and dependencies for the bundle result
-          for (const importPath of importPaths) {
-            dependencies.add(importPath);
-            try {
-              const result = await bundleAsync({
-                filename: importPath,
-                resolver: {
-                  // Resolve paths for @import statements in CSS files.
-                  // This lets us track any imported CSS files as dependencies.
-                  resolve: (specifier, from) => {
-                    const resolvedPath = resolve(dirname(from), specifier);
-                    dependencies.add(resolvedPath);
-                    return resolvedPath;
-                  },
-                }
-              });
-              codeChunks.push(result.code);
-            } catch (err) {
-              throw new BundleError(`css.import() failed to import file "${importPath}" for bundle "${bundleName}".`, {
-                cause: err,
-              });
-            }
-          }
-        }
-
-        const rawBundleChunks = rawCssBundles.get(bundleName);
-        if (rawBundleChunks) {
-          if (parentCallSiteURL) {
-            const callerFilePath = fileURLToPath(parentCallSiteURL);
-            dependencies.add(callerFilePath);
-          }
-          for (const chunk of rawBundleChunks) {
-            codeChunks.push(textEncoder.encode(chunk));
-          }
-        }
-
-        return {
-          bundleName,
-          code: concatUint8Arrays(codeChunks),
-          dependencies,
-        };
-      })();
-
-      return cachedPromise;
+    const rawChunks = rawCssBundles.get(bundleName);
+    const importPaths = bundleImportPaths.get(bundleName) ?? new Set<string>();
+    const hasRawContent = rawChunks !== undefined && rawChunks.length > 0;
+    bundles.set(bundleName, {
+      importPaths,
+      rawContent: hasRawContent ? textEncoder.encode(rawChunks.join("")) : new Uint8Array(0),
+      callerFilePath: hasRawContent ? callerFilePath : undefined,
     });
   }
 
   return {
-    bundles: bundleGetterMap,
+    bundles,
     [cssTemplateResultSymbol]: true,
   };
 };

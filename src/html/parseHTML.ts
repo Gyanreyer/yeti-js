@@ -291,25 +291,28 @@ export const parseHTML = async (htmlStringChars: Uint8Array, dynamicValues: unkn
       if ("js" in closingParentNode.component && isJSTemplateResult(closingParentNode.component.js)) {
         rootNode.assets ??= {};
         rootNode.assets.js ??= new Map();
-        for (const [bundleName, bundleGetter] of closingParentNode.component.js.bundles) {
+        for (const [bundleName, contribution] of closingParentNode.component.js.bundles) {
           let bundleSet = rootNode.assets.js.get(bundleName);
           if (!bundleSet) {
             bundleSet = new Set();
             rootNode.assets.js.set(bundleName, bundleSet);
           }
-          bundleSet.add(bundleGetter);
+          // The component's BundleContribution is shared by reference across all instances
+          // of that component on the page; the Set dedupes by reference identity so the same
+          // contribution is only collected once.
+          bundleSet.add(contribution);
         }
       }
       if ("css" in closingParentNode.component && isCSSTemplateResult(closingParentNode.component.css)) {
         rootNode.assets ??= {};
         rootNode.assets.css ??= new Map();
-        for (const [bundleName, bundleGetter] of closingParentNode.component.css.bundles) {
+        for (const [bundleName, contribution] of closingParentNode.component.css.bundles) {
           let bundleSet = rootNode.assets.css.get(bundleName);
           if (!bundleSet) {
             bundleSet = new Set();
             rootNode.assets.css.set(bundleName, bundleSet);
           }
-          bundleSet.add(bundleGetter);
+          bundleSet.add(contribution);
         }
       }
     } else {

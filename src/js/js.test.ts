@@ -1,4 +1,4 @@
-import { describe, test } from 'node:test';
+import { describe, test, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { fileURLToPath } from 'node:url';
 
@@ -6,29 +6,45 @@ import { isJSTemplateResult, js } from "./js.ts";
 import { css } from '../css/css.ts';
 import { html } from '../html/html.ts';
 import { textEncoder } from '../utils/textEncoder.ts';
+import { textDecoder } from '../utils/textDecoder.ts';
 import { BundleError } from '../error.ts';
-import { BUNDLE_TYPE, type BundleSrcObject, type BundleInlineObject } from '../bundle/bundle.ts';
+import {
+  BUNDLE_TYPE,
+  type BundleSrcObject,
+  type BundleInlineObject,
+  type BundleContribution,
+} from '../bundle/bundle.ts';
+import {
+  clearBundleImportCache,
+  getJSImportBundle,
+} from '../bundle/bundleImportCache.ts';
 
 describe("js", () => {
+  afterEach(() => {
+    // The process-wide bundle import cache is shared across tests; clear it so each test
+    // sees a fresh state and any error-path tests don't trip over a previously cached result.
+    clearBundleImportCache();
+  });
+
   describe("js templates", () => {
-    test("A simple string-only js template is processed as expected", async () => {
+    test("A simple string-only js template produces a contribution with raw content and no imports", () => {
       const result = js`
       console.log("Hello, world!");
     `;
       assert(isJSTemplateResult(result));
       assert.deepStrictEqual(Array.from(result.bundles.keys()), ["global"]);
-      const globalBundleGetter = result.bundles.get("global");
-      assert(globalBundleGetter);
-      const globalBundleResult = await globalBundleGetter();
 
-      assert.deepStrictEqual(globalBundleResult, {
-        bundleName: "global",
-        code: textEncoder.encode(`\n      console.log("Hello, world!");\n    `),
-        dependencies: new Set([import.meta.filename]),
-      });
+      const globalContribution = result.bundles.get("global") as BundleContribution;
+      assert(globalContribution);
+      assert.strictEqual(globalContribution.importPaths.size, 0);
+      assert.deepStrictEqual(
+        globalContribution.rawContent,
+        textEncoder.encode(`\n      console.log("Hello, world!");\n    `),
+      );
+      assert.strictEqual(globalContribution.callerFilePath, import.meta.filename);
     });
 
-    test("A js template with bundles specified using js.bundle() is processed as expected", async () => {
+    test("A js template with multiple bundles separates raw content per bundle name", () => {
       const result = js`
       console.log("This is the global bundle.");
       ${js.bundle("bundle1")}
@@ -40,37 +56,33 @@ describe("js", () => {
       assert(isJSTemplateResult(result));
       assert.deepStrictEqual(Array.from(result.bundles.keys()), ["global", "bundle1", "bundle2"]);
 
-      const globalBundleGetter = result.bundles.get("global");
-      const bundle1Getter = result.bundles.get("bundle1");
-      const bundle2Getter = result.bundles.get("bundle2");
-      assert(globalBundleGetter);
-      assert(bundle1Getter);
-      assert(bundle2Getter);
+      const globalContribution = result.bundles.get("global") as BundleContribution;
+      const bundle1Contribution = result.bundles.get("bundle1") as BundleContribution;
+      const bundle2Contribution = result.bundles.get("bundle2") as BundleContribution;
+      assert(globalContribution);
+      assert(bundle1Contribution);
+      assert(bundle2Contribution);
 
-      const globalBundleResult = await globalBundleGetter();
-      const bundle1Result = await bundle1Getter();
-      const bundle2Result = await bundle2Getter();
+      assert.deepStrictEqual(
+        globalContribution.rawContent,
+        textEncoder.encode(`\n      console.log("This is the global bundle.");\n      `),
+      );
+      assert.strictEqual(globalContribution.importPaths.size, 0);
 
-      assert.deepStrictEqual(globalBundleResult, {
-        bundleName: "global",
-        code: textEncoder.encode(`\n      console.log("This is the global bundle.");\n      `),
-        dependencies: new Set([import.meta.filename]),
-      });
+      assert.deepStrictEqual(
+        bundle1Contribution.rawContent,
+        textEncoder.encode(`\n      console.log("This is bundle 1.");\n      `),
+      );
+      assert.strictEqual(bundle1Contribution.importPaths.size, 0);
 
-      assert.deepStrictEqual(bundle1Result, {
-        bundleName: "bundle1",
-        code: textEncoder.encode(`\n      console.log("This is bundle 1.");\n      `),
-        dependencies: new Set([import.meta.filename]),
-      });
-
-      assert.deepStrictEqual(bundle2Result, {
-        bundleName: "bundle2",
-        code: textEncoder.encode(`\n      console.log("This is bundle 2.");\n    `),
-        dependencies: new Set([import.meta.filename]),
-      });
+      assert.deepStrictEqual(
+        bundle2Contribution.rawContent,
+        textEncoder.encode(`\n      console.log("This is bundle 2.");\n    `),
+      );
+      assert.strictEqual(bundle2Contribution.importPaths.size, 0);
     });
 
-    test("A js template with imports specified using js.import() is processed as expected", async () => {
+    test("A js template with imports captures resolved import paths per bundle", () => {
       const result = js`
       ${js.import("../../test_data/js/external-script.js", "bundle1")}
       ${js.import("/test_data/js/external-script-2.js", "bundle2")}
@@ -78,36 +90,29 @@ describe("js", () => {
 
       assert.deepEqual(Array.from(result.bundles.keys()), ["bundle1", "bundle2"]);
 
-      const bundle1Getter = result.bundles.get("bundle1");
-      const bundle2Getter = result.bundles.get("bundle2");
-      assert(bundle1Getter);
-      assert(bundle2Getter);
+      const bundle1Contribution = result.bundles.get("bundle1") as BundleContribution;
+      const bundle2Contribution = result.bundles.get("bundle2") as BundleContribution;
+      assert(bundle1Contribution);
+      assert(bundle2Contribution);
 
-      const bundle1Result = await bundle1Getter();
-      const bundle2Result = await bundle2Getter();
+      assert.deepStrictEqual(
+        bundle1Contribution.importPaths,
+        new Set([fileURLToPath(import.meta.resolve("../../test_data/js/external-script.js"))]),
+      );
+      // bundle1 was imports-only (the surrounding raw content is whitespace-only and dropped),
+      // so the caller file is not tracked as a contribution dependency.
+      assert.strictEqual(bundle1Contribution.callerFilePath, undefined);
+      assert.strictEqual(bundle1Contribution.rawContent.byteLength, 0);
 
-      assert.deepStrictEqual(bundle1Result, {
-        bundleName: "bundle1",
-        code: textEncoder.encode(`// test_data/js/external-script.js
-console.log("Hello, world!");
-`),
-        dependencies: new Set([
-          fileURLToPath(import.meta.resolve("../../test_data/js/external-script.js")),
-        ]),
-      });
-
-      assert.deepStrictEqual(bundle2Result, {
-        bundleName: "bundle2",
-        code: textEncoder.encode(`// test_data/js/external-script-2.js
-window.alert("This is external-script-2.js");
-`),
-        dependencies: new Set([
-          fileURLToPath(import.meta.resolve("../../test_data/js/external-script-2.js")),
-        ]),
-      });
+      assert.deepStrictEqual(
+        bundle2Contribution.importPaths,
+        new Set([fileURLToPath(import.meta.resolve("../../test_data/js/external-script-2.js"))]),
+      );
+      assert.strictEqual(bundle2Contribution.callerFilePath, undefined);
+      assert.strictEqual(bundle2Contribution.rawContent.byteLength, 0);
     });
 
-    test("A js template with mixed bundle targets is processed as expected", async () => {
+    test("A js template with mixed bundle targets correctly partitions imports and raw content", () => {
       const result = js`
       console.log("This is the global bundle.");
 
@@ -121,76 +126,37 @@ window.alert("This is external-script-2.js");
 
       assert.deepEqual(Array.from(result.bundles.keys()), ["global", "my-bundle", "another-bundle"]);
 
-      const myBundleGetter = result.bundles.get("my-bundle");
-      const anotherBundleGetter = result.bundles.get("another-bundle");
-      const globalBundleGetter = result.bundles.get("global");
-      assert(myBundleGetter);
-      assert(anotherBundleGetter);
-      assert(globalBundleGetter);
+      const myBundleContribution = result.bundles.get("my-bundle") as BundleContribution;
+      const anotherBundleContribution = result.bundles.get("another-bundle") as BundleContribution;
+      const globalContribution = result.bundles.get("global") as BundleContribution;
+      assert(myBundleContribution);
+      assert(anotherBundleContribution);
+      assert(globalContribution);
 
-      const myBundleResult = await myBundleGetter();
-      const anotherBundleResult = await anotherBundleGetter();
+      assert.deepStrictEqual(
+        myBundleContribution.importPaths,
+        new Set([fileURLToPath(import.meta.resolve("../../test_data/js/external-script.js"))]),
+      );
 
-      assert.deepStrictEqual(myBundleResult, {
-        bundleName: "my-bundle",
-        code: textEncoder.encode(`// test_data/js/external-script.js
-console.log("Hello, world!");
-`),
-        dependencies: new Set([
-          fileURLToPath(import.meta.resolve("../../test_data/js/external-script.js")),
-        ]),
-      });
+      // js.import() with no explicit bundle name targets the *current active bundle*, which
+      // at that point in the template is "another-bundle" (set by the preceding js.bundle() call).
+      assert.deepStrictEqual(
+        anotherBundleContribution.importPaths,
+        new Set([fileURLToPath(import.meta.resolve("../../test_data/js/external-script-2.js"))]),
+      );
+      assert.deepStrictEqual(
+        anotherBundleContribution.rawContent,
+        textEncoder.encode(`\n      console.log("Another bundle.");\n\n      \n    `),
+      );
 
-      assert.deepStrictEqual(anotherBundleResult, {
-        bundleName: "another-bundle",
-        code: textEncoder.encode(`// test_data/js/external-script-2.js
-window.alert("This is external-script-2.js");
-
-      console.log("Another bundle.");\n\n      \n    `),
-        dependencies: new Set([
-          import.meta.filename,
-          fileURLToPath(import.meta.resolve("../../test_data/js/external-script-2.js")),
-        ]),
-      });
-
-      const globalBundleResult = await globalBundleGetter();
-      assert.deepStrictEqual(globalBundleResult, {
-        bundleName: "global",
-        // Global bundle just has the whitespace and newlines around the imports and bundles
-        code: textEncoder.encode(`
-      console.log("This is the global bundle.");\n\n      \n\n      `),
-        dependencies: new Set([import.meta.filename]),
-      });
+      assert.strictEqual(globalContribution.importPaths.size, 0);
+      assert.deepStrictEqual(
+        globalContribution.rawContent,
+        textEncoder.encode(`\n      console.log("This is the global bundle.");\n\n      \n\n      `),
+      );
     });
 
-    test("A js template with imports for a file with sub-dependencies is bundled as expected", async () => {
-      const result = js`${js.import("/test_data/js/file-with-import.js", "bundle1")}`;
-
-      assert.deepEqual(Array.from(result.bundles.keys()), ["bundle1"]);
-
-      const bundle1Getter = result.bundles.get("bundle1");
-      assert(bundle1Getter);
-
-      const bundle1Result = await bundle1Getter();
-
-      assert.deepStrictEqual(bundle1Result, {
-        bundleName: "bundle1",
-        code: textEncoder.encode(`// test_data/js/imported-file.ts
-var sayHello = (name) => {
-  console.log(\`Hello, \${name}, from the imported file!\`);
-};
-
-// test_data/js/file-with-import.js
-sayHello("Alice");
-`),
-        dependencies: new Set([
-          fileURLToPath(import.meta.resolve("../../test_data/js/file-with-import.js")),
-          fileURLToPath(import.meta.resolve("../../test_data/js/imported-file.ts")),
-        ]),
-      });
-    });
-
-    test("Bundles with imports are kept even if raw content is only whitespace", async () => {
+    test("Bundles whose raw content is whitespace-only but have imports are kept", () => {
       const result = js`
         ${js.import("/test_data/js/external-script.js", "my-bundle")}
         ${js.bundle("my-bundle")}
@@ -201,44 +167,31 @@ sayHello("Alice");
       assert(isJSTemplateResult(result));
       assert.deepStrictEqual(Array.from(result.bundles.keys()), ["my-bundle"]);
 
-      const myBundleGetter = result.bundles.get("my-bundle");
-      assert(myBundleGetter);
-
-      const myBundleResult = await myBundleGetter();
-
-      assert.deepStrictEqual(myBundleResult, {
-        bundleName: "my-bundle",
-        code: textEncoder.encode(`// test_data/js/external-script.js
-console.log("Hello, world!");
-`),
-        dependencies: new Set([
-          fileURLToPath(import.meta.resolve("../../test_data/js/external-script.js")),
-          // The caller file is not a dependency since we dropped the whitespace-only content
-        ]),
-      });
+      const myBundleContribution = result.bundles.get("my-bundle") as BundleContribution;
+      assert(myBundleContribution);
+      assert.deepStrictEqual(
+        myBundleContribution.importPaths,
+        new Set([fileURLToPath(import.meta.resolve("../../test_data/js/external-script.js"))]),
+      );
+      assert.strictEqual(myBundleContribution.rawContent.byteLength, 0);
+      // Caller is not a dep when the bundle is imports-only
+      assert.strictEqual(myBundleContribution.callerFilePath, undefined);
     });
 
-    test("A js template with imports for files that don't exist throws an error", async () => {
-      const result = js`${js.import("/test_data/js/nonexistent-file.js")}`;
+    test("Bundles whose raw content is whitespace-only and have no imports are dropped entirely", () => {
+      const result = js`
+        ${js.bundle("empty-bundle")}
 
-      assert.deepEqual(Array.from(result.bundles.keys()), ["global"]);
 
-      const globalBundleGetter = result.bundles.get("global");
-      assert(globalBundleGetter);
+        ${js.bundle("non-empty-bundle")}
+        console.log("hi");
+      `;
 
-      try {
-        await globalBundleGetter();
-        assert.fail("Expected globalBundleGetter() to throw an error for nonexistent file import, but it did not throw.");
-      } catch (err) {
-        assert(err instanceof BundleError);
-        assert.strictEqual(err.message, `js.import() failed to import files for bundle "global".`);
-        // The cause should be an esbuild BuildFailure error with details about the error
-        assert(err.cause instanceof Error);
-        assert.strictEqual((err.cause as any).errors[0].text, `Could not resolve "/Users/ryangeyer/Projects/yeti-js/test_data/js/nonexistent-file.js"`);
-      }
+      assert(isJSTemplateResult(result));
+      assert.deepStrictEqual(Array.from(result.bundles.keys()), ["non-empty-bundle"]);
     });
 
-    test("A js template with a css or html import throws an error", async () => {
+    test("A js template with a css or html import throws an error at construction time", () => {
       assert.throws(
         () => js`${css.import("../../test_data/css/style.css")}`,
         new BundleError(
@@ -253,18 +206,78 @@ console.log("Hello, world!");
         ),
       );
     });
+  });
 
-    test("JS template results are cached, and the bundle getters return the same results on multiple calls", async () => {
+  describe("bundling contributions via the bundle import cache", () => {
+    test("getJSImportBundle bundles a single import path through esbuild", async () => {
       const result = js`${js.import("../../test_data/js/external-script.js", "bundle1")}`;
+      const bundle1Contribution = result.bundles.get("bundle1") as BundleContribution;
+      assert(bundle1Contribution);
 
-      assert(isJSTemplateResult(result));
-      const bundle1Getter = result.bundles.get("bundle1");
-      assert(bundle1Getter);
+      const bundleResult = await getJSImportBundle(bundle1Contribution.importPaths);
 
-      const bundle1Result1 = await bundle1Getter();
-      const bundle1Result2 = await bundle1Getter();
+      // The bundled output should contain the source content
+      assert.match(textDecoder.decode(bundleResult.code), /Hello, world!/);
+      // The dependency set should include the imported file
+      assert(
+        bundleResult.dependencyFilePaths.has(
+          fileURLToPath(import.meta.resolve("../../test_data/js/external-script.js")),
+        ),
+      );
+    });
 
-      assert.strictEqual(bundle1Result1, bundle1Result2);
+    test("getJSImportBundle bundles transitive dependencies into a single output", async () => {
+      const result = js`${js.import("/test_data/js/file-with-import.js", "bundle1")}`;
+      const bundle1Contribution = result.bundles.get("bundle1") as BundleContribution;
+      assert(bundle1Contribution);
+
+      const bundleResult = await getJSImportBundle(bundle1Contribution.importPaths);
+      const code = textDecoder.decode(bundleResult.code);
+
+      // Output should include code from both the entry file and its imported dependency
+      assert.match(code, /sayHello/);
+      // Dependency tracking should include both files
+      assert(
+        bundleResult.dependencyFilePaths.has(
+          fileURLToPath(import.meta.resolve("../../test_data/js/file-with-import.js")),
+        ),
+      );
+      assert(
+        bundleResult.dependencyFilePaths.has(
+          fileURLToPath(import.meta.resolve("../../test_data/js/imported-file.ts")),
+        ),
+      );
+    });
+
+    test("getJSImportBundle throws when an import path does not exist", async () => {
+      const result = js`${js.import("/test_data/js/nonexistent-file.js")}`;
+      const globalContribution = result.bundles.get("global") as BundleContribution;
+      assert(globalContribution);
+
+      await assert.rejects(
+        () => getJSImportBundle(globalContribution.importPaths),
+        (err: unknown): err is BundleError => {
+          assert(err instanceof BundleError);
+          assert(err.cause instanceof Error);
+          return true;
+        },
+      );
+    });
+
+    test("getJSImportBundle returns the same Promise for repeated calls with the same path set", async () => {
+      const result = js`${js.import("../../test_data/js/external-script.js", "bundle1")}`;
+      const bundle1Contribution = result.bundles.get("bundle1") as BundleContribution;
+      assert(bundle1Contribution);
+
+      const promise1 = getJSImportBundle(bundle1Contribution.importPaths);
+      const promise2 = getJSImportBundle(bundle1Contribution.importPaths);
+      assert.strictEqual(promise1, promise2);
+
+      const result1 = await promise1;
+      const result2 = await promise2;
+      assert.strictEqual(result1, result2);
+      // Same Uint8Array reference, not just same content
+      assert.strictEqual(result1.code, result2.code);
     });
   });
 

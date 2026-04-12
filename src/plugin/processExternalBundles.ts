@@ -12,19 +12,43 @@ import { renderHTML } from '../html/renderHTML.ts';
 import { parseHTML } from '../html/parseHTML.ts';
 import { safeWriteFile } from '../utils/safeWriteFile.ts';
 import { concatUint8Arrays } from '../utils/concatUint8Arrays.ts';
+import { getCSSImportBundle, getJSImportBundle } from '../bundle/bundleImportCache.ts';
 import { makeBundleVersionPlaceholder } from './bundleVersionPlaceholder.ts';
+import type { PageBundleAggregate } from './processPageComponent.ts';
 
 /**
- * Performs final transforms on the combined contents of an external CSS bundle, then writes the bundle to disk
+ * Cross-page merged shape for a single bundle name. Built up in `eleventy.after` by
+ * unioning import paths and concatenating raw contents from every page that contributed
+ * to the bundle.
+ */
+export interface MergedBundleAggregate {
+  importPaths: Set<string>;
+  rawContents: Uint8Array[];
+}
+
+/**
+ * Performs final transforms on the merged contents of an external CSS bundle, then writes the bundle to disk.
+ *
+ * The merged aggregate's `importPaths` are bundled in a single `getCSSImportBundle` call so
+ * lightningcss runs once over the union of every page's imports for this bundle name.
+ * That output is concatenated with each page's raw contribution and run through the final
+ * lightningcss transform pass.
  */
 export const processAndWriteExternalCSSBundle = async (
   bundleName: string,
-  bundleContents: Set<Uint8Array>,
+  bundleAggregate: MergedBundleAggregate,
   output: string,
   config: YetiConfig,
   bundleContentHashes: Map<string, string>,
 ) => {
-  const combinedCode = concatUint8Arrays(bundleContents);
+  const codeChunks: Uint8Array[] = [];
+  if (bundleAggregate.importPaths.size > 0) {
+    const importBundleResult = await getCSSImportBundle(bundleAggregate.importPaths);
+    codeChunks.push(importBundleResult.code);
+  }
+  codeChunks.push(...bundleAggregate.rawContents);
+  const combinedCode = concatUint8Arrays(codeChunks);
+
   const outputFilePath = config.css.deriveBundleFilePath(bundleName);
 
   const transformConfig = config.css.deriveBundleTransformConfig(bundleName, config.css.defaultBundleTransformConfig);
@@ -42,16 +66,28 @@ export const processAndWriteExternalCSSBundle = async (
 };
 
 /**
- * Performs final transforms on the combined contents of an external JS bundle, then writes the bundle to disk
+ * Performs final transforms on the merged contents of an external JS bundle, then writes the bundle to disk.
+ *
+ * The merged aggregate's `importPaths` are bundled in a single `getJSImportBundle` call so
+ * esbuild runs once over the union of every page's imports for this bundle name. That
+ * single deduplicated output is concatenated with each page's raw contribution and run
+ * through the final esbuild transform pass.
  */
 export const processAndWriteExternalJSBundle = async (
   bundleName: string,
-  bundleContents: Set<Uint8Array>,
+  bundleAggregate: MergedBundleAggregate,
   output: string,
   config: YetiConfig,
   bundleContentHashes: Map<string, string>,
 ) => {
-  const combinedCode = concatUint8Arrays(bundleContents);
+  const codeChunks: Uint8Array[] = [];
+  if (bundleAggregate.importPaths.size > 0) {
+    const importBundleResult = await getJSImportBundle(bundleAggregate.importPaths);
+    codeChunks.push(importBundleResult.code);
+  }
+  codeChunks.push(...bundleAggregate.rawContents);
+  const combinedCode = concatUint8Arrays(codeChunks);
+
   const outputFilePath = config.js.deriveBundleFilePath(bundleName);
 
   const transformConfig = config.js.deriveBundleTransformConfig(bundleName, config.js.defaultBundleTransformConfig);
@@ -62,6 +98,28 @@ export const processAndWriteExternalJSBundle = async (
     createHash("sha256").update(transformResult.code).digest("hex").slice(0, 8),
   );
   await safeWriteFile(join(output, outputFilePath), transformResult.code);
+};
+
+/**
+ * Merge a single page's bundle aggregates into the cross-page merged aggregates.
+ * Import paths are unioned (string-deduped via the Set), and raw contents are appended
+ * preserving each page's contribution.
+ */
+export const mergePageBundleAggregates = (
+  merged: Map<string, MergedBundleAggregate>,
+  pageBundles: Map<string, PageBundleAggregate>,
+): void => {
+  for (const [bundleName, pageAgg] of pageBundles) {
+    let mergedAgg = merged.get(bundleName);
+    if (!mergedAgg) {
+      mergedAgg = { importPaths: new Set(), rawContents: [] };
+      merged.set(bundleName, mergedAgg);
+    }
+    for (const importPath of pageAgg.importPaths) {
+      mergedAgg.importPaths.add(importPath);
+    }
+    mergedAgg.rawContents.push(...pageAgg.rawContents);
+  }
 };
 
 /**

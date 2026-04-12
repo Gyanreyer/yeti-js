@@ -1,5 +1,6 @@
 import type { CustomAtRules, TransformOptions as LightningCSSTransformOptions } from 'lightningcss';
 import type { TransformOptions as EsbuildTransformOptions } from 'esbuild';
+import { join } from 'node:path';
 
 import type { YetiNode, YetiRootNode } from './html/types.ts';
 import type { DeepPartial } from './utils/utilityTypes.ts';
@@ -245,8 +246,10 @@ export type YetiConfig = {
 export type PartialYetiConfig = DeepPartial<YetiConfig>;
 
 const config: YetiConfig = {
-  inputDir: "",
-  outputDir: "",
+  // Default inputDir is the current working directory, but we will override this with the actual Eleventy input dir when we initialize the plugin.
+  inputDir: process.cwd(),
+  // Default outputDir is a "_site" directory in the current working directory, but we will override this with the actual Eleventy output dir when we initialize the plugin.
+  outputDir: join(process.cwd(), "_site"),
   js: {
     defaultBundleName: "global",
     defaultBundleTransformConfig: {

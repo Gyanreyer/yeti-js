@@ -9,16 +9,19 @@ import type { EleventyPageData, YetiPageComponent } from './types.ts';
 import { YETI_NODE_TYPE } from '../html/types.ts';
 import { isYetiNode } from '../html/utils.ts';
 import { renderHTML } from '../html/renderHTML.ts';
-import { processPageComponent } from './processPageComponent.ts';
+import { processPageComponent, type PageBundleAggregate } from './processPageComponent.ts';
 import {
   resetUsedExternalSpecifiers,
   buildAndWriteExternalDependencies,
 } from '../js/externalDependencies.ts';
 import { mergeBundleSetMaps } from '../bundle/mergeBundleContents.ts';
+import { invalidateStaleEntries } from '../bundle/bundleImportCache.ts';
 import {
   processAndWriteExternalCSSBundle,
   processAndWriteExternalJSBundle,
   processAndWriteExternalHTMLBundle,
+  mergePageBundleAggregates,
+  type MergedBundleAggregate,
 } from './processExternalBundles.ts';
 
 export const yetiPlugin = (eleventyConfig: EleventyUserConfig, userConfig: Partial<YetiConfig> = {}) => {
@@ -47,16 +50,20 @@ export const yetiPlugin = (eleventyConfig: EleventyUserConfig, userConfig: Parti
     });
 
     resetUsedExternalSpecifiers();
+
+    // Drop any stale entries from the bundle import cache so watch-mode rebuilds pick up
+    // dependency file changes. Untouched entries survive across builds.
+    await invalidateStaleEntries();
   });
 
   eleventyConfig.addTemplateFormats(config.pageTemplateFileExtension);
 
-  // Maps input paths to the external CSS/JS/HTML content which we should gather into bundles in the "eleventy.after" hook
-  // and write to files.
+  // Maps input paths to the per-page external bundle aggregates which we should merge across
+  // pages in the "eleventy.after" hook before bundling, transforming, and writing to files.
   const globalExternalBundleContents: {
     [inputPath: string]: {
-      css: Map<string, Set<Uint8Array<ArrayBufferLike>>>;
-      js: Map<string, Set<Uint8Array>>;
+      css: Map<string, PageBundleAggregate>;
+      js: Map<string, PageBundleAggregate>;
       htmlImportPaths: Map<string, Set<string>>;
     };
   } = {};
@@ -107,15 +114,15 @@ export const yetiPlugin = (eleventyConfig: EleventyUserConfig, userConfig: Parti
     };
     results: Array<{ outputPath: string }>;
   }) => {
-    // Combine the contents of the bundles with the same name across different pages so we can transform
-    // and write them out as single bundles in the output directory
-    const combinedCSSBundleContents = new Map<string, Set<Uint8Array>>();
-    const combinedJSBundleContents = new Map<string, Set<Uint8Array>>();
+    // Combine the per-page bundle aggregates for each bundle name across pages so we can run
+    // a single bundling/transform pass per merged bundle in the output directory.
+    const mergedCSSBundles = new Map<string, MergedBundleAggregate>();
+    const mergedJSBundles = new Map<string, MergedBundleAggregate>();
     const combinedHTMLImportPaths = new Map<string, Set<string>>();
 
     for (const { css, js, htmlImportPaths } of Object.values(globalExternalBundleContents)) {
-      mergeBundleSetMaps(combinedCSSBundleContents, css);
-      mergeBundleSetMaps(combinedJSBundleContents, js);
+      mergePageBundleAggregates(mergedCSSBundles, css);
+      mergePageBundleAggregates(mergedJSBundles, js);
       mergeBundleSetMaps(combinedHTMLImportPaths, htmlImportPaths);
     }
 
@@ -123,11 +130,11 @@ export const yetiPlugin = (eleventyConfig: EleventyUserConfig, userConfig: Parti
     const bundleContentHashes = new Map<string, string>();
 
     await Promise.all([
-      ...Array.from(combinedCSSBundleContents, ([bundleName, bundleContents]) =>
-        processAndWriteExternalCSSBundle(bundleName, bundleContents, output, config, bundleContentHashes)
+      ...Array.from(mergedCSSBundles, ([bundleName, mergedAggregate]) =>
+        processAndWriteExternalCSSBundle(bundleName, mergedAggregate, output, config, bundleContentHashes)
       ),
-      ...Array.from(combinedJSBundleContents, ([bundleName, bundleContents]) =>
-        processAndWriteExternalJSBundle(bundleName, bundleContents, output, config, bundleContentHashes)
+      ...Array.from(mergedJSBundles, ([bundleName, mergedAggregate]) =>
+        processAndWriteExternalJSBundle(bundleName, mergedAggregate, output, config, bundleContentHashes)
       ),
       ...Array.from(combinedHTMLImportPaths, ([bundleName, importPaths]) =>
         processAndWriteExternalHTMLBundle(bundleName, importPaths, output, config, bundleContentHashes)

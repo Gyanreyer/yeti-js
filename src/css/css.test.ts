@@ -1,19 +1,33 @@
-import { describe, test } from "node:test";
+import { describe, test, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
 
-import { BUNDLE_TYPE } from "../bundle/bundle.ts";
+import {
+  BUNDLE_TYPE,
+  type BundleContribution,
+  type BundleSrcObject,
+  type BundleInlineObject,
+} from "../bundle/bundle.ts";
 import { textEncoder } from "../utils/textEncoder.ts";
+import { textDecoder } from "../utils/textDecoder.ts";
 
 import { BundleError } from "../error.ts";
 import { html } from "../html/html.ts";
 import { js } from "../js/js.ts";
 
 import { css, isCSSTemplateResult } from "./css.ts";
+import {
+  clearBundleImportCache,
+  getCSSImportBundle,
+} from "../bundle/bundleImportCache.ts";
 
 describe("css", () => {
+  afterEach(() => {
+    clearBundleImportCache();
+  });
+
   describe("css templates", () => {
-    test("A simple string-only css template is processed as expected", async () => {
+    test("A simple string-only css template produces a contribution with raw content and no imports", () => {
       const result = css`
         body {
           margin: 1000px;
@@ -21,22 +35,22 @@ describe("css", () => {
       `;
       assert(isCSSTemplateResult(result));
       assert.deepStrictEqual(Array.from(result.bundles.keys()), ["global"]);
-      const globalBundleGetter = result.bundles.get("global");
-      assert(globalBundleGetter);
-      const globalBundleResult = await globalBundleGetter();
 
-      assert.deepStrictEqual(globalBundleResult, {
-        bundleName: "global",
-        code: textEncoder.encode(`
+      const globalContribution = result.bundles.get("global") as BundleContribution;
+      assert(globalContribution);
+      assert.strictEqual(globalContribution.importPaths.size, 0);
+      assert.deepStrictEqual(
+        globalContribution.rawContent,
+        textEncoder.encode(`
         body {
           margin: 1000px;
         }
       `),
-        dependencies: new Set([import.meta.filename]),
-      });
+      );
+      assert.strictEqual(globalContribution.callerFilePath, import.meta.filename);
     });
 
-    test("A css template with bundles specified is processed as expected", async () => {
+    test("A css template with multiple bundles separates raw content per bundle name", () => {
       const result = css`
         ${css.bundle("my-bundle")}
         :root {
@@ -55,35 +69,31 @@ describe("css", () => {
         ["my-bundle", "another-bundle"],
       );
 
-      const myBundleGetter = result.bundles.get("my-bundle");
-      assert(myBundleGetter);
-      const myBundleResult = await myBundleGetter();
-      assert.deepStrictEqual(myBundleResult, {
-        bundleName: "my-bundle",
-        code: textEncoder.encode(`
+      const myBundleContribution = result.bundles.get("my-bundle") as BundleContribution;
+      assert(myBundleContribution);
+      assert.deepStrictEqual(
+        myBundleContribution.rawContent,
+        textEncoder.encode(`
         :root {
           color: rebeccapurple;
         }
 
         `),
-        dependencies: new Set([import.meta.filename]),
-      });
+      );
 
-      const anotherBundleGetter = result.bundles.get("another-bundle");
-      assert(anotherBundleGetter);
-      const anotherBundleResult = await anotherBundleGetter();
-      assert.deepStrictEqual(anotherBundleResult, {
-        bundleName: "another-bundle",
-        code: textEncoder.encode(`
+      const anotherBundleContribution = result.bundles.get("another-bundle") as BundleContribution;
+      assert(anotherBundleContribution);
+      assert.deepStrictEqual(
+        anotherBundleContribution.rawContent,
+        textEncoder.encode(`
         body {
           margin: 0;
         }
       `),
-        dependencies: new Set([import.meta.filename]),
-      });
+      );
     });
 
-    test("A css template with imports is processed as expected", async () => {
+    test("A css template with imports captures resolved import paths per bundle", () => {
       const result = css`
         ${css.import("../../test_data/css/external-styles.css", "bundle-1")}
         ${css.import("/test_data/css/external-styles-2.css", "bundle-2")}
@@ -93,59 +103,33 @@ describe("css", () => {
       assert(isCSSTemplateResult(result));
       assert.deepStrictEqual(Array.from(result.bundles.keys()), ["bundle-1", "bundle-2", "bundle-3"]);
 
-      const bundle1Getter = result.bundles.get("bundle-1");
-      assert(bundle1Getter);
-      const bundle1Result = await bundle1Getter();
-      assert.deepStrictEqual(bundle1Result, {
-        bundleName: "bundle-1",
-        code: textEncoder.encode(`:root {
-  font-size: 100px;
-}
-`),
-        dependencies: new Set([
-          fileURLToPath(import.meta.resolve("../../test_data/css/external-styles.css"))
-        ]),
-      });
+      const bundle1Contribution = result.bundles.get("bundle-1") as BundleContribution;
+      assert(bundle1Contribution);
+      assert.deepStrictEqual(
+        bundle1Contribution.importPaths,
+        new Set([fileURLToPath(import.meta.resolve("../../test_data/css/external-styles.css"))]),
+      );
 
-      const bundle2Getter = result.bundles.get("bundle-2");
-      assert(bundle2Getter);
-      const bundle2Result = await bundle2Getter();
-      assert.deepStrictEqual(bundle2Result, {
-        bundleName: "bundle-2",
-        code: textEncoder.encode(`h1 {
-  font-family: sans-serif;
-}
-`),
-        dependencies: new Set([
-          fileURLToPath(import.meta.resolve("../../test_data/css/external-styles-2.css"))
-        ]),
-      });
+      const bundle2Contribution = result.bundles.get("bundle-2") as BundleContribution;
+      assert(bundle2Contribution);
+      assert.deepStrictEqual(
+        bundle2Contribution.importPaths,
+        new Set([fileURLToPath(import.meta.resolve("../../test_data/css/external-styles-2.css"))]),
+      );
 
-      const bundle3Getter = result.bundles.get("bundle-3");
-      assert(bundle3Getter);
-      const bundle3Result = await bundle3Getter();
-      assert.deepStrictEqual(bundle3Result, {
-        bundleName: "bundle-3",
-        code: textEncoder.encode(`:root {
-  --brand-color: rebeccapurple;
-}
-
-:root {
-  font-size: 100px;
-}
-`),
-        dependencies: new Set([
-          fileURLToPath(import.meta.resolve("../../test_data/css/styles-with-import.css")),
-          fileURLToPath(import.meta.resolve("../../test_data/css/imported-styles.css")),
-        ]),
-      });
+      const bundle3Contribution = result.bundles.get("bundle-3") as BundleContribution;
+      assert(bundle3Contribution);
+      assert.deepStrictEqual(
+        bundle3Contribution.importPaths,
+        new Set([fileURLToPath(import.meta.resolve("../../test_data/css/styles-with-import.css"))]),
+      );
     });
 
-    test("Bundles containing only whitespace are dropped", async () => {
+    test("Bundles containing only whitespace are dropped", () => {
       const result = css`
         ${css.bundle("empty-bundle")}
-        
-        
+
+
         ${css.bundle("non-empty-bundle")}
         body { margin: 0; }
       `;
@@ -153,69 +137,31 @@ describe("css", () => {
       assert(isCSSTemplateResult(result));
       // empty-bundle should be filtered out because it contains only whitespace
       assert.deepStrictEqual(Array.from(result.bundles.keys()), ["non-empty-bundle"]);
-
-      const nonEmptyBundleGetter = result.bundles.get("non-empty-bundle");
-      assert(nonEmptyBundleGetter);
-      const nonEmptyBundleResult = await nonEmptyBundleGetter();
-      assert.deepStrictEqual(nonEmptyBundleResult, {
-        bundleName: "non-empty-bundle",
-        code: textEncoder.encode(`
-        body { margin: 0; }
-      `),
-        dependencies: new Set([import.meta.filename]),
-      });
     });
 
-    test("Bundles with imports are kept even if raw content is only whitespace", async () => {
+    test("Bundles whose raw content is whitespace-only but have imports are kept", () => {
       const result = css`
         ${css.import("../../test_data/css/external-styles.css", "bundle-with-import")}
         ${css.bundle("bundle-with-import")}
-        
-        
+
+
       `;
 
       assert(isCSSTemplateResult(result));
-      // bundle-with-import should be kept because it has imports
       assert.deepStrictEqual(Array.from(result.bundles.keys()), ["bundle-with-import"]);
 
-      const bundleGetter = result.bundles.get("bundle-with-import");
-      assert(bundleGetter);
-      const bundleResult = await bundleGetter();
-
-      assert.deepStrictEqual(bundleResult, {
-        bundleName: "bundle-with-import",
-        code: textEncoder.encode(`:root {
-  font-size: 100px;
-}
-`),
-        dependencies: new Set([
-          fileURLToPath(import.meta.resolve("../../test_data/css/external-styles.css")),
-          // The caller file is not a dependency since we dropped the whitespace-only content
-        ]),
-      });
+      const contribution = result.bundles.get("bundle-with-import") as BundleContribution;
+      assert(contribution);
+      assert.deepStrictEqual(
+        contribution.importPaths,
+        new Set([fileURLToPath(import.meta.resolve("../../test_data/css/external-styles.css"))]),
+      );
+      assert.strictEqual(contribution.rawContent.byteLength, 0);
+      // Caller is not a dep when the bundle is imports-only
+      assert.strictEqual(contribution.callerFilePath, undefined);
     });
 
-    test("A css template with imports for files that don't exist throws an error", async () => {
-      const result = css`${css.import("/test_data/css/non-existent-file.css")}`;
-
-      assert.deepEqual(Array.from(result.bundles.keys()), ["global"]);
-
-      const globalBundleGetter = result.bundles.get("global");
-      assert(globalBundleGetter);
-
-      try {
-        await globalBundleGetter();
-        assert.fail("Expected globalBundleGetter() to throw an error due to the missing file.");
-      } catch (error) {
-        assert(error instanceof Error);
-        assert.strictEqual(error.message, `css.import() failed to import file "${fileURLToPath(import.meta.resolve("../../test_data/css/non-existent-file.css"))}" for bundle "global".`);
-        // The cause should be a lightning CSS error
-        assert(error.cause instanceof Error);
-        assert.strictEqual(error.cause.message, "No such file or directory (os error 2)");
-      }
-    });
-
-    test("A css template with a js or html import throws an error", async () => {
+    test("A css template with a js or html import throws an error at construction time", () => {
       assert.throws(
         () => css`${js.import("/test_data/js/external-script.js")}`,
         new BundleError(
@@ -230,41 +176,77 @@ describe("css", () => {
         ),
       );
     });
+  });
 
-    test("CSS template results are cached, and the bundle getters return the same result on multiple calls", async () => {
-      const result = css`
-        ${css.import("../../test_data/css/external-styles.css", "my-bundle")}
-      `;
+  describe("bundling contributions via the bundle import cache", () => {
+    test("getCSSImportBundle bundles a single import path through lightningcss", async () => {
+      const result = css`${css.import("../../test_data/css/external-styles.css", "my-bundle")}`;
+      const myBundleContribution = result.bundles.get("my-bundle") as BundleContribution;
+      assert(myBundleContribution);
 
-      assert(isCSSTemplateResult(result));
-      assert.deepStrictEqual(Array.from(result.bundles.keys()), ["my-bundle"]);
+      const bundleResult = await getCSSImportBundle(myBundleContribution.importPaths);
+      const code = textDecoder.decode(bundleResult.code);
+      assert.match(code, /font-size/);
 
-      const myBundleGetter1 = result.bundles.get("my-bundle");
-      const myBundleGetter2 = result.bundles.get("my-bundle");
-      assert(myBundleGetter1);
-      assert(myBundleGetter2);
-      assert.strictEqual(myBundleGetter1, myBundleGetter2);
-
-      const myBundleResult1 = await myBundleGetter1();
-      const myBundleResult2 = await myBundleGetter2();
-      assert.strictEqual(myBundleResult1, myBundleResult2);
-      assert.deepStrictEqual(myBundleResult1, {
-        bundleName: "my-bundle",
-        code: textEncoder.encode(`:root {
-  font-size: 100px;
-}
-`),
-        dependencies: new Set([
+      assert(
+        bundleResult.dependencyFilePaths.has(
           fileURLToPath(import.meta.resolve("../../test_data/css/external-styles.css")),
-        ]),
-      });
+        ),
+      );
+    });
+
+    test("getCSSImportBundle resolves transitive @import statements as dependencies", async () => {
+      const result = css`${css.import("/test_data/css/styles-with-import.css", "bundle")}`;
+      const contribution = result.bundles.get("bundle") as BundleContribution;
+      assert(contribution);
+
+      const bundleResult = await getCSSImportBundle(contribution.importPaths);
+      assert(
+        bundleResult.dependencyFilePaths.has(
+          fileURLToPath(import.meta.resolve("../../test_data/css/styles-with-import.css")),
+        ),
+      );
+      assert(
+        bundleResult.dependencyFilePaths.has(
+          fileURLToPath(import.meta.resolve("../../test_data/css/imported-styles.css")),
+        ),
+      );
+    });
+
+    test("getCSSImportBundle throws when an import path does not exist", async () => {
+      const result = css`${css.import("/test_data/css/non-existent-file.css")}`;
+      const globalContribution = result.bundles.get("global") as BundleContribution;
+      assert(globalContribution);
+
+      await assert.rejects(
+        () => getCSSImportBundle(globalContribution.importPaths),
+        (err: unknown): err is BundleError => {
+          assert(err instanceof BundleError);
+          assert(err.cause instanceof Error);
+          return true;
+        },
+      );
+    });
+
+    test("getCSSImportBundle returns the same Promise for repeated calls with the same path set", async () => {
+      const result = css`${css.import("../../test_data/css/external-styles.css", "my-bundle")}`;
+      const contribution = result.bundles.get("my-bundle") as BundleContribution;
+      assert(contribution);
+
+      const promise1 = getCSSImportBundle(contribution.importPaths);
+      const promise2 = getCSSImportBundle(contribution.importPaths);
+      assert.strictEqual(promise1, promise2);
+
+      const result1 = await promise1;
+      const result2 = await promise2;
+      assert.strictEqual(result1, result2);
     });
   });
 
   describe("css.src()", () => {
     test("css.src() returns the expected bundle src object", () => {
       const result = css.src("my-bundle");
-      assert.deepStrictEqual(result, {
+      assert.deepStrictEqual<BundleSrcObject<"css">>(result, {
         assetType: "css",
         bundleName: "my-bundle",
         [BUNDLE_TYPE]: "src",
@@ -275,7 +257,7 @@ describe("css", () => {
   describe("css.inline()", () => {
     test("css.inline() returns the expected bundle inline object", () => {
       const result = css.inline("my-bundle");
-      assert.deepStrictEqual(result, {
+      assert.deepStrictEqual<BundleInlineObject<"css">>(result, {
         assetType: "css",
         bundleName: "my-bundle",
         [BUNDLE_TYPE]: "inline",

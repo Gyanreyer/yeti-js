@@ -2,7 +2,7 @@ import { transform as transformCSS } from "lightningcss";
 import { transform as transformJS } from 'esbuild';
 import { open } from "node:fs/promises";
 
-import { getExternalBundleFilePath, isBundleSrcObject, isInlinedBundleElementNode, WILDCARD_BUNDLE_NAME } from "../bundle/bundle.ts";
+import { getExternalBundleFilePath, isBundleSrcObject, isInlinedBundleElementNode, WILDCARD_BUNDLE_NAME, type BundleContribution } from "../bundle/bundle.ts";
 import { YETI_NODE_TYPE } from "../html/types.ts";
 import type { YetiRootNode, YetiElementNode, YetiChildNode, YetiNode } from "../html/types.ts";
 import type { EleventyPageData, YetiPageComponent } from "./types.ts";
@@ -17,6 +17,23 @@ import { concatUint8Arrays } from "../utils/concatUint8Arrays.ts";
 import { textDecoder } from "../utils/textDecoder.ts";
 import { mergeHeadContent } from "../html/mergeHeadContent.ts";
 import { makeBundleVersionPlaceholder } from "./bundleVersionPlaceholder.ts";
+import { getCSSImportBundle, getJSImportBundle } from "../bundle/bundleImportCache.ts";
+
+/**
+ * A page-level aggregate of bundle contributions for a single bundle name. We collect every
+ * `BundleContribution` whose name matches across the page component and its rendered tree
+ * into one of these structures, then use it to:
+ *
+ * 1. Render inline bundle content for `${js.inline()}` / `${css.inline()}` references on
+ *    this page (the imports are bundled-once via the bundle import cache, the per-component
+ *    raw content is concatenated).
+ * 2. Hand the same shape up to `eleventy.after` so cross-page merging can union import
+ *    paths and concat raw contents one more time before the final transform-and-write step.
+ */
+export interface PageBundleAggregate {
+  importPaths: Set<string>;
+  rawContents: Uint8Array[];
+}
 
 /**
  * Takes a page component and its props, renders the component to a Yeti node tree, processes any CSS/JS/HTML asset bundles used by the component,
@@ -25,7 +42,7 @@ import { makeBundleVersionPlaceholder } from "./bundleVersionPlaceholder.ts";
  * Steps:
  * 1. Extract any CSS/JS attached to the page component on its pageComponent.css and pageComponent.js properties
  * 2. Render the page component to a Yeti node tree
- * 3. Merge the CSS/JS bundles and dependencies from the rendered node tree with the CSS/JS from step 1
+ * 3. Merge the CSS/JS bundle contributions and dependencies from the rendered node tree with the CSS/JS from step 1
  * 4. Perform a transformation pass over the Yeti node tree...
  *    - For each BundleInlineElementNode, get the page's combined raw bundle content for the specified bundle name and asset type
  *      and perform any desired transformations on it. JS bundles should be transformed with esbuild, CSS bundles should be transformed with lightningcss,
@@ -33,81 +50,79 @@ import { makeBundleVersionPlaceholder } from "./bundleVersionPlaceholder.ts";
  *      The transformed bundle content should be cached so that if multiple BundleInlineElementNodes reference the same bundle, the bundle content is only transformed once.
  *      Insert the transformed bundle content into the node tree in place of the BundleInlineElementNode.
  *    - For each node attribute which is a BundleSrcObject, get the bundle file path for the specified bundle name and asset type and set that as the new attribute value.
- *      Track the set of getters for the referenced bundle as an externally refrenced bundle so we can return them and write the combined bundle contents to external files in the "eleventy.after" hook.
- * 5. Render the final processed node tree to an HTML string and return it, along with the map of external bundle getters which can be used to get the final transformed bundle contents for any externally
- *    referenced bundles so that we can determine the final external bundle contents and file paths
- *      and write the transformed bundle content to an external file. The file path should be determined by config.css.deriveBundleFilePath or config.js.deriveBundleFilePath, depending on the asset type.
+ *      Track the page bundle aggregates for any externally referenced bundle so we can return them and write the combined bundle contents to external files in the "eleventy.after" hook.
+ * 5. Render the final processed node tree to an HTML string and return it, along with the page bundle aggregates which can be used by the cross-page merge step
+ *      to determine the final external bundle contents and file paths and write the transformed bundle content to external files. The file path should be determined by config.css.deriveBundleFilePath or config.js.deriveBundleFilePath, depending on the asset type.
  */
 export const processPageComponent = async (pageComponent: YetiPageComponent, pageProps: EleventyPageData): Promise<{
   pageRootNode: YetiRootNode;
   externalBundles: {
-    css: Map<string, Set<Uint8Array>>;
-    js: Map<string, Set<Uint8Array>>;
+    css: Map<string, PageBundleAggregate>;
+    js: Map<string, PageBundleAggregate>;
     htmlImportPaths: Map<string, Set<string>>;
   };
   dependencies: Set<string>;
 }> => {
-  const pageCssBundleCode = new Map<string, Set<Uint8Array>>();
-
   const pageDependencies = new Set<string>();
 
+  // Page-level aggregates per bundle name. Populated from both the page component's own
+  // js/css template results and from the rendered tree's collected component assets.
+  const pageCssBundleAggregates = new Map<string, PageBundleAggregate>();
+  const pageJsBundleAggregates = new Map<string, PageBundleAggregate>();
+
+  const addBundleContribution = (
+    aggregates: Map<string, PageBundleAggregate>,
+    bundleName: string,
+    contribution: BundleContribution,
+  ) => {
+    let agg = aggregates.get(bundleName);
+    if (!agg) {
+      agg = { importPaths: new Set(), rawContents: [] };
+      aggregates.set(bundleName, agg);
+    }
+    for (const importPath of contribution.importPaths) {
+      agg.importPaths.add(importPath);
+    }
+    if (contribution.rawContent.byteLength > 0) {
+      agg.rawContents.push(contribution.rawContent);
+    }
+    if (contribution.callerFilePath) {
+      pageDependencies.add(contribution.callerFilePath);
+    }
+  };
+
+  // 1. Page component's own CSS/JS contributions
   if (isCSSTemplateResult(pageComponent.css)) {
-    await Promise.all(Array.from(pageComponent.css.bundles.entries()).map(async ([bundleName, bundleGetter]) => {
-      const result = await bundleGetter();
-      pageCssBundleCode.set(bundleName, new Set([result.code]));
-      for (const dependency of result.dependencies) {
-        pageDependencies.add(dependency);
-      }
-    }));
+    for (const [bundleName, contribution] of pageComponent.css.bundles) {
+      addBundleContribution(pageCssBundleAggregates, bundleName, contribution);
+    }
   }
-  const pageJsBundleCode = new Map<string, Set<Uint8Array>>();
-
   if (isJSTemplateResult(pageComponent.js)) {
-    await Promise.all(Array.from(pageComponent.js.bundles.entries()).map(async ([bundleName, bundleGetter]) => {
-      const result = await bundleGetter();
-      pageJsBundleCode.set(bundleName, new Set([result.code]));
-      for (const dependency of result.dependencies) {
-        pageDependencies.add(dependency);
-      }
-    }));
+    for (const [bundleName, contribution] of pageComponent.js.bundles) {
+      addBundleContribution(pageJsBundleAggregates, bundleName, contribution);
+    }
   }
 
+  // 2. Render the page component
   const pageRootNode = await pageComponent(pageProps);
 
   // Merge any collected Head component content into the document's <head> element
   mergeHeadContent(pageRootNode);
 
+  // 3. Component-tree CSS/JS contributions, in document order (parseHTML's Set preserves insertion order)
   if (pageRootNode.assets) {
     if (pageRootNode.assets.css) {
-      for (const [bundleName, bundleGetterSet] of pageRootNode.assets.css) {
-        let bundleGetters = pageCssBundleCode.get(bundleName);
-        if (!bundleGetters) {
-          bundleGetters = new Set();
-          pageCssBundleCode.set(bundleName, bundleGetters);
+      for (const [bundleName, contributionSet] of pageRootNode.assets.css) {
+        for (const contribution of contributionSet) {
+          addBundleContribution(pageCssBundleAggregates, bundleName, contribution);
         }
-        await Promise.all(Array.from(bundleGetterSet).map(async (bundleGetter) => {
-          const result = await bundleGetter();
-          bundleGetters.add(result.code);
-          for (const dependency of result.dependencies) {
-            pageDependencies.add(dependency);
-          }
-        }));
       }
     }
     if (pageRootNode.assets.js) {
-      for (const [bundleName, bundleGetterSet] of pageRootNode.assets.js) {
-        let bundleGetters = pageJsBundleCode.get(bundleName);
-        if (!bundleGetters) {
-          bundleGetters = new Set();
-          pageJsBundleCode.set(bundleName, bundleGetters);
+      for (const [bundleName, contributionSet] of pageRootNode.assets.js) {
+        for (const contribution of contributionSet) {
+          addBundleContribution(pageJsBundleAggregates, bundleName, contribution);
         }
-        await Promise.all(Array.from(bundleGetterSet).map(async (bundleGetter) => {
-          const result = await bundleGetter();
-          bundleGetters.add(result.code);
-          for (const dependency of result.dependencies) {
-            pageDependencies.add(dependency);
-          }
-        }));
       }
     }
     if (pageRootNode.assets.html?.dependencies) {
@@ -119,6 +134,45 @@ export const processPageComponent = async (pageComponent: YetiPageComponent, pag
 
   const config = getConfig();
 
+  /**
+   * Resolve a page bundle aggregate into a single Uint8Array of source code by combining
+   * the bundled imports (via the process-level cache) with the per-component raw content.
+   * Also adds any tracked dependencies from the cache to the page dependency set.
+   *
+   * Returns null if the aggregate is empty (no imports and no raw content).
+   */
+  const resolveJSBundleSource = async (aggregate: PageBundleAggregate): Promise<Uint8Array | null> => {
+    const codeChunks: Uint8Array[] = [];
+    if (aggregate.importPaths.size > 0) {
+      const result = await getJSImportBundle(aggregate.importPaths);
+      codeChunks.push(result.code);
+      for (const dep of result.dependencyFilePaths) {
+        pageDependencies.add(dep);
+      }
+    }
+    codeChunks.push(...aggregate.rawContents);
+    if (codeChunks.length === 0) {
+      return null;
+    }
+    return concatUint8Arrays(codeChunks);
+  };
+
+  const resolveCSSBundleSource = async (aggregate: PageBundleAggregate): Promise<Uint8Array | null> => {
+    const codeChunks: Uint8Array[] = [];
+    if (aggregate.importPaths.size > 0) {
+      const result = await getCSSImportBundle(aggregate.importPaths);
+      codeChunks.push(result.code);
+      for (const dep of result.dependencyFilePaths) {
+        pageDependencies.add(dep);
+      }
+    }
+    codeChunks.push(...aggregate.rawContents);
+    if (codeChunks.length === 0) {
+      return null;
+    }
+    return concatUint8Arrays(codeChunks);
+  };
+
   const transformedInlineCSSBundleCache = new Map<string, string>();
   const getInlinedCSSBundleContent = async (bundleName: string): Promise<string | null> => {
     const cachedBundleContent = transformedInlineCSSBundleCache.get(bundleName);
@@ -126,12 +180,15 @@ export const processPageComponent = async (pageComponent: YetiPageComponent, pag
       return cachedBundleContent;
     }
 
-    const bundleContentSet = pageCssBundleCode.get(bundleName);
-    if (!bundleContentSet) {
+    const aggregate = pageCssBundleAggregates.get(bundleName);
+    if (!aggregate) {
       return null;
     }
 
-    const combinedRawCode = concatUint8Arrays(bundleContentSet);
+    const combinedRawCode = await resolveCSSBundleSource(aggregate);
+    if (!combinedRawCode) {
+      return null;
+    }
 
     const transformConfig = config.css.deriveBundleTransformConfig(bundleName, config.css.defaultBundleTransformConfig);
     const transformResult = transformCSS({
@@ -152,12 +209,15 @@ export const processPageComponent = async (pageComponent: YetiPageComponent, pag
       return cachedBundleContent;
     }
 
-    const bundleContentSet = pageJsBundleCode.get(bundleName);
-    if (!bundleContentSet) {
+    const aggregate = pageJsBundleAggregates.get(bundleName);
+    if (!aggregate) {
       return null;
     }
 
-    const combinedRawCode = concatUint8Arrays(bundleContentSet);
+    const combinedRawCode = await resolveJSBundleSource(aggregate);
+    if (!combinedRawCode) {
+      return null;
+    }
 
     const transformConfig = config.js.deriveBundleTransformConfig(bundleName, config.js.defaultBundleTransformConfig);
     const transformResult = await transformJS(combinedRawCode, transformConfig);
@@ -202,7 +262,6 @@ export const processPageComponent = async (pageComponent: YetiPageComponent, pag
     let parsedBundleRootNode = await parseHTML(bundleContentBuffer);
 
     const transformConfig = config.html.deriveBundleTransformConfig(bundleName, config.html.defaultBundleTransformConfig);
-    transformConfig.processNodeTree
 
     if (transformConfig.processNodeTree) {
       parsedBundleRootNode = await transformConfig.processNodeTree(parsedBundleRootNode);
@@ -342,7 +401,7 @@ export const processPageComponent = async (pageComponent: YetiPageComponent, pag
 
             switch (assetType) {
               case "css": {
-                if (pageCssBundleCode.has(bundleName)) {
+                if (pageCssBundleAggregates.has(bundleName)) {
                   node.attributes[attrName] = getSrcValueForBundle();
                   usedCSSBundleNames.add(bundleName);
                 } else {
@@ -352,7 +411,7 @@ export const processPageComponent = async (pageComponent: YetiPageComponent, pag
                 break;
               }
               case "js": {
-                if (pageJsBundleCode.has(bundleName)) {
+                if (pageJsBundleAggregates.has(bundleName)) {
                   node.attributes[attrName] = getSrcValueForBundle();
                   usedJSBundleNames.add(bundleName);
                 } else {
@@ -399,8 +458,8 @@ export const processPageComponent = async (pageComponent: YetiPageComponent, pag
 
   if (wildcardNodes.size > 0) {
     const unusedBundleNames = {
-      css: new Set(pageCssBundleCode.keys()).difference(usedCSSBundleNames),
-      js: new Set(pageJsBundleCode.keys()).difference(usedJSBundleNames),
+      css: new Set(pageCssBundleAggregates.keys()).difference(usedCSSBundleNames),
+      js: new Set(pageJsBundleAggregates.keys()).difference(usedJSBundleNames),
       html: new Set(htmlBundleImportPaths.keys()).difference(usedHTMLBundleNames),
     }
 
@@ -501,27 +560,49 @@ export const processPageComponent = async (pageComponent: YetiPageComponent, pag
     }
   }
 
-  // Assemble final map of externally referenced bundle contents which
-  // we'll need to write to external files in the "eleventy.after" hook
+  // Assemble final map of externally referenced bundle aggregates which we'll need to merge
+  // across pages and write to external files in the "eleventy.after" hook.
   const externalBundles = {
-    css: new Map<string, Set<Uint8Array>>(),
-    js: new Map<string, Set<Uint8Array>>(),
+    css: new Map<string, PageBundleAggregate>(),
+    js: new Map<string, PageBundleAggregate>(),
     htmlImportPaths: new Map<string, Set<string>>(),
   };
 
+  // For external bundles, we also need to make sure their import deps are tracked as page
+  // dependencies even if they were never inlined (which would have populated deps as a
+  // side effect of the inline rendering pass). Cache hits make this cheap when the bundle
+  // was already resolved for inline content earlier.
+  const externalDepTrackingTasks: Promise<void>[] = [];
+
   for (const bundleName of usedExternalBundleNames.css) {
-    const bundleCode = pageCssBundleCode.get(bundleName);
-    if (!bundleCode) {
-      throw new Error(`Expected to find bundle code for externally referenced CSS bundle "${bundleName}".`);
+    const aggregate = pageCssBundleAggregates.get(bundleName);
+    if (!aggregate) {
+      throw new Error(`Expected to find aggregate for externally referenced CSS bundle "${bundleName}".`);
     }
-    externalBundles.css.set(bundleName, bundleCode);
+    externalBundles.css.set(bundleName, aggregate);
+    if (aggregate.importPaths.size > 0) {
+      externalDepTrackingTasks.push((async () => {
+        const result = await getCSSImportBundle(aggregate.importPaths);
+        for (const dep of result.dependencyFilePaths) {
+          pageDependencies.add(dep);
+        }
+      })());
+    }
   }
   for (const bundleName of usedExternalBundleNames.js) {
-    const bundleCode = pageJsBundleCode.get(bundleName);
-    if (!bundleCode) {
-      throw new Error(`Expected to find bundle code for externally referenced JS bundle "${bundleName}".`);
+    const aggregate = pageJsBundleAggregates.get(bundleName);
+    if (!aggregate) {
+      throw new Error(`Expected to find aggregate for externally referenced JS bundle "${bundleName}".`);
     }
-    externalBundles.js.set(bundleName, bundleCode);
+    externalBundles.js.set(bundleName, aggregate);
+    if (aggregate.importPaths.size > 0) {
+      externalDepTrackingTasks.push((async () => {
+        const result = await getJSImportBundle(aggregate.importPaths);
+        for (const dep of result.dependencyFilePaths) {
+          pageDependencies.add(dep);
+        }
+      })());
+    }
   }
   for (const bundleName of usedExternalBundleNames.html) {
     const bundleImportPaths = htmlBundleImportPaths.get(bundleName);
@@ -530,6 +611,8 @@ export const processPageComponent = async (pageComponent: YetiPageComponent, pag
     }
     externalBundles.htmlImportPaths.set(bundleName, bundleImportPaths);
   }
+
+  await Promise.all(externalDepTrackingTasks);
 
   // Delete assets object from root node since we don't need it now that we've processed it
   delete pageRootNode.assets;

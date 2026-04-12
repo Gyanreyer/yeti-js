@@ -15,49 +15,29 @@ describe("processPageComponent", () => {
 
     assert.deepStrictEqual(externalBundles, {
       css: new Map([
-        ["global", new Set([textEncoder.encode(`header {
-  border: 1px solid #000;
-  padding: 4px;
-}
-
-  
-
-  
-  header {
-    background-color: red;
-  }
-  h1 {
-    color: yellow;
-  }
-`),
-        textEncoder.encode(`
-  fancy-component:not(:defined) {
-    display: none;
-  }
-`),
-        ])],
+        ["global", {
+          importPaths: new Set([
+            fileURLToPath(import.meta.resolve("../../test_data/simplePageWithAssets/Heading.component.css")),
+          ]),
+          rawContents: [
+            // Heading's raw contribution to the global bundle. The interleaved whitespace
+            // chunks come from the parts of the template literal that surround the
+            // ${css.import()} and ${css.bundle()} calls.
+            textEncoder.encode("\n  \n\n  \n  header {\n    background-color: red;\n  }\n  h1 {\n    color: yellow;\n  }\n"),
+            // FancyComponent's raw contribution to the global bundle.
+            textEncoder.encode("\n  fancy-component:not(:defined) {\n    display: none;\n  }\n"),
+          ],
+        }],
       ]),
       js: new Map([
-        ["global", new Set([textEncoder.encode(`// test_data/simplePageWithAssets/fancy-component.js
-var FancyComponent = class extends HTMLElement {
-  static tagName = "fancy-component";
-  static {
-    customElements.define(this.tagName, this);
-  }
-  connectedCallback() {
-    this.innerHTML = \`
-      <h1>Fancy Component</h1>
-      <p>This is a fancy component.</p>
-    \`;
-  }
-};
-
-  
-  
-
-  console.log("Hello from FancyComponent!");
-`)],
-        )],
+        ["global", {
+          importPaths: new Set([
+            fileURLToPath(import.meta.resolve("../../test_data/simplePageWithAssets/fancy-component.js")),
+          ]),
+          rawContents: [
+            textEncoder.encode("\n  \n  \n\n  console.log(\"Hello from FancyComponent!\");\n"),
+          ],
+        }],
       ]),
       htmlImportPaths: new Map(),
     });

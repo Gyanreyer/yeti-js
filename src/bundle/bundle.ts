@@ -7,6 +7,26 @@ import { logWarning } from "../log.ts";
 // which are not referenced anywhere else should be placed.
 export const WILDCARD_BUNDLE_NAME = "*";
 
+/**
+ * A single component's contribution to a named bundle, captured at template construction
+ * time without performing any bundling work.
+ *
+ * - `importPaths` are the absolute file paths added to this bundle via `js.import()` /
+ *   `css.import()`. They get unioned across pages and handed to `bundleImportCache` for
+ *   a single deduplicated bundling pass.
+ * - `rawContent` is the encoded text content of the template literal chunks for this
+ *   bundle (per-component, not deduplicated).
+ * - `callerFilePath` is the file that called the `js`/`css` template tag — tracked as a
+ *   page dependency so that 11ty re-renders pages whose component sources change. Only
+ *   set when the contribution actually has raw content (an imports-only contribution
+ *   doesn't depend on the caller file's body).
+ */
+export interface BundleContribution {
+  importPaths: Set<string>;
+  rawContent: Uint8Array;
+  callerFilePath?: string;
+}
+
 export const BUNDLE_TYPE = Symbol("YETI_BUNDLE_TYPE");
 
 export type AssetType = "html" | "css" | "js";

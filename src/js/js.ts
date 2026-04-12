@@ -1,27 +1,24 @@
-import { build, type Plugin } from 'esbuild';
 import { getCallSites } from 'node:util';
 import { fileURLToPath } from 'node:url';
 
-import { BUNDLE_TYPE, isBundleObject, makeCssOrJsBundleInlineObject, makeBundleSrcObject, makeBundleStartObject, makeCssOrJsBundleImportObject } from "../bundle/bundle.ts";
+import {
+  BUNDLE_TYPE,
+  isBundleObject,
+  makeCssOrJsBundleInlineObject,
+  makeBundleSrcObject,
+  makeBundleStartObject,
+  makeCssOrJsBundleImportObject,
+  type BundleContribution,
+} from "../bundle/bundle.ts";
 import { resolveImportPath } from "../bundle/import.ts";
 import { getConfig } from "../config.ts";
 import { BundleError } from "../error.ts";
 import { textEncoder } from '../utils/textEncoder.ts';
-import { concatUint8Arrays } from '../utils/concatUint8Arrays.ts';
-import { createExternalDependenciesEsbuildPlugin } from './externalDependencies.ts';
 
-export interface JSBundleResult {
-  bundleName: string;
-  code: Uint8Array;
-  dependencies: Set<string>;
-}
-
-export type JSBundleGetter = () => Promise<JSBundleResult>;
-export type JSBundleGetterMap = Map<string, JSBundleGetter>;
 const jsTemplateResultSymbol = Symbol("JS_TEMPLATE_RESULT");
 
 export type JSTemplateResult = {
-  bundles: JSBundleGetterMap;
+  bundles: Map<string, BundleContribution>;
   [jsTemplateResultSymbol]: true;
 }
 
@@ -44,13 +41,13 @@ export const js = (strings: TemplateStringsArray, ...values: unknown[]): JSTempl
     parentCallSiteURL = getCallSites()[1]?.scriptName;
     callSiteCache.set(strings, parentCallSiteURL);
   }
+  const callerFilePath = parentCallSiteURL ? fileURLToPath(parentCallSiteURL) : undefined;
 
+  // Per-bundle accumulators populated as we walk the template strings/values.
   const rawJsBundles = new Map<string, string[]>();
-  // Map of bundleName to array of import paths for that bundle{
   const bundleImportPaths = new Map<string, Set<string>>();
 
   let currentBundleName = js.getDefaultBundleName();
-
   const bundleNames = new Set<string>([currentBundleName]);
 
   const stringCount = strings.length;
@@ -95,96 +92,41 @@ export const js = (strings: TemplateStringsArray, ...values: unknown[]): JSTempl
     }
   }
 
-  // Filter out bundles that contain only whitespace
+  // Filter out bundles that contain only whitespace AND have no imports.
+  // Bundles with imports but only-whitespace raw content are kept (with no raw content).
   for (const bundleName of bundleNames) {
     const rawChunks = rawJsBundles.get(bundleName);
     if (!rawChunks || rawChunks.every(chunk => chunk.trimStart().length === 0)) {
-      // If the raw chunks are entirely composed of whitespace, drop that from the bundle
+      // Whitespace-only raw content is dropped from the contribution.
       rawJsBundles.delete(bundleName);
       const hasImports = (bundleImportPaths.get(bundleName)?.size ?? 0) > 0;
       if (!hasImports) {
-        // If the bundle also has no imports, drop it entirely
+        // No imports either — drop the bundle entirely.
         bundleNames.delete(bundleName);
       }
     }
   }
 
-  const bundleGetterMap: JSBundleGetterMap = new Map();
-
+  // Materialize the final BundleContribution map. Encoding to Uint8Array up front (rather
+  // than lazily inside a getter) makes the contribution immutable and removes the need
+  // for the per-instance caching layer that the old getter pattern carried.
+  const bundles = new Map<string, BundleContribution>();
   for (const bundleName of bundleNames) {
-    let cachedPromise: Promise<JSBundleResult> | null = null;
-
-    bundleGetterMap.set(bundleName, () => {
-      if (cachedPromise) {
-        return cachedPromise;
-      }
-
-      cachedPromise = (async () => {
-        const dependencies = new Set<string>();
-        const codeChunks: Uint8Array[] = [];
-
-        const importPaths = bundleImportPaths.get(bundleName);
-        if (importPaths) {
-          // Use esbuild to bundle imported files together and get a list of all input files for dependency tracking
-          try {
-            const { externalDependencies } = getConfig().js;
-            const esbuildPlugins = externalDependencies ? [
-              createExternalDependenciesEsbuildPlugin(externalDependencies, true)
-            ] : undefined;
-
-            const result = await build({
-              entryPoints: Array.from(importPaths),
-              bundle: true,
-              write: false,
-              treeShaking: true,
-              // Outputs data so we can get a list of all input files for dependency tracking
-              metafile: true,
-              absPaths: ["metafile"],
-              format: "esm",
-              platform: "browser",
-              // esbuild needs an outdir to generate metafile data even when write is false, but we won't actually write any files to this directory
-              outdir: "out",
-              plugins: esbuildPlugins,
-            });
-            for (const inputFile in result.metafile.inputs) {
-              dependencies.add(inputFile);
-            }
-            for (const outputFile in result.outputFiles) {
-              const outputFileData = result.outputFiles[outputFile];
-              codeChunks.push(outputFileData.contents);
-            }
-          } catch (err) {
-            throw new BundleError(`js.import() failed to import files for bundle "${bundleName}".`, {
-              cause: err,
-            });
-          }
-        }
-
-        const rawBundleChunks = rawJsBundles.get(bundleName);
-        if (rawBundleChunks) {
-          if (parentCallSiteURL) {
-            const callerFilePath = fileURLToPath(parentCallSiteURL);
-            dependencies.add(callerFilePath);
-          }
-
-          for (const chunk of rawBundleChunks) {
-            codeChunks.push(textEncoder.encode(chunk));
-          }
-        }
-
-        return {
-          bundleName,
-          code: concatUint8Arrays(codeChunks),
-          dependencies,
-        };
-      })();
-
-      return cachedPromise;
+    const rawChunks = rawJsBundles.get(bundleName);
+    const importPaths = bundleImportPaths.get(bundleName) ?? new Set<string>();
+    const hasRawContent = rawChunks !== undefined && rawChunks.length > 0;
+    bundles.set(bundleName, {
+      importPaths,
+      rawContent: hasRawContent ? textEncoder.encode(rawChunks.join("")) : new Uint8Array(0),
+      // Caller file is only a dependency when its content actually contributed to the bundle.
+      // For imports-only bundles, the caller's source body doesn't matter — only the import
+      // path strings do, and those are captured at template construction time anyway.
+      callerFilePath: hasRawContent ? callerFilePath : undefined,
     });
   }
 
   return {
-    bundles: bundleGetterMap,
+    bundles,
     [jsTemplateResultSymbol]: true,
   };
 };
@@ -207,4 +149,3 @@ js.import = (importPath: string, bundleName?: string) => {
 js.inline = <TBundleName extends string>(bundleName: TBundleName) => makeCssOrJsBundleInlineObject("js", bundleName);
 
 js.src = <TBundleName extends string>(bundleName: TBundleName) => makeBundleSrcObject("js", bundleName);
-

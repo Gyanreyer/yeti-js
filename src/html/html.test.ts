@@ -7,7 +7,7 @@ import { YETI_NODE_TYPE, } from "./types.ts";
 import type { DocumentBundleAssets, YetiChildNode, YetiRootNode } from './types.ts';
 import { YetiHTMLParsingError } from "../error.ts";
 import { css } from "../css/css.ts";
-import { js, type JSBundleResult } from '../js/js.ts';
+import { js } from '../js/js.ts';
 
 const makeBasicAssetsObject = (): DocumentBundleAssets => ({
   html: {

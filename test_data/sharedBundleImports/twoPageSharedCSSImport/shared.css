@@ -1,0 +1,8 @@
+@font-face {
+  font-family: "shared-marker-font";
+  src: url("/fonts/shared-marker.woff2") format("woff2");
+}
+
+.shared-marker-rule {
+  color: rebeccapurple;
+}
