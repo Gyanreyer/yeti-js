@@ -194,6 +194,39 @@ const sanitizedHTMLEscapeCharMap: Record<number, string> = {
 };
 
 
+/**
+ * Checks whether the `&` at position `ampIndex` in `text` begins a valid HTML
+ * entity reference (named like `&nbsp;` or numeric like `&#123;` / `&#xA0;`).
+ */
+const isHTMLEntityReference = (text: string, ampIndex: number): boolean => {
+  const next = text.charCodeAt(ampIndex + 1);
+  if (Number.isNaN(next)) return false;
+
+  if (next === 0x23 /* # */) {
+    // Numeric reference: &#digits; or &#xhex;
+    const hex = text.charCodeAt(ampIndex + 2);
+    if (hex === 0x78 /* x */ || hex === 0x58 /* X */) {
+      // &#xHEX;
+      let j = ampIndex + 3;
+      while (j < text.length && /[0-9a-fA-F]/.test(text[j])) j++;
+      return j > ampIndex + 3 && text[j] === ";";
+    }
+    // &#DEC;
+    let j = ampIndex + 2;
+    while (j < text.length && text[j] >= "0" && text[j] <= "9") j++;
+    return j > ampIndex + 2 && text[j] === ";";
+  }
+
+  // Named reference: &name;  (name is alphanumeric)
+  if ((next >= 0x41 && next <= 0x5A) || (next >= 0x61 && next <= 0x7A)) {
+    let j = ampIndex + 2;
+    while (j < text.length && /[a-zA-Z0-9]/.test(text[j])) j++;
+    return j > ampIndex + 1 && text[j] === ";";
+  }
+
+  return false;
+};
+
 export const sanitizeHTMLTextContent = (text: string): string => {
   let sanitizedText = "";
   let lastIndex = 0;
@@ -202,6 +235,10 @@ export const sanitizeHTMLTextContent = (text: string): string => {
     const char = text[i];
     const charCode = char.charCodeAt(0);
     if (charCode in sanitizedHTMLEscapeCharMap) {
+      // Don't escape `&` that is already part of a valid HTML entity reference
+      if (charCode === CHAR_CODE_AMPERSAND && isHTMLEntityReference(text, i)) {
+        continue;
+      }
       sanitizedText += text.slice(lastIndex, i) + sanitizedHTMLEscapeCharMap[charCode];
       lastIndex = i + 1;
     }

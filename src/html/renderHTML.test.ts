@@ -69,6 +69,24 @@ describe("renderHTML", () => {
     );
   });
 
+  test("preserves HTML entity references in text content", async () => {
+    const htmlRoot = await html`<p>Hello&nbsp;world &amp; goodbye&mdash;friends &#169; &#x1F600;</p>`;
+    const result = renderHTML(htmlRoot);
+    assert.strictEqual(
+      result,
+      `<p>Hello&nbsp;world &amp; goodbye&mdash;friends &#169; &#x1F600;</p>`
+    );
+  });
+
+  test("escapes bare ampersands but preserves entity references", async () => {
+    const htmlRoot = await html`<p>A&B &nbsp; C&amp;D</p>`;
+    const result = renderHTML(htmlRoot);
+    assert.strictEqual(
+      result,
+      `<p>A&amp;B &nbsp; C&amp;D</p>`
+    );
+  });
+
   test("escapes ampersands in attribute values", async () => {
     const htmlRoot = await html`<a href=${"https://example.com?a=1&b=2"}></a>`;
     const result = renderHTML(htmlRoot);
