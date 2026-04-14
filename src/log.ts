@@ -23,7 +23,7 @@ export const logWarning = (...logValues: any[]) => {
     return;
   }
 
-  console.warn(yetiLogPrefix, ...logValues);
+  console.warn(yetiLogPrefix, styleText("yellow", `Warning: ${logValues.join(" ")}`));
 };
 
 /**
@@ -31,5 +31,5 @@ export const logWarning = (...logValues: any[]) => {
  */
 export const logError = (...logValues: any[]) => {
   // Errors should always be shown, even in quiet mode
-  console.error(yetiLogPrefix, ...logValues);
+  console.error(yetiLogPrefix, styleText("red", `Error: ${logValues.join(" ")}`));
 };

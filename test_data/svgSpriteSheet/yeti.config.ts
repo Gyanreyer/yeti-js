@@ -7,6 +7,8 @@ const config: PartialYetiConfig = {
       if (bundleName === "icons") {
         return "/assets/icons.svg";
       }
+
+      return `/html/${bundleName}.html`;
     },
     defaultBundleTransformConfig: {
       minify: false,
@@ -51,6 +53,8 @@ const config: PartialYetiConfig = {
           },
         };
       }
+
+      return defaultConfig;
     },
   },
 }

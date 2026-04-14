@@ -241,6 +241,15 @@ export type YetiConfig = {
    * @default ["page.js", "page.ts"]
    */
   pageTemplateFileExtension: string | string[];
+  /**
+   * Directory where yeti-js stores its build cache for incremental builds.
+   * The cache persists per-page bundle contributions across process boundaries
+   * so that incremental CLI builds (`--incremental`) can produce correct output
+   * without rebuilding every page.
+   *
+   * @default "node_modules/.cache/yeti-js" (relative to cwd)
+   */
+  cacheDir: string;
 }
 
 export type PartialYetiConfig = DeepPartial<YetiConfig>;
@@ -275,6 +284,7 @@ const config: YetiConfig = {
     deriveBundleFilePath: (bundleName) => `/html/${bundleName}.html`,
   },
   pageTemplateFileExtension: ["page.js", "page.ts"],
+  cacheDir: join(process.cwd(), "node_modules/.cache/yeti-js"),
   quietMode: false,
 };
 
@@ -597,6 +607,24 @@ export const validateConfig = (newConfig: PartialYetiConfig) => {
         } else if (typeof value !== "boolean") {
           (errors ??= []).push(
             `"quietMode" must be a boolean, got ${describeType(value)}`
+          );
+        }
+        break;
+      }
+      case "cacheDir": {
+        const value = newConfig[key];
+        if (value === undefined) {
+          // undefined is permitted
+          break;
+        } else if (typeof value === "string") {
+          if (value.length === 0) {
+            (errors ??= []).push(
+              `"cacheDir" must be a non-empty string, got ""`
+            );
+          }
+        } else {
+          (errors ??= []).push(
+            `"cacheDir" must be a string, got ${describeType(value)}`
           );
         }
         break;

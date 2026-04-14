@@ -5,8 +5,7 @@
   "author": "Ryan Geyer",
   "license": "MIT",
   "homepage": "https://github.com/Gyanreyer/yeti-js",
-  "main": "./src/index.js",
-  "types": "./src/types.d.ts",
+  "main": "./src/index.ts",
   "engines": {
     "node": ">=24.0.0"
   },
@@ -14,14 +13,15 @@
     "test": "node --test"
   },
   "peerDependencies": {
-    "@11ty/eleventy": ">=3.0.0"
+    "@11ty/eleventy": ">=3.0.0",
+    "esbuild": ">=0.25.0",
+    "lightningcss": ">=1.30.0",
+    "marked": ">=15.0.0"
   },
   "devDependencies": {
     "@11ty/eleventy": "^3.1.2",
     "@types/node": "^24.12.2",
-    "typescript": "^6.0.2"
-  },
-  "dependencies": {
+    "typescript": "^6.0.2",
     "esbuild": "^0.25.11",
     "lightningcss": "^1.30.2",
     "marked": "^15.0.12"
