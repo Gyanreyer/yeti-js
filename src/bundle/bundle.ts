@@ -44,7 +44,7 @@ export interface BaseBundleObject<TAssetType extends AssetType, TBundleType exte
 // Bundle start objects can only be used in css and js templates
 export type BundleStartAssetType = "css" | "js";
 
-interface BundleStartObject<TAssetType extends BundleStartAssetType, TBundleName extends string = string> extends BaseBundleObject<TAssetType, "start"> {
+export interface BundleStartObject<TAssetType extends BundleStartAssetType, TBundleName extends string = string> extends BaseBundleObject<TAssetType, "start"> {
   /**
    * The name of the bundle being started. All contents following this marker
    * will be placed into that bundle until otherwise specified.
@@ -161,7 +161,7 @@ export const makeBundleSrcObject = <TAssetType extends AssetType, TBundleName ex
   return srcObject;
 };
 
-interface BundleImportObject<TAssetType extends AssetType> extends BaseBundleObject<TAssetType, "import"> {
+export interface BundleImportObject<TAssetType extends AssetType> extends BaseBundleObject<TAssetType, "import"> {
   /**
    * The resolved absolute path to the imported external file.
    */

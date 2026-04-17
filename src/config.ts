@@ -777,7 +777,7 @@ export const mergeConfigs = <T extends Record<string, any>>(baseConfig: T, newCo
 /**
  * Merges new config settings into the base Yeti config.
  */
-export const updateConfig = (newConfig: PartialYetiConfig) => {
+export const updateConfig = (newConfig: PartialYetiConfig): YetiConfig => {
   validateConfig(newConfig);
   const merged = mergeConfigs(config, newConfig);
   return Object.assign(config, merged);

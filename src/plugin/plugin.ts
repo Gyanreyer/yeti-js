@@ -42,8 +42,13 @@ import {
 // load time; a MessagePort sends the input directory and a build counter before
 // each build so the resolver knows what to bust.
 const { port1: esmCacheBustPort, port2 } = new MessageChannel();
+// `import.meta.resolve` takes a plain string that TypeScript's `rewriteRelativeImportExtensions`
+// does not rewrite, so we pick the extension that matches however this module itself was loaded.
+const esmCacheBustSpecifier = import.meta.url.endsWith(".ts")
+  ? "./esmCacheBust.ts"
+  : "./esmCacheBust.js";
 register(
-  import.meta.resolve("./esmCacheBust.ts"),
+  import.meta.resolve(esmCacheBustSpecifier),
   { data: { port: port2 }, transferList: [port2] },
 );
 
