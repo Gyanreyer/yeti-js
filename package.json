@@ -1,6 +1,6 @@
 {
   "name": "yeti-js",
-  "version": "0.0.7-alpha.0",
+  "version": "0.0.7-alpha.2",
   "type": "module",
   "author": "Ryan Geyer",
   "license": "MIT",
@@ -22,7 +22,6 @@
   },
   "scripts": {
     "test": "node --test",
-    "typecheck": "tsc",
     "build": "tsdown",
     "clean": "rm -rf dist",
     "prepack": "npm run build"

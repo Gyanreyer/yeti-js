@@ -22,16 +22,17 @@ export async function initialize({ port }: { port: MessagePort }) {
 
 export async function resolve(
   specifier: string,
-  context: { parentURL?: string },
+  _context: { parentURL?: string },
   nextResolve: (specifier: string) => Promise<{ url: string }>,
 ) {
-  // Only process relative or file: specifiers from project files
+  // Skip bare specifiers — only relative or file: URLs can possibly resolve to a project file.
+  // We intentionally don't filter by parentURL here: the plugin itself lives in node_modules
+  // and imports user page components, and those imports must be cache-busted. The check on
+  // the *resolved* path below is the real node_modules guard.
   if (
-    (!specifier.startsWith("./") &&
-      !specifier.startsWith("../") &&
-      !specifier.startsWith("file:")) ||
-    !context.parentURL ||
-    context.parentURL.includes("/node_modules/")
+    !specifier.startsWith("./") &&
+    !specifier.startsWith("../") &&
+    !specifier.startsWith("file:")
   ) {
     return nextResolve(specifier);
   }
