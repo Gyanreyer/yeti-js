@@ -228,17 +228,15 @@ describe("css", () => {
       );
     });
 
-    test("getCSSImportBundle returns the same Promise for repeated calls with the same path set", async () => {
+    test("getCSSImportBundle deduplicates work for repeated calls with the same path set", async () => {
       const result = css`${css.import("../../test_data/css/external-styles.css", "my-bundle")}`;
       const contribution = result.bundles.get("my-bundle") as BundleContribution;
       assert(contribution);
 
-      const promise1 = getCSSImportBundle(contribution.importPaths);
-      const promise2 = getCSSImportBundle(contribution.importPaths);
-      assert.strictEqual(promise1, promise2);
-
-      const result1 = await promise1;
-      const result2 = await promise2;
+      const [result1, result2] = await Promise.all([
+        getCSSImportBundle(contribution.importPaths),
+        getCSSImportBundle(contribution.importPaths),
+      ]);
       assert.strictEqual(result1, result2);
     });
   });

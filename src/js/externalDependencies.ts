@@ -18,7 +18,9 @@ export const deriveOutputPathForSpecifier = (specifier: string, outputDir: strin
   return join(outputDir, dir, `${name}.js`);
 };
 
-// Tracks which external dependency specifiers were actually imported during esbuild builds
+// Tracks which external dependency specifiers were imported across all bundles in the current build.
+// Populated either by the esbuild plugin (when `out` is passed) or by `addUsedExternalSpecifiers()`
+// (used to replay specifiers from a cached bundle result, since cache hits skip esbuild).
 let usedExternalSpecifiers = new Set<string>();
 
 export const resetUsedExternalSpecifiers = () => {
@@ -26,6 +28,17 @@ export const resetUsedExternalSpecifiers = () => {
 };
 
 export const getUsedExternalSpecifiers = () => usedExternalSpecifiers;
+
+/**
+ * Add specifiers to the global used-specifiers set. Called by `bundleImportCache` after every
+ * bundle resolution (hit or miss) so that bundle-level cache hits still register their
+ * external dependencies for the per-build `buildAndWriteExternalDependencies()` pass.
+ */
+export const addUsedExternalSpecifiers = (specifiers: Iterable<string>): void => {
+  for (const s of specifiers) {
+    usedExternalSpecifiers.add(s);
+  }
+};
 
 // Matches bare specifiers (not starting with . or /)
 const externalDependencyResolveFilterRegex = /^[^./]/;
@@ -35,14 +48,15 @@ const externalDependencyResolveFilterRegex = /^[^./]/;
  * Matched imports are marked as external and their paths are rewritten to the configured output location.
  *
  * @param externalDeps - The `externalDependencies` config mapping glob patterns to output paths/dirs.
- * @param trackUsedSpecifiers - If true, matched specifiers are recorded in the module-level
- *   `usedExternalSpecifiers` set for later use when building the external dependency bundles.
+ * @param out - If provided, every matched specifier is added to this set. The caller is
+ *   responsible for forwarding these into the global `usedExternalSpecifiers` set (typically
+ *   via `addUsedExternalSpecifiers()`); the plugin itself no longer touches global state.
  * @param excludeSpecifier - Optional specifier to exclude from matching (used when building
  *   an external dependency bundle to avoid self-externalization).
  */
 export const createExternalDependenciesEsbuildPlugin = (
   externalDeps: Record<string, string>,
-  trackUsedSpecifiers: boolean,
+  out: Set<string> | null,
   excludeSpecifier?: string,
 ): Plugin => {
   const entries = Object.entries(externalDeps);
@@ -57,9 +71,7 @@ export const createExternalDependenciesEsbuildPlugin = (
 
         for (const [pattern, output] of entries) {
           if (matchesGlob(args.path, pattern)) {
-            if (trackUsedSpecifiers) {
-              usedExternalSpecifiers.add(args.path);
-            }
+            out?.add(args.path);
 
             const isDirectory = output.endsWith('/');
             const outputPath = isDirectory
@@ -103,7 +115,7 @@ export const buildSingleExternalBundle = async (
     outdir: 'out',
     minify: transformConfig.minify,
     target: transformConfig.target,
-    plugins: [createExternalDependenciesEsbuildPlugin(allExternalDeps, false, specifier)],
+    plugins: [createExternalDependenciesEsbuildPlugin(allExternalDeps, null, specifier)],
   });
 
   if (!result.outputFiles || result.outputFiles.length === 0) {
@@ -163,7 +175,7 @@ export const buildCodeSplitExternalBundles = async (
     minify: transformConfig.minify,
     target: transformConfig.target,
     plugins: Object.keys(filteredExternalDeps).length > 0
-      ? [createExternalDependenciesEsbuildPlugin(filteredExternalDeps, false)]
+      ? [createExternalDependenciesEsbuildPlugin(filteredExternalDeps, null)]
       : [],
   });
 

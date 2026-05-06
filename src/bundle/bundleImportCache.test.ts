@@ -6,12 +6,22 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import {
+  resetAccessTracking,
   clearBundleImportCache,
+  getBundleCacheStats,
   getCSSImportBundle,
   getJSImportBundle,
   invalidateStaleEntries,
+  loadBundleImportCache,
+  resetBundleCacheStats,
+  saveBundleImportCache,
 } from './bundleImportCache.ts';
 import { BundleError } from '../error.ts';
+import { getConfig, updateConfig } from '../config.ts';
+import {
+  getUsedExternalSpecifiers,
+  resetUsedExternalSpecifiers,
+} from '../js/externalDependencies.ts';
 
 const tempDirsToCleanup: string[] = [];
 const makeTempDir = async (): Promise<string> => {
@@ -30,28 +40,31 @@ describe('bundleImportCache', () => {
   });
 
   describe('getJSImportBundle', () => {
-    test('returns the same Promise reference for repeated calls with the same import path set', () => {
+    test('returns the same result reference for repeated calls with the same import path set', async () => {
       const paths = new Set([
         fileURLToPath(import.meta.resolve('../../test_data/js/external-script.js')),
       ]);
-      const promise1 = getJSImportBundle(paths);
-      const promise2 = getJSImportBundle(paths);
-      assert.strictEqual(promise1, promise2);
+      const [r1, r2] = await Promise.all([getJSImportBundle(paths), getJSImportBundle(paths)]);
+      assert.strictEqual(r1, r2);
     });
 
-    test('returns the same Promise for two different Set instances containing the same paths', () => {
+    test('returns the same result for two different Set instances containing the same paths', async () => {
       const path = fileURLToPath(import.meta.resolve('../../test_data/js/external-script.js'));
-      const promise1 = getJSImportBundle(new Set([path]));
-      const promise2 = getJSImportBundle(new Set([path]));
-      assert.strictEqual(promise1, promise2);
+      const [r1, r2] = await Promise.all([
+        getJSImportBundle(new Set([path])),
+        getJSImportBundle(new Set([path])),
+      ]);
+      assert.strictEqual(r1, r2);
     });
 
-    test('cache key is order-independent (sorted before hashing)', () => {
+    test('cache key is order-independent (sorted before hashing)', async () => {
       const a = fileURLToPath(import.meta.resolve('../../test_data/js/external-script.js'));
       const b = fileURLToPath(import.meta.resolve('../../test_data/js/external-script-2.js'));
-      const promise1 = getJSImportBundle(new Set([a, b]));
-      const promise2 = getJSImportBundle(new Set([b, a]));
-      assert.strictEqual(promise1, promise2);
+      const [r1, r2] = await Promise.all([
+        getJSImportBundle(new Set([a, b])),
+        getJSImportBundle(new Set([b, a])),
+      ]);
+      assert.strictEqual(r1, r2);
     });
 
     test('different import path sets produce different bundle results', async () => {
@@ -87,19 +100,18 @@ describe('bundleImportCache', () => {
       );
     });
 
-    test('throws on empty import path set', () => {
-      assert.throws(() => getJSImportBundle(new Set()), BundleError);
+    test('throws on empty import path set', async () => {
+      await assert.rejects(getJSImportBundle(new Set()), BundleError);
     });
   });
 
   describe('getCSSImportBundle', () => {
-    test('returns the same Promise reference for repeated calls with the same import path set', () => {
+    test('returns the same result reference for repeated calls with the same import path set', async () => {
       const paths = new Set([
         fileURLToPath(import.meta.resolve('../../test_data/css/external-styles.css')),
       ]);
-      const promise1 = getCSSImportBundle(paths);
-      const promise2 = getCSSImportBundle(paths);
-      assert.strictEqual(promise1, promise2);
+      const [r1, r2] = await Promise.all([getCSSImportBundle(paths), getCSSImportBundle(paths)]);
+      assert.strictEqual(r1, r2);
     });
 
     test('result includes the imported file as a dependency', async () => {
@@ -115,8 +127,8 @@ describe('bundleImportCache', () => {
       );
     });
 
-    test('throws on empty import path set', () => {
-      assert.throws(() => getCSSImportBundle(new Set()), BundleError);
+    test('throws on empty import path set', async () => {
+      await assert.rejects(getCSSImportBundle(new Set()), BundleError);
     });
   });
 
@@ -237,5 +249,175 @@ describe('bundleImportCache', () => {
       assert.notStrictEqual(cssResult1, cssResult2);
       assert(new TextDecoder().decode(cssResult2.code).includes('marker-v2'));
     });
+  });
+});
+
+describe('bundleImportCache — persistence + replay', () => {
+  afterEach(async () => {
+    clearBundleImportCache();
+    resetUsedExternalSpecifiers();
+    while (tempDirsToCleanup.length > 0) {
+      const dir = tempDirsToCleanup.pop()!;
+      await rm(dir, { recursive: true, force: true }).catch(() => { });
+    }
+  });
+
+  test('round-trip: save → clear → load yields a cache hit on the same import set', async () => {
+    const cacheDir = await mkdtemp(join(tmpdir(), 'yeti-bundle-cache-persist-'));
+    tempDirsToCleanup.push(cacheDir);
+    const versionKey = 'test-version-key';
+    const inputDir = getConfig().inputDir;
+    const path = fileURLToPath(import.meta.resolve('../../test_data/js/external-script.js'));
+
+    resetAccessTracking();
+    const r1 = await getJSImportBundle(new Set([path]));
+    await saveBundleImportCache(cacheDir, versionKey, inputDir);
+
+    clearBundleImportCache();
+    resetAccessTracking();
+    await loadBundleImportCache(cacheDir, versionKey, inputDir);
+    resetBundleCacheStats();
+
+    const r2 = await getJSImportBundle(new Set([path]));
+    const stats = getBundleCacheStats();
+    assert.equal(stats.jsHits, 1, 'expected exactly one cache hit after load');
+    assert.equal(stats.jsMisses, 0, 'expected zero cache misses after load');
+    assert.deepStrictEqual(r2.code, r1.code);
+    // After load, the result is a fresh object reconstructed from the serialized bytes.
+    assert.notStrictEqual(r2, r1);
+  });
+
+  test('load returns silently when version key does not match', async () => {
+    const cacheDir = await mkdtemp(join(tmpdir(), 'yeti-bundle-cache-version-'));
+    tempDirsToCleanup.push(cacheDir);
+    const inputDir = getConfig().inputDir;
+    const path = fileURLToPath(import.meta.resolve('../../test_data/js/external-script.js'));
+
+    resetAccessTracking();
+    await getJSImportBundle(new Set([path]));
+    await saveBundleImportCache(cacheDir, 'old-version', inputDir);
+
+    clearBundleImportCache();
+    resetAccessTracking();
+    await loadBundleImportCache(cacheDir, 'new-version', inputDir);
+    resetBundleCacheStats();
+
+    await getJSImportBundle(new Set([path]));
+    const stats = getBundleCacheStats();
+    assert.equal(stats.jsMisses, 1, 'mismatched version should leave cache empty → fresh miss');
+    assert.equal(stats.jsHits, 0);
+  });
+
+  test('access-tracking eviction: entries not accessed during a build are dropped at save time', async () => {
+    const cacheDir = await mkdtemp(join(tmpdir(), 'yeti-bundle-cache-evict-'));
+    tempDirsToCleanup.push(cacheDir);
+    const versionKey = 'evict-test';
+    const inputDir = getConfig().inputDir;
+    const a = fileURLToPath(import.meta.resolve('../../test_data/js/external-script.js'));
+    const b = fileURLToPath(import.meta.resolve('../../test_data/js/external-script-2.js'));
+
+    // Build pass 1: populate cache with both A and B
+    resetAccessTracking();
+    await getJSImportBundle(new Set([a]));
+    await getJSImportBundle(new Set([b]));
+    await saveBundleImportCache(cacheDir, versionKey, inputDir);
+
+    // Simulate a fresh process that only references A this build.
+    clearBundleImportCache();
+    resetAccessTracking();
+    await loadBundleImportCache(cacheDir, versionKey, inputDir);
+    await getJSImportBundle(new Set([a])); // accesses A only
+    await saveBundleImportCache(cacheDir, versionKey, inputDir);
+
+    // Now load fresh again — B should have been evicted from disk.
+    clearBundleImportCache();
+    resetAccessTracking();
+    await loadBundleImportCache(cacheDir, versionKey, inputDir);
+    resetBundleCacheStats();
+
+    await getJSImportBundle(new Set([a]));
+    await getJSImportBundle(new Set([b]));
+    const stats = getBundleCacheStats();
+    assert.equal(stats.jsHits, 1, 'A should hit (still cached)');
+    assert.equal(stats.jsMisses, 1, 'B should miss (evicted)');
+  });
+
+  test('external specifiers are replayed into the global set on cache hit', async () => {
+    const tempDir = await makeTempDir();
+    // A page-level JS file that imports a bare specifier configured as external.
+    const filePath = join(tempDir, 'uses-external.js');
+    await writeFile(filePath, 'import "test-external-mod";\nconsole.log("hi");\n');
+
+    const originalDeps = getConfig().js.externalDependencies;
+    updateConfig({
+      js: { externalDependencies: { 'test-external-mod': '/js/ext/test-mod.js' } },
+    });
+
+    try {
+      // First call: cache miss; esbuild plugin records the specifier into the local out set.
+      resetAccessTracking();
+      resetUsedExternalSpecifiers();
+      await getJSImportBundle(new Set([filePath]));
+      assert.ok(
+        getUsedExternalSpecifiers().has('test-external-mod'),
+        'cache miss: specifier should be in the global set',
+      );
+
+      // Reset the global set, then call again — should be a cache hit, but the specifier
+      // must still end up in the global set (replayed from BundleImportResult.externalSpecifiers).
+      resetUsedExternalSpecifiers();
+      resetBundleCacheStats();
+      await getJSImportBundle(new Set([filePath]));
+      assert.equal(getBundleCacheStats().jsHits, 1, 'expected cache hit on second call');
+      assert.ok(
+        getUsedExternalSpecifiers().has('test-external-mod'),
+        'cache hit: specifier should still be replayed into the global set',
+      );
+    } finally {
+      updateConfig({
+        js: { externalDependencies: originalDeps as Record<string, string> | undefined },
+      });
+    }
+  });
+
+  test('persistence preserves replay on cache hit across save/load cycle', async () => {
+    const tempDir = await makeTempDir();
+    const cacheDir = await mkdtemp(join(tmpdir(), 'yeti-bundle-cache-replay-'));
+    tempDirsToCleanup.push(cacheDir);
+    const filePath = join(tempDir, 'uses-external.js');
+    await writeFile(filePath, 'import "persisted-external-mod";\nconsole.log("hi");\n');
+
+    const originalDeps = getConfig().js.externalDependencies;
+    updateConfig({
+      js: { externalDependencies: { 'persisted-external-mod': '/js/ext/persisted.js' } },
+    });
+
+    try {
+      const versionKey = 'replay-test';
+      const inputDir = getConfig().inputDir;
+
+      resetAccessTracking();
+      resetUsedExternalSpecifiers();
+      await getJSImportBundle(new Set([filePath]));
+      await saveBundleImportCache(cacheDir, versionKey, inputDir);
+
+      // Simulate fresh process: in-memory cache cleared, on-disk cache survives.
+      clearBundleImportCache();
+      resetUsedExternalSpecifiers();
+      resetAccessTracking();
+      await loadBundleImportCache(cacheDir, versionKey, inputDir);
+      resetBundleCacheStats();
+
+      await getJSImportBundle(new Set([filePath]));
+      assert.equal(getBundleCacheStats().jsHits, 1);
+      assert.ok(
+        getUsedExternalSpecifiers().has('persisted-external-mod'),
+        'replay should work even after save/load (specifiers persisted with the entry)',
+      );
+    } finally {
+      updateConfig({
+        js: { externalDependencies: originalDeps as Record<string, string> | undefined },
+      });
+    }
   });
 });

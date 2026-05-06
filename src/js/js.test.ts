@@ -264,17 +264,15 @@ describe("js", () => {
       );
     });
 
-    test("getJSImportBundle returns the same Promise for repeated calls with the same path set", async () => {
+    test("getJSImportBundle deduplicates work for repeated calls with the same path set", async () => {
       const result = js`${js.import("../../test_data/js/external-script.js", "bundle1")}`;
       const bundle1Contribution = result.bundles.get("bundle1") as BundleContribution;
       assert(bundle1Contribution);
 
-      const promise1 = getJSImportBundle(bundle1Contribution.importPaths);
-      const promise2 = getJSImportBundle(bundle1Contribution.importPaths);
-      assert.strictEqual(promise1, promise2);
-
-      const result1 = await promise1;
-      const result2 = await promise2;
+      const [result1, result2] = await Promise.all([
+        getJSImportBundle(bundle1Contribution.importPaths),
+        getJSImportBundle(bundle1Contribution.importPaths),
+      ]);
       assert.strictEqual(result1, result2);
       // Same Uint8Array reference, not just same content
       assert.strictEqual(result1.code, result2.code);

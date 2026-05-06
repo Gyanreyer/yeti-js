@@ -18,7 +18,12 @@ import {
   buildAndWriteExternalDependencies,
 } from '../js/externalDependencies.ts';
 import { mergeBundleSetMaps } from '../bundle/mergeBundleContents.ts';
-import { invalidateStaleEntries } from '../bundle/bundleImportCache.ts';
+import {
+  resetAccessTracking,
+  invalidateStaleEntries,
+  loadBundleImportCache,
+  saveBundleImportCache,
+} from '../bundle/bundleImportCache.ts';
 import {
   processAndWriteExternalCSSBundle,
   processAndWriteExternalJSBundle,
@@ -99,16 +104,25 @@ export const yetiPlugin = (eleventyConfig: EleventyUserConfig, userConfig: Parti
     esmCacheBustPort.postMessage({ inputDir: resolve(inputDir), buildId: ++esmCacheBustBuildId });
 
     resetUsedExternalSpecifiers();
+    resetAccessTracking();
+
+    // Compute the cache version key once per process. Both the page build cache and the
+    // bundle import cache are gated by this same key (yeti + esbuild + lightningcss + format).
+    cacheVersionKey ??= await computeCacheVersionKey();
+
+    // Load both persistent caches from disk. The bundle import cache is loaded BEFORE
+    // `invalidateStaleEntries()` so the existing mtime-based invalidation logic naturally
+    // drops persisted entries whose deps changed on disk while no build was running.
+    await loadBundleImportCache(config.cacheDir, cacheVersionKey, config.inputDir);
 
     // Drop any stale entries from the bundle import cache so watch-mode rebuilds pick up
     // dependency file changes. Untouched entries survive across builds.
     await invalidateStaleEntries();
 
-    // Load the persistent build cache from disk. This populates
+    // Load the persistent page build cache from disk. This populates
     // globalExternalBundleContents with cached per-page bundle contributions
     // so that incremental builds (where only some pages recompile) still
     // have complete bundle data for the merge step in eleventy.after.
-    cacheVersionKey ??= await computeCacheVersionKey();
     buildCache = await loadBuildCache(config.cacheDir, cacheVersionKey, config.inputDir);
 
     // Replace globalExternalBundleContents with what's in the cache.
@@ -329,10 +343,13 @@ export const yetiPlugin = (eleventyConfig: EleventyUserConfig, userConfig: Parti
       }
     }
 
-    await saveBuildCache(config.cacheDir, config.inputDir, {
-      cacheVersionKey: cacheVersionKey!,
-      lastBundleContentHashes: bundleContentHashes,
-      pages: updatedPages,
-    });
+    await Promise.all([
+      saveBuildCache(config.cacheDir, config.inputDir, {
+        cacheVersionKey: cacheVersionKey!,
+        lastBundleContentHashes: bundleContentHashes,
+        pages: updatedPages,
+      }),
+      saveBundleImportCache(config.cacheDir, cacheVersionKey!, config.inputDir),
+    ]);
   });
 }
