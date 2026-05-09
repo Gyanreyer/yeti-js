@@ -2,7 +2,7 @@ import { describe, test } from "node:test";
 import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
 
-import { YETI_NODE_TYPE, type YetiRootNode } from "../html/types.ts";
+import { YETI_NODE_TYPE, type YetiRootNode, type YetiElementNode } from "../html/types.ts";
 import { textEncoder } from "../utils/textEncoder.ts";
 
 import { processPageComponent } from "./processPageComponent.ts";
@@ -262,6 +262,158 @@ describe("processPageComponent", () => {
           ],
         },
       ],
+    });
+  });
+
+  test("handles a page with duplicate wildcard bundle references", async () => {
+    const MyPageComponent = (await import("../../test_data/pageWithDuplicateWildcards/MyPage.page.ts")).default;
+
+    const { pageRootNode, externalBundles } = await processPageComponent(MyPageComponent, {} as any);
+
+    // Each asset type's "global" bundle should be tracked once even though there are
+    // multiple `*.src("*")` references in the layout that resolve to it.
+    assert.deepStrictEqual(Array.from(externalBundles.css.keys()), ["global", "critical"]);
+    assert.deepStrictEqual(Array.from(externalBundles.js.keys()), ["global"]);
+
+    console.dir(pageRootNode, { depth: null });
+
+    assert.deepStrictEqual<YetiRootNode>(pageRootNode, {
+      type: YETI_NODE_TYPE.ROOT,
+      children: [
+        { type: YETI_NODE_TYPE.DOCTYPE, content: 'html' },
+        {
+          type: YETI_NODE_TYPE.ELEMENT,
+          tagName: 'html',
+          attributes: { lang: 'en' },
+          children: [
+            {
+              type: YETI_NODE_TYPE.ELEMENT,
+              tagName: 'head',
+              children: [
+                {
+                  type: YETI_NODE_TYPE.ELEMENT,
+                  tagName: 'meta',
+                  attributes: { charset: 'UTF-8' }
+                },
+                {
+                  type: YETI_NODE_TYPE.ELEMENT,
+                  tagName: 'title',
+                  children: [{ type: YETI_NODE_TYPE.TEXT, content: 'Test Page' }]
+                },
+                {
+                  type: YETI_NODE_TYPE.ELEMENT,
+                  tagName: 'style',
+                  attributes: { 'data-first': true },
+                  children: [
+                    {
+                      type: YETI_NODE_TYPE.TEXT,
+                      content: 'body{background:#00f}'
+                    },
+                    { type: YETI_NODE_TYPE.TEXT, content: ':root{--color:red}' }
+                  ]
+                },
+                {
+                  type: YETI_NODE_TYPE.ELEMENT,
+                  tagName: 'style',
+                  attributes: { 'data-second': true },
+                  children: [
+                    {
+                      type: YETI_NODE_TYPE.TEXT,
+                      content: 'body{background:#00f}'
+                    },
+                    { type: YETI_NODE_TYPE.TEXT, content: ':root{--color:red}' }
+                  ]
+                },
+                {
+                  type: YETI_NODE_TYPE.ELEMENT,
+                  tagName: 'link',
+                  attributes: {
+                    rel: 'stylesheet',
+                    href: '/css/global.css?v=--YETI__css__global--',
+                    media: 'print',
+                    onload: "this.media='all'"
+                  }
+                },
+                {
+                  type: YETI_NODE_TYPE.ELEMENT,
+                  tagName: 'link',
+                  attributes: {
+                    rel: 'stylesheet',
+                    href: '/css/critical.css?v=--YETI__css__critical--',
+                    media: 'print',
+                    onload: "this.media='all'"
+                  }
+                },
+                {
+                  type: YETI_NODE_TYPE.ELEMENT,
+                  tagName: 'noscript',
+                  children: [
+                    {
+                      type: YETI_NODE_TYPE.ELEMENT,
+                      tagName: 'link',
+                      attributes: {
+                        rel: 'stylesheet',
+                        href: '/css/global.css?v=--YETI__css__global--'
+                      }
+                    },
+                    {
+                      type: YETI_NODE_TYPE.ELEMENT,
+                      tagName: 'link',
+                      attributes: {
+                        rel: 'stylesheet',
+                        href: '/css/critical.css?v=--YETI__css__critical--'
+                      }
+                    }
+                  ]
+                },
+                {
+                  type: YETI_NODE_TYPE.ELEMENT,
+                  tagName: 'script',
+                  attributes: { 'data-first': true, type: 'module' },
+                  children: [
+                    {
+                      type: YETI_NODE_TYPE.TEXT,
+                      content: 'console.log("hello");\n'
+                    }
+                  ]
+                },
+                {
+                  type: YETI_NODE_TYPE.ELEMENT,
+                  tagName: 'script',
+                  attributes: { 'data-second': true, type: 'module' },
+                  children: [
+                    {
+                      type: YETI_NODE_TYPE.TEXT,
+                      content: 'console.log("hello");\n'
+                    }
+                  ]
+                },
+                {
+                  type: YETI_NODE_TYPE.ELEMENT,
+                  tagName: 'script',
+                  attributes: {
+                    'data-first': true,
+                    src: '/js/global.js?v=--YETI__js__global--'
+                  }
+                },
+                {
+                  type: YETI_NODE_TYPE.ELEMENT,
+                  tagName: 'script',
+                  attributes: {
+                    'data-second': true,
+                    src: '/js/global.js?v=--YETI__js__global--'
+                  }
+                }
+              ]
+            },
+            {
+              type: YETI_NODE_TYPE.ELEMENT,
+              tagName: 'body',
+              children: [{ type: YETI_NODE_TYPE.ELEMENT, tagName: 'main' }]
+            }
+          ]
+        }
+      ]
     });
   });
 });

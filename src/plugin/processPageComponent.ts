@@ -463,19 +463,8 @@ export const processPageComponent = async (pageComponent: YetiPageComponent, pag
       html: new Set(htmlBundleImportPaths.keys()).difference(usedHTMLBundleNames),
     }
 
-    let wildCardAssetTypeCounts: Record<"css" | "js" | "html", number> = {
-      css: 0,
-      js: 0,
-      html: 0,
-    };
-
     for (const [node, wildCardNode] of wildcardNodes.entries()) {
       const { parent, assetType, type } = wildCardNode;
-
-      wildCardAssetTypeCounts[assetType]++;
-      if (wildCardAssetTypeCounts[assetType] > 1) {
-        logWarning(`Duplicate wildcard bundle reference found for asset type "${assetType}" in element with tag name "${node.tagName}". This wildcard reference will never produce any output.`);
-      }
 
       if (!parent.children) {
         throw new Error(`Expected parent node to have children for wildcard node with tag name "${node.tagName}"`);
@@ -554,9 +543,6 @@ export const processPageComponent = async (pageComponent: YetiPageComponent, pag
       } else {
         parent.children.splice(parentChildIndex, 1, ...replacementNodes);
       }
-      // We've consumed all the bundles for this wildcard node, so we can clear
-      // the set to prevent any future wildcard nodes from using the same bundles
-      bundleNamesToUse.clear();
     }
   }
 
