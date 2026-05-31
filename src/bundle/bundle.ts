@@ -7,6 +7,11 @@ import { logWarning } from "../log.ts";
 // which are not referenced anywhere else should be placed.
 export const WILDCARD_BUNDLE_NAME = "*";
 
+// Reserved sentinel bundle name for the page-scoped bundle. CSS/JS template tags default to this
+// when no `bundle()` start marker has been seen, so any contribution that doesn't explicitly target
+// a named bundle ends up in a per-page bundle file rather than a shared global bundle.
+export const PAGE_BUNDLE_NAME = "@page";
+
 /**
  * A single component's contribution to a named bundle, captured at template construction
  * time without performing any bundling work.

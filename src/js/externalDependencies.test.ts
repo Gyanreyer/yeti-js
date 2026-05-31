@@ -67,10 +67,10 @@ describe("externalDependencies", () => {
 
       const result = js`${js.import("/test_data/js/file-with-external-import.js")}`;
 
-      const globalContribution = result.bundles.get("global");
-      assert(globalContribution);
+      const pageContribution = result.bundles.get("@page");
+      assert(pageContribution);
 
-      const bundleResult = await getJSImportBundle(globalContribution.importPaths);
+      const bundleResult = await getJSImportBundle(pageContribution.importPaths);
       const code = textDecoder.decode(bundleResult.code);
 
       // The output should contain an import statement pointing to the external path
@@ -96,9 +96,9 @@ describe("externalDependencies", () => {
       });
 
       const result = js`${js.import("/test_data/js/file-with-external-import.js")}`;
-      const globalContribution = result.bundles.get("global");
-      assert(globalContribution);
-      await getJSImportBundle(globalContribution.importPaths);
+      const pageContribution = result.bundles.get("@page");
+      assert(pageContribution);
+      await getJSImportBundle(pageContribution.importPaths);
 
       const usedSpecifiers = getUsedExternalSpecifiers();
       assert(usedSpecifiers.has("my-external-package"));
@@ -117,10 +117,10 @@ describe("externalDependencies", () => {
       });
 
       const result = js`${js.import("/test_data/js/file-with-subpath-import.js")}`;
-      const globalContribution = result.bundles.get("global");
-      assert(globalContribution);
+      const pageContribution = result.bundles.get("@page");
+      assert(pageContribution);
 
-      const bundleResult = await getJSImportBundle(globalContribution.importPaths);
+      const bundleResult = await getJSImportBundle(pageContribution.importPaths);
       const code = textDecoder.decode(bundleResult.code);
 
       // Both imports should be externalized with derived paths
@@ -145,10 +145,10 @@ describe("externalDependencies", () => {
 
       // This file imports from imported-file.ts (local) - should still be bundled
       const result = js`${js.import("/test_data/js/file-with-import.js")}`;
-      const globalContribution = result.bundles.get("global");
-      assert(globalContribution);
+      const pageContribution = result.bundles.get("@page");
+      assert(pageContribution);
 
-      const bundleResult = await getJSImportBundle(globalContribution.importPaths);
+      const bundleResult = await getJSImportBundle(pageContribution.importPaths);
       const code = textDecoder.decode(bundleResult.code);
 
       // The local dependency should be bundled inline as usual

@@ -16,5 +16,5 @@ export default function PageA() {
 }
 
 PageA.js = js`
-  ${js.import("./shared.js")}
+  ${js.import("./shared.js", "global")}
 `;

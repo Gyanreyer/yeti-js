@@ -4,7 +4,7 @@ import { join, matchesGlob, parse as parsePath } from 'node:path';
 import { getConfig } from '../config.ts';
 import { BundleError } from '../error.ts';
 import { logError } from '../log.ts';
-import { safeWriteFile } from '../utils/safeWriteFile.ts';
+import { writeFileIfChanged } from '../utils/writeFileIfChanged.ts';
 
 /**
  * Derives the output file path for a specifier matched by a directory-style external dependency entry.
@@ -231,7 +231,7 @@ export const buildAndWriteExternalDependencies = async (
           output,
         );
         await Promise.all(
-          outputFiles.map(file => safeWriteFile(file.path, file.contents))
+          outputFiles.map(file => writeFileIfChanged(file.path, file.contents))
         );
       } else {
         if (specifiers.length > 1) {
@@ -242,7 +242,7 @@ export const buildAndWriteExternalDependencies = async (
           );
         }
         const code = await buildSingleExternalBundle(specifiers[0], externalDependencies);
-        await safeWriteFile(join(output, outputTarget), code);
+        await writeFileIfChanged(join(output, outputTarget), code);
       }
     })
   );

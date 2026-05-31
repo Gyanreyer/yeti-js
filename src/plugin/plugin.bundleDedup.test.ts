@@ -122,13 +122,15 @@ describe("Yeti Plugin — shared bundle import dedup", () => {
   test("a single page importing two entry points that share a transitive dep dedupes that dep", async () => {
     const outputDir = await buildFixture("intraPageSharedTransitiveDep");
 
-    const globalJs = await readFile(resolve(outputDir, "js/global.js"), "utf-8");
+    // Single-page fixture using the default `@page` bundle — output lives at the
+    // template-derived path produced by `defaultDerivePageBundleFilePath`.
+    const pageJs = await readFile(resolve(outputDir, "js/_pages/index.js"), "utf-8");
 
     // The helper module's body should appear exactly once even though both a.js and b.js import it.
     assert.equal(
-      countOccurrences(globalJs, "intra-page-shared-helper-called-by"),
+      countOccurrences(pageJs, "intra-page-shared-helper-called-by"),
       1,
-      `Expected helper.js to be deduped within a single page bundle. global.js:\n${globalJs}`,
+      `Expected helper.js to be deduped within the page bundle. _pages/index.js:\n${pageJs}`,
     );
   });
 });

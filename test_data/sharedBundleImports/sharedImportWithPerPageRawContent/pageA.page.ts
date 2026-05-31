@@ -14,6 +14,7 @@ export default function PageA() {
 }
 
 PageA.js = js`
+  ${js.bundle("global")}
   ${js.import("./shared.js")}
   console.log("PageA-only-marker");
 `;

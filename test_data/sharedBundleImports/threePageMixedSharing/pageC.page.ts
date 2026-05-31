@@ -14,5 +14,5 @@ export default function PageC() {
 }
 
 PageC.js = js`
-  ${js.import("./y.js")}
+  ${js.import("./y.js", "global")}
 `;

@@ -35,10 +35,14 @@
   "devDependencies": {
     "@11ty/eleventy": "^3.1.2",
     "@types/node": "^24.12.2",
+    "@types/object-hash": "^3.0.6",
     "esbuild": "^0.25.11",
     "lightningcss": "^1.30.2",
     "marked": "^15.0.12",
     "tsdown": "^0.21.9",
     "typescript": "^6.0.2"
+  },
+  "dependencies": {
+    "object-hash": "^3.0.0"
   }
 }

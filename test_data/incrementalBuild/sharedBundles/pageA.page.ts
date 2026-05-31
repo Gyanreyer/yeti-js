@@ -17,9 +17,9 @@ export default function PageA() {
 }
 
 PageA.css = css`
-  ${css.import("./pageA-only.css")}
+  ${css.import("./pageA-only.css", "global")}
 `;
 
 PageA.js = js`
-  ${js.import("./pageA-only.js")}
+  ${js.import("./pageA-only.js", "global")}
 `;

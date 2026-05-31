@@ -14,6 +14,6 @@ export default function PageB() {
 }
 
 PageB.js = js`
-  ${js.import("./x.js")}
-  ${js.import("./y.js")}
+  ${js.import("./x.js", "global")}
+  ${js.import("./y.js", "global")}
 `;

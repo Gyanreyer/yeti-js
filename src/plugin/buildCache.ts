@@ -5,7 +5,8 @@ import { brotliCompress, brotliDecompress } from 'node:zlib';
 import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
 
-import type { PageBundleAggregate } from './processPageComponent.ts';
+import type { PageBundleAggregate, PageScopedBundles } from './processPageComponent.ts';
+import type { PageContext } from './types.ts';
 import { safeWriteFile } from '../utils/safeWriteFile.ts';
 
 const compress = promisify(brotliCompress);
@@ -15,7 +16,7 @@ const decompress = promisify(brotliDecompress);
  * Bump this when the cache format or serialization logic changes in a way
  * that makes older cache files incompatible, even if no dependency versions changed.
  */
-const CACHE_VERSION = 1;
+const CACHE_VERSION = 4;
 
 /**
  * Derive a per-site cache filename from the inputDir so that multiple sites
@@ -36,14 +37,40 @@ interface SerializedHashPosition {
 }
 
 interface SerializedPageCacheEntry {
-  outputPath: string;
-  /** Exact character positions of each substituted bundle hash in the output HTML */
-  hashPositions: SerializedHashPosition[];
+  /**
+   * One entry per rendered output of this template. A single template `inputPath` can produce
+   * many outputs (pagination), each its own file with its own substituted-hash positions.
+   */
+  outputs: {
+    outputPath: string;
+    /** Exact character positions of each substituted bundle hash in this output's HTML */
+    hashPositions: SerializedHashPosition[];
+  }[];
   externalBundles: {
     css: Record<string, { importPaths: string[]; rawContents: string[] }>;
     js: Record<string, { importPaths: string[]; rawContents: string[] }>;
     htmlImportPaths: Record<string, string[]>;
   };
+  /**
+   * Page-scoped (`@page`) bundle contributions for this page. Persisted so that incremental
+   * builds — where Eleventy only re-runs `compile()` for pages whose deps changed — still have
+   * complete page-bundle data for the merge step in `eleventy.after`.
+   */
+  pageBundles: {
+    inputPath: string;
+    css: { importPaths: string[]; rawContents: string[] } | null;
+    js: { importPaths: string[]; rawContents: string[] } | null;
+    html: string[] | null;
+  };
+  /**
+   * The most recent `PageContext` observed for this page. Needed in
+   * `eleventy.after` because `derivePageBundleFilePath(page)` may key off any field on it.
+   * Carrying it through the cache lets unchanged-on-this-build pages still get their
+   * page-bundle written. We carry only the `page` subobject (not full `EleventyPageData`)
+   * because surrounding fields like `pagination` contain circular refs that won't survive
+   * JSON serialization.
+   */
+  page: PageContext;
 }
 
 interface SerializedBuildCache {
@@ -61,15 +88,29 @@ export interface HashPosition {
   placeholder: string;
 }
 
-export interface PageCacheEntry {
+/** One rendered output of a template: its file path and the substituted-hash positions in it. */
+export interface PageCacheOutput {
   outputPath: string;
-  /** Exact character positions of each substituted bundle hash in the output HTML */
+  /** Exact character positions of each substituted bundle hash in this output's HTML */
   hashPositions: HashPosition[];
+}
+
+export interface PageCacheEntry {
+  /**
+   * One entry per rendered output of this template. A single template `inputPath` can produce
+   * many outputs (pagination); each output file tracks its own hash positions so incremental
+   * builds can splice stale hashes into every variant, not just one.
+   */
+  outputs: PageCacheOutput[];
   externalBundles: {
     css: Map<string, PageBundleAggregate>;
     js: Map<string, PageBundleAggregate>;
     htmlImportPaths: Map<string, Set<string>>;
   };
+  /** Page-scoped (`@page`) bundle aggregates for this page. */
+  pageBundles: PageScopedBundles;
+  /** The most recent `PageContext` observed for this page. */
+  page: PageContext;
 }
 
 export interface BuildCacheData {
@@ -86,19 +127,23 @@ const getPackageVersion = async (packageJsonPath: string): Promise<string> => {
 };
 
 /**
- * Compute a cache version key from yeti-js + esbuild + lightningcss versions
- * plus the manual CACHE_VERSION constant. Any change in these values
- * invalidates the entire cache.
+ * Compute a cache version key from yeti-js + esbuild + lightningcss + object-hash
+ * versions plus the manual CACHE_VERSION constant. Any change in these values
+ * invalidates the entire cache. object-hash is included because its serialization
+ * is part of the bundle output cache key — a library upgrade that changes the
+ * serialization shape would otherwise produce silent key collisions across versions.
  */
 export const computeCacheVersionKey = async (): Promise<string> => {
   const yetiVersion = await getPackageVersion(import.meta.resolve('../../package.json'));
   const esbuildVersion = (await import('esbuild')).version;
   const lightningcssVersion = await getLightningcssVersion();
+  const objectHashVersion = await getPackageVersion(import.meta.resolve('object-hash/package.json'));
 
   const hash = createHash('sha256');
   hash.update(`yeti:${yetiVersion}`);
   hash.update(`esbuild:${esbuildVersion}`);
   hash.update(`lightningcss:${lightningcssVersion}`);
+  hash.update(`object-hash:${objectHashVersion}`);
   hash.update(`format:${CACHE_VERSION}`);
   return hash.digest('hex');
 };
@@ -148,13 +193,14 @@ const deserializePageBundleAggregate = (
 });
 
 export const serializePageEntry = (
-  outputPath: string,
-  hashPositions: HashPosition[],
+  outputs: PageCacheOutput[],
   externalBundles: {
     css: Map<string, PageBundleAggregate>;
     js: Map<string, PageBundleAggregate>;
     htmlImportPaths: Map<string, Set<string>>;
   },
+  pageBundles: PageScopedBundles,
+  page: PageContext,
 ): SerializedPageCacheEntry => {
   const cssBundles: SerializedPageCacheEntry["externalBundles"]["css"] = {};
   for (const [bundleName, agg] of externalBundles.css) {
@@ -170,19 +216,24 @@ export const serializePageEntry = (
   }
 
   return ({
-    outputPath,
-    hashPositions,
+    outputs,
     externalBundles: {
       css: cssBundles,
       js: jsBundles,
       htmlImportPaths: htmlImportPaths,
     },
+    pageBundles: {
+      inputPath: pageBundles.inputPath,
+      css: pageBundles.css ? serializePageBundleAggregate(pageBundles.css) : null,
+      js: pageBundles.js ? serializePageBundleAggregate(pageBundles.js) : null,
+      html: pageBundles.html ? Array.from(pageBundles.html) : null,
+    },
+    page,
   });
 };
 
 const deserializePageEntry = (json: SerializedPageCacheEntry): PageCacheEntry => ({
-  outputPath: json.outputPath,
-  hashPositions: json.hashPositions,
+  outputs: json.outputs.map((o) => ({ outputPath: o.outputPath, hashPositions: o.hashPositions })),
   externalBundles: {
     css: new Map(
       Object.entries(json.externalBundles.css).map(([k, v]) => [k, deserializePageBundleAggregate(v)]),
@@ -194,6 +245,13 @@ const deserializePageEntry = (json: SerializedPageCacheEntry): PageCacheEntry =>
       Object.entries(json.externalBundles.htmlImportPaths).map(([k, v]) => [k, new Set(v)]),
     ),
   },
+  pageBundles: {
+    inputPath: json.pageBundles.inputPath,
+    css: json.pageBundles.css ? deserializePageBundleAggregate(json.pageBundles.css) : null,
+    js: json.pageBundles.js ? deserializePageBundleAggregate(json.pageBundles.js) : null,
+    html: json.pageBundles.html ? new Set(json.pageBundles.html) : null,
+  },
+  page: json.page,
 });
 
 // -- Load / Save --
@@ -263,7 +321,12 @@ export const saveBuildCache = async (
           pages: Object.fromEntries(
             Array.from(data.pages, ([inputPath, entry]) => [
               inputPath,
-              serializePageEntry(entry.outputPath, entry.hashPositions, entry.externalBundles),
+              serializePageEntry(
+                entry.outputs,
+                entry.externalBundles,
+                entry.pageBundles,
+                entry.page,
+              ),
             ]),
           ),
         } satisfies SerializedBuildCache

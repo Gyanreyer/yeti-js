@@ -2,44 +2,70 @@ import { describe, test } from "node:test";
 import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
 
-import { YETI_NODE_TYPE, type YetiRootNode, type YetiElementNode } from "../html/types.ts";
+import { YETI_NODE_TYPE, type YetiRootNode } from "../html/types.ts";
 import { textEncoder } from "../utils/textEncoder.ts";
 
-import { processPageComponent } from "./processPageComponent.ts";
+import { type PageScopedBundles, processPageComponent } from "./processPageComponent.ts";
+import { makeBundleVersionPlaceholder, makePageBundleVersionPlaceholder } from "./bundleVersionPlaceholder.ts";
+import type { EleventyPageData } from "./types.ts";
+
+/**
+ * Minimal mock of `EleventyPageData` for unit tests. The plugin only reads `page.inputPath`
+ * from this in the default page-bundle path deriver, so the rest of the fields just need to
+ * be shape-correct.
+ */
+const makeMockPageProps = (inputPath: string): EleventyPageData => ({
+  eleventy: {
+    version: "3.0.0",
+    generator: "test",
+    env: { source: "script", runMode: "build", config: "", root: "" },
+    directories: { input: ".", data: "_data", includes: "_includes", layouts: "_layouts", output: "_site" },
+  },
+  page: {
+    inputPath,
+    fileSlug: "test",
+    filePathStem: "/test",
+    templateSyntax: "njk",
+    date: new Date(0),
+    url: "/test/",
+    outputPath: "_site/test/index.html",
+  },
+  collections: {},
+});
 
 describe("processPageComponent", () => {
   test("handles a simple page with assets", async () => {
     const MyPageComponent = (await import("../../test_data/simplePageWithAssets/MyPage.page.ts")).default;
 
-    const { pageRootNode, externalBundles, dependencies } = await processPageComponent(MyPageComponent, {} as any);
+    const { pageRootNode, externalBundles, dependencies, pageBundles } = await processPageComponent(
+      MyPageComponent,
+      makeMockPageProps("test_data/simplePageWithAssets/MyPage.page.ts"),
+    );
 
-    assert.deepStrictEqual(externalBundles, {
-      css: new Map([
-        ["global", {
-          importPaths: new Set([
-            fileURLToPath(import.meta.resolve("../../test_data/simplePageWithAssets/Heading.component.css")),
-          ]),
-          rawContents: [
-            // Heading's raw contribution to the global bundle. The interleaved whitespace
-            // chunks come from the parts of the template literal that surround the
-            // ${css.import()} and ${css.bundle()} calls.
-            textEncoder.encode("\n  \n\n  \n  header {\n    background-color: red;\n  }\n  h1 {\n    color: yellow;\n  }\n"),
-            // FancyComponent's raw contribution to the global bundle.
-            textEncoder.encode("\n  fancy-component:not(:defined) {\n    display: none;\n  }\n"),
-          ],
-        }],
-      ]),
-      js: new Map([
-        ["global", {
-          importPaths: new Set([
-            fileURLToPath(import.meta.resolve("../../test_data/simplePageWithAssets/fancy-component.js")),
-          ]),
-          rawContents: [
-            textEncoder.encode("\n  \n  \n\n  console.log(\"Hello from FancyComponent!\");\n"),
-          ],
-        }],
-      ]),
-      htmlImportPaths: new Map(),
+    assert.deepStrictEqual<PageScopedBundles>(pageBundles, {
+      css: {
+        importPaths: new Set([
+          fileURLToPath(import.meta.resolve("../../test_data/simplePageWithAssets/Heading.component.css")),
+        ]),
+        rawContents: [
+          // Heading's raw contribution to the global bundle. The interleaved whitespace
+          // chunks come from the parts of the template literal that surround the
+          // ${css.import()} and ${css.bundle()} calls.
+          textEncoder.encode("\n  \n\n  \n  header {\n    background-color: red;\n  }\n  h1 {\n    color: yellow;\n  }\n"),
+          // FancyComponent's raw contribution to the global bundle.
+          textEncoder.encode("\n  fancy-component:not(:defined) {\n    display: none;\n  }\n"),
+        ],
+      },
+      js: {
+        importPaths: new Set([
+          fileURLToPath(import.meta.resolve("../../test_data/simplePageWithAssets/fancy-component.js")),
+        ]),
+        rawContents: [
+          textEncoder.encode("\n  \n  \n\n  console.log(\"Hello from FancyComponent!\");\n"),
+        ],
+      },
+      html: null,
+      inputPath: "test_data/simplePageWithAssets/MyPage.page.ts",
     });
 
     assert.deepStrictEqual(dependencies, new Set([
@@ -155,7 +181,7 @@ describe("processPageComponent", () => {
                   type: YETI_NODE_TYPE.ELEMENT,
                   tagName: "script",
                   attributes: {
-                    src: "/js/global.js?v=--YETI__js__global--",
+                    src: `/js/_pages/test_data/simplePageWithAssets/MyPage.js?v=${makePageBundleVersionPlaceholder("js", "test_data/simplePageWithAssets/MyPage.page.ts")}`,
                   },
                 },
                 {
@@ -163,7 +189,7 @@ describe("processPageComponent", () => {
                   tagName: "link",
                   attributes: {
                     rel: "stylesheet",
-                    href: "/css/global.css?v=--YETI__css__global--",
+                    href: `/css/_pages/test_data/simplePageWithAssets/MyPage.css?v=${makePageBundleVersionPlaceholder("css", "test_data/simplePageWithAssets/MyPage.page.ts")}`,
                   },
                 },
               ],
@@ -177,7 +203,10 @@ describe("processPageComponent", () => {
   test("handles a page with empty wildcards", async () => {
     const MyPageComponent = (await import("../../test_data/simplePageWithEmptyWildcards/MyPage.page.ts")).default;
 
-    const { pageRootNode, externalBundles, dependencies } = await processPageComponent(MyPageComponent, {} as any);
+    const { pageRootNode, externalBundles, dependencies } = await processPageComponent(
+      MyPageComponent,
+      makeMockPageProps("test_data/simplePageWithEmptyWildcards/MyPage.page.ts"),
+    );
 
     assert.deepStrictEqual(externalBundles, {
       css: new Map(),
@@ -268,14 +297,37 @@ describe("processPageComponent", () => {
   test("handles a page with duplicate wildcard bundle references", async () => {
     const MyPageComponent = (await import("../../test_data/pageWithDuplicateWildcards/MyPage.page.ts")).default;
 
-    const { pageRootNode, externalBundles } = await processPageComponent(MyPageComponent, {} as any);
+    const { pageRootNode, externalBundles, pageBundles } = await processPageComponent(
+      MyPageComponent,
+      makeMockPageProps("test_data/pageWithDuplicateWildcards/MyPage.page.ts"),
+    );
 
     // Each asset type's "global" bundle should be tracked once even though there are
     // multiple `*.src("*")` references in the layout that resolve to it.
-    assert.deepStrictEqual(Array.from(externalBundles.css.keys()), ["global", "critical"]);
-    assert.deepStrictEqual(Array.from(externalBundles.js.keys()), ["global"]);
+    assert.deepStrictEqual(Array.from(externalBundles.css.keys()), ["critical"]);
+    assert.deepStrictEqual(Array.from(externalBundles.js.keys()), []);
 
-    console.dir(pageRootNode, { depth: null });
+    assert.deepStrictEqual<PageScopedBundles>(pageBundles, {
+      css: {
+        importPaths: new Set(),
+        rawContents: [
+          textEncoder.encode(`
+  body { background: blue; }
+
+  `),
+        ],
+      },
+      js: {
+        importPaths: new Set(),
+        rawContents: [
+          textEncoder.encode(`
+  console.log("hello");
+`),
+        ],
+      },
+      html: null,
+      inputPath: "test_data/pageWithDuplicateWildcards/MyPage.page.ts",
+    })
 
     assert.deepStrictEqual<YetiRootNode>(pageRootNode, {
       type: YETI_NODE_TYPE.ROOT,
@@ -329,7 +381,7 @@ describe("processPageComponent", () => {
                   tagName: 'link',
                   attributes: {
                     rel: 'stylesheet',
-                    href: '/css/global.css?v=--YETI__css__global--',
+                    href: `/css/_pages/test_data/pageWithDuplicateWildcards/MyPage.css?v=${makePageBundleVersionPlaceholder("css", "test_data/pageWithDuplicateWildcards/MyPage.page.ts")}`,
                     media: 'print',
                     onload: "this.media='all'"
                   }
@@ -339,7 +391,7 @@ describe("processPageComponent", () => {
                   tagName: 'link',
                   attributes: {
                     rel: 'stylesheet',
-                    href: '/css/critical.css?v=--YETI__css__critical--',
+                    href: `/css/critical.css?v=${makeBundleVersionPlaceholder("css", "critical")}`,
                     media: 'print',
                     onload: "this.media='all'"
                   }
@@ -353,7 +405,7 @@ describe("processPageComponent", () => {
                       tagName: 'link',
                       attributes: {
                         rel: 'stylesheet',
-                        href: '/css/global.css?v=--YETI__css__global--'
+                        href: `/css/_pages/test_data/pageWithDuplicateWildcards/MyPage.css?v=${makePageBundleVersionPlaceholder("css", "test_data/pageWithDuplicateWildcards/MyPage.page.ts")}`
                       }
                     },
                     {
@@ -361,7 +413,7 @@ describe("processPageComponent", () => {
                       tagName: 'link',
                       attributes: {
                         rel: 'stylesheet',
-                        href: '/css/critical.css?v=--YETI__css__critical--'
+                        href: `/css/critical.css?v=${makeBundleVersionPlaceholder("css", "critical")}`
                       }
                     }
                   ]
@@ -393,7 +445,7 @@ describe("processPageComponent", () => {
                   tagName: 'script',
                   attributes: {
                     'data-first': true,
-                    src: '/js/global.js?v=--YETI__js__global--'
+                    src: `/js/_pages/test_data/pageWithDuplicateWildcards/MyPage.js?v=${makePageBundleVersionPlaceholder("js", "test_data/pageWithDuplicateWildcards/MyPage.page.ts")}`
                   }
                 },
                 {
@@ -401,7 +453,7 @@ describe("processPageComponent", () => {
                   tagName: 'script',
                   attributes: {
                     'data-second': true,
-                    src: '/js/global.js?v=--YETI__js__global--'
+                    src: `/js/_pages/test_data/pageWithDuplicateWildcards/MyPage.js?v=${makePageBundleVersionPlaceholder("js", "test_data/pageWithDuplicateWildcards/MyPage.page.ts")}`
                   }
                 }
               ]

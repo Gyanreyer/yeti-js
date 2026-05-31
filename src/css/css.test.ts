@@ -27,27 +27,27 @@ describe("css", () => {
   });
 
   describe("css templates", () => {
-    test("A simple string-only css template produces a contribution with raw content and no imports", () => {
+    test("A simple string-only css template produces a contribution with raw content under the page-scoped @page key by default", () => {
       const result = css`
         body {
           margin: 1000px;
         }
       `;
       assert(isCSSTemplateResult(result));
-      assert.deepStrictEqual(Array.from(result.bundles.keys()), ["global"]);
+      assert.deepStrictEqual(Array.from(result.bundles.keys()), ["@page"]);
 
-      const globalContribution = result.bundles.get("global") as BundleContribution;
-      assert(globalContribution);
-      assert.strictEqual(globalContribution.importPaths.size, 0);
+      const pageContribution = result.bundles.get("@page");
+      assert(pageContribution);
+      assert.strictEqual(pageContribution.importPaths.size, 0);
       assert.deepStrictEqual(
-        globalContribution.rawContent,
+        pageContribution.rawContent,
         textEncoder.encode(`
         body {
           margin: 1000px;
         }
       `),
       );
-      assert.strictEqual(globalContribution.callerFilePath, import.meta.filename);
+      assert.strictEqual(pageContribution.callerFilePath, import.meta.filename);
     });
 
     test("A css template with multiple bundles separates raw content per bundle name", () => {
@@ -215,11 +215,11 @@ describe("css", () => {
 
     test("getCSSImportBundle throws when an import path does not exist", async () => {
       const result = css`${css.import("/test_data/css/non-existent-file.css")}`;
-      const globalContribution = result.bundles.get("global") as BundleContribution;
-      assert(globalContribution);
+      const pageContribution = result.bundles.get("@page");
+      assert(pageContribution);
 
       await assert.rejects(
-        () => getCSSImportBundle(globalContribution.importPaths),
+        () => getCSSImportBundle(pageContribution.importPaths),
         (err: unknown): err is BundleError => {
           assert(err instanceof BundleError);
           assert(err.cause instanceof Error);

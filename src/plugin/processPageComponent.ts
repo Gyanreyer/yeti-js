@@ -1,8 +1,7 @@
 import { transform as transformCSS } from "lightningcss";
 import { transform as transformJS } from 'esbuild';
-import { open } from "node:fs/promises";
 
-import { getExternalBundleFilePath, isBundleSrcObject, isInlinedBundleElementNode, WILDCARD_BUNDLE_NAME, type BundleContribution } from "../bundle/bundle.ts";
+import { getExternalBundleFilePath, isBundleSrcObject, isInlinedBundleElementNode, PAGE_BUNDLE_NAME, WILDCARD_BUNDLE_NAME, type BundleContribution } from "../bundle/bundle.ts";
 import { YETI_NODE_TYPE } from "../html/types.ts";
 import type { YetiRootNode, YetiElementNode, YetiChildNode, YetiNode } from "../html/types.ts";
 import type { EleventyPageData, YetiPageComponent } from "./types.ts";
@@ -14,10 +13,28 @@ import { getConfig } from "../config.ts";
 import { logWarning } from "../log.ts";
 import { aOrAn } from "../utils/aOrAn.ts";
 import { concatUint8Arrays } from "../utils/concatUint8Arrays.ts";
+import { readAndConcatFiles } from "../utils/readAndConcatFiles.ts";
 import { textDecoder } from "../utils/textDecoder.ts";
 import { mergeHeadContent } from "../html/mergeHeadContent.ts";
-import { makeBundleVersionPlaceholder } from "./bundleVersionPlaceholder.ts";
+import { makeBundleVersionPlaceholder, makePageBundleVersionPlaceholder } from "./bundleVersionPlaceholder.ts";
 import { getCSSImportBundle, getJSImportBundle } from "../bundle/bundleImportCache.ts";
+
+/**
+ * Warn that a referenced bundle has no content for the page, unless it's the page-scoped
+ * `@page` bundle.
+ *
+ * Referencing `@page` (e.g. `css.src("@page")` in a shared layout) on a page that happens to
+ * contribute no content of that asset type is an expected, benign case: not every page has
+ * component CSS/JS/HTML. Warning there would be noise on potentially every page, so we stay
+ * silent. Named bundles still warn, since an empty named bundle the author explicitly referenced
+ * usually signals a mistake (typo, forgotten contribution, wrong asset type).
+ */
+const warnEmptyBundleReference = (bundleName: string, message: string): void => {
+  if (bundleName === PAGE_BUNDLE_NAME) {
+    return;
+  }
+  logWarning(message);
+};
 
 /**
  * A page-level aggregate of bundle contributions for a single bundle name. We collect every
@@ -54,6 +71,28 @@ export interface PageBundleAggregate {
  * 5. Render the final processed node tree to an HTML string and return it, along with the page bundle aggregates which can be used by the cross-page merge step
  *      to determine the final external bundle contents and file paths and write the transformed bundle content to external files. The file path should be determined by config.css.deriveBundleFilePath or config.js.deriveBundleFilePath, depending on the asset type.
  */
+/**
+ * Page-scoped bundle contributions returned alongside cross-page external bundles.
+ * Pages whose `inputPath` matches (e.g. pagination variants of the same template) get
+ * merged into a single page-bundle file by `eleventy.after`.
+ *
+ * The `inputPath` field is the page's source template path, used as the merge key. Each
+ * asset-type field is `null` if the page contributed nothing to its `@page` bundle for
+ * that asset type.
+ *
+ * Note the shape asymmetry: `css` and `js` are full `PageBundleAggregate`s (importPaths +
+ * raw template contents), while `html` is a flat `Set<string>` of import paths. This
+ * mirrors the broader HTML-bundling model in this codebase — HTML bundles only support
+ * imported files, not raw inline contributions from a tagged template — and is intentional
+ * rather than an in-progress simplification.
+ */
+export interface PageScopedBundles {
+  inputPath: string;
+  css: PageBundleAggregate | null;
+  js: PageBundleAggregate | null;
+  html: Set<string> | null;
+}
+
 export const processPageComponent = async (pageComponent: YetiPageComponent, pageProps: EleventyPageData): Promise<{
   pageRootNode: YetiRootNode;
   externalBundles: {
@@ -61,6 +100,7 @@ export const processPageComponent = async (pageComponent: YetiPageComponent, pag
     js: Map<string, PageBundleAggregate>;
     htmlImportPaths: Map<string, Set<string>>;
   };
+  pageBundles: PageScopedBundles;
   dependencies: Set<string>;
 }> => {
   const pageDependencies = new Set<string>();
@@ -239,25 +279,7 @@ export const processPageComponent = async (pageComponent: YetiPageComponent, pag
       return null;
     }
 
-    // Open all file handles and stat them in parallel, then read sequentially into a pre-allocated buffer
-    const fileEntries = await Promise.all(
-      Array.from(bundleImportPathsSet).map(async (importPath) => {
-        const fh = await open(importPath, "r");
-        const { size } = await fh.stat();
-        return { fh, size };
-      })
-    );
-    const bundleByteLength = fileEntries.reduce((sum, { size }) => sum + size, 0);
-    const bundleContentBuffer = new Uint8Array(bundleByteLength);
-    try {
-      let offset = 0;
-      for (const { fh, size } of fileEntries) {
-        await fh.read(bundleContentBuffer, offset, size);
-        offset += size;
-      }
-    } finally {
-      await Promise.all(fileEntries.map(({ fh }) => fh.close()));
-    }
+    const bundleContentBuffer = await readAndConcatFiles(bundleImportPathsSet);
 
     let parsedBundleRootNode = await parseHTML(bundleContentBuffer);
 
@@ -328,7 +350,7 @@ export const processPageComponent = async (pageComponent: YetiPageComponent, pag
           case "css": {
             const bundleContent = await getInlinedCSSBundleContent(bundleName);
             if (!bundleContent) {
-              logWarning(`Bundle "${bundleName}" is referenced in an inline CSS bundle element but no content was found for that bundle. This may mean that the bundle is empty or not being included in the output as expected.`);
+              warnEmptyBundleReference(bundleName, `Bundle "${bundleName}" is referenced in an inline CSS bundle element but no content was found for that bundle. This may mean that the bundle is empty or not being included in the output as expected.`);
             } else {
               usedCSSBundleNames.add(bundleName);
             }
@@ -340,7 +362,7 @@ export const processPageComponent = async (pageComponent: YetiPageComponent, pag
           case "js": {
             const bundleContent = await getInlinedJSBundleContent(bundleName);
             if (!bundleContent) {
-              logWarning(`Bundle "${bundleName}" is referenced in an inline JS bundle element but no content was found for that bundle. This may mean that the bundle is empty or not being included in the output as expected.`);
+              warnEmptyBundleReference(bundleName, `Bundle "${bundleName}" is referenced in an inline JS bundle element but no content was found for that bundle. This may mean that the bundle is empty or not being included in the output as expected.`);
             } else {
               usedJSBundleNames.add(bundleName);
             }
@@ -352,7 +374,7 @@ export const processPageComponent = async (pageComponent: YetiPageComponent, pag
           case "html": {
             const bundleContentRootNode = await getInlinedHTMLBundleContent(bundleName);
             if (!bundleContentRootNode) {
-              logWarning(`Bundle "${bundleName}" is referenced in an inline HTML bundle element but no content was found for that bundle. This may mean that the bundle is empty or not being included in the output as expected.`);
+              warnEmptyBundleReference(bundleName, `Bundle "${bundleName}" is referenced in an inline HTML bundle element but no content was found for that bundle. This may mean that the bundle is empty or not being included in the output as expected.`);
               return {
                 type: YETI_NODE_TYPE.TEXT,
                 content: "",
@@ -391,22 +413,31 @@ export const processPageComponent = async (pageComponent: YetiPageComponent, pag
             }
           } else {
             const getSrcValueForBundle = () => {
-              const bundleFilePath = getExternalBundleFilePath(bundleName, assetType);
+              const bundleFilePath = bundleName === PAGE_BUNDLE_NAME
+                ? config[assetType].derivePageBundleFilePath(pageProps.page)
+                : getExternalBundleFilePath(bundleName, assetType);
+              const placeholder = bundleName === PAGE_BUNDLE_NAME
+                ? makePageBundleVersionPlaceholder(assetType, pageProps.page.inputPath)
+                : makeBundleVersionPlaceholder(assetType, bundleName);
               // Use URL to parse any user-provided trailing content into query/hash components,
               // merge in the version placeholder, and reconstruct the full value
               const url = new URL(`${bundleFilePath}${attrValue.afterContent ?? ""}`, "http://y");
-              url.searchParams.set("v", makeBundleVersionPlaceholder(assetType, bundleName));
+              url.searchParams.set("v", placeholder);
               return `${attrValue.beforeContent ?? ""}${url.pathname}${url.search}${url.hash}`;
             };
 
+            // Only track a referenced bundle as "used" (which the assembly step below expects to
+            // resolve to an aggregate) when it actually has content. An empty referenced bundle has
+            // its attribute dropped and is otherwise skipped — see `warnEmptyBundleReference`.
             switch (assetType) {
               case "css": {
                 if (pageCssBundleAggregates.has(bundleName)) {
                   node.attributes[attrName] = getSrcValueForBundle();
                   usedCSSBundleNames.add(bundleName);
+                  usedExternalBundleNames.css.add(bundleName);
                 } else {
                   delete node.attributes[attrName];
-                  logWarning(`Bundle "${bundleName}" is referenced in ${aOrAn(attrName)} ${attrName} attribute for CSS asset type but no content was found for that bundle. This may mean that the bundle is empty or not being included in the output as expected. The attribute "${attrName}" will be removed from the element with tag name "${node.tagName}".`);
+                  warnEmptyBundleReference(bundleName, `Bundle "${bundleName}" is referenced in ${aOrAn(attrName)} ${attrName} attribute for CSS asset type but no content was found for that bundle. This may mean that the bundle is empty or not being included in the output as expected. The attribute "${attrName}" will be removed from the element with tag name "${node.tagName}".`);
                 }
                 break;
               }
@@ -414,9 +445,10 @@ export const processPageComponent = async (pageComponent: YetiPageComponent, pag
                 if (pageJsBundleAggregates.has(bundleName)) {
                   node.attributes[attrName] = getSrcValueForBundle();
                   usedJSBundleNames.add(bundleName);
+                  usedExternalBundleNames.js.add(bundleName);
                 } else {
                   delete node.attributes[attrName];
-                  logWarning(`Bundle "${bundleName}" is referenced in ${aOrAn(attrName)} ${attrName} attribute for JS asset type but no content was found for that bundle. This may mean that the bundle is empty or not being included in the output as expected. The attribute "${attrName}" will be removed from the element with tag name "${node.tagName}".`);
+                  warnEmptyBundleReference(bundleName, `Bundle "${bundleName}" is referenced in ${aOrAn(attrName)} ${attrName} attribute for JS asset type but no content was found for that bundle. This may mean that the bundle is empty or not being included in the output as expected. The attribute "${attrName}" will be removed from the element with tag name "${node.tagName}".`);
                 }
                 break;
               }
@@ -424,14 +456,14 @@ export const processPageComponent = async (pageComponent: YetiPageComponent, pag
                 if (htmlBundleImportPaths.has(bundleName)) {
                   node.attributes[attrName] = getSrcValueForBundle();
                   usedHTMLBundleNames.add(bundleName);
+                  usedExternalBundleNames.html.add(bundleName);
                 } else {
                   delete node.attributes[attrName];
-                  logWarning(`Bundle "${bundleName}" is referenced in ${aOrAn(attrName)} ${attrName} attribute for HTML asset type but no content was found for that bundle. This may mean that the bundle is empty or not being included in the output as expected. The attribute "${attrName}" will be removed from the element with tag name "${node.tagName}".`);
+                  warnEmptyBundleReference(bundleName, `Bundle "${bundleName}" is referenced in ${aOrAn(attrName)} ${attrName} attribute for HTML asset type but no content was found for that bundle. This may mean that the bundle is empty or not being included in the output as expected. The attribute "${attrName}" will be removed from the element with tag name "${node.tagName}".`);
                 }
                 break;
               }
             }
-            usedExternalBundleNames[assetType].add(bundleName);
           }
         }
       }
@@ -528,9 +560,14 @@ export const processPageComponent = async (pageComponent: YetiPageComponent, pag
         } else {
           const newNode = { ...node, attributes: { ...node.attributes } };
           for (const attrName of wildCardNode.attrNames) {
-            const bundleFilePath = getExternalBundleFilePath(bundleName, assetType);
+            const bundleFilePath = bundleName === PAGE_BUNDLE_NAME
+              ? config[assetType].derivePageBundleFilePath(pageProps.page)
+              : getExternalBundleFilePath(bundleName, assetType);
+            const placeholder = bundleName === PAGE_BUNDLE_NAME
+              ? makePageBundleVersionPlaceholder(assetType, pageProps.page.inputPath)
+              : makeBundleVersionPlaceholder(assetType, bundleName);
             const url = new URL(bundleFilePath, "http://y");
-            url.searchParams.set("v", makeBundleVersionPlaceholder(assetType, bundleName));
+            url.searchParams.set("v", placeholder);
             newNode.attributes[attrName] = `${url.pathname}${url.search}${url.hash}`;
           }
           replacementNodes.push(newNode);
@@ -548,10 +585,19 @@ export const processPageComponent = async (pageComponent: YetiPageComponent, pag
 
   // Assemble final map of externally referenced bundle aggregates which we'll need to merge
   // across pages and write to external files in the "eleventy.after" hook.
+  // Page-scoped (`@page`) bundles are segregated into `pageBundles` so the plugin layer can
+  // route them through `derivePageBundleFilePath` and merge them by inputPath across
+  // pagination variants of the same template.
   const externalBundles = {
     css: new Map<string, PageBundleAggregate>(),
     js: new Map<string, PageBundleAggregate>(),
     htmlImportPaths: new Map<string, Set<string>>(),
+  };
+  const pageBundles: PageScopedBundles = {
+    inputPath: pageProps.page.inputPath,
+    css: null,
+    js: null,
+    html: null,
   };
 
   // For external bundles, we also need to make sure their import deps are tracked as page
@@ -565,7 +611,11 @@ export const processPageComponent = async (pageComponent: YetiPageComponent, pag
     if (!aggregate) {
       throw new Error(`Expected to find aggregate for externally referenced CSS bundle "${bundleName}".`);
     }
-    externalBundles.css.set(bundleName, aggregate);
+    if (bundleName === PAGE_BUNDLE_NAME) {
+      pageBundles.css = aggregate;
+    } else {
+      externalBundles.css.set(bundleName, aggregate);
+    }
     if (aggregate.importPaths.size > 0) {
       externalDepTrackingTasks.push((async () => {
         const result = await getCSSImportBundle(aggregate.importPaths);
@@ -580,7 +630,11 @@ export const processPageComponent = async (pageComponent: YetiPageComponent, pag
     if (!aggregate) {
       throw new Error(`Expected to find aggregate for externally referenced JS bundle "${bundleName}".`);
     }
-    externalBundles.js.set(bundleName, aggregate);
+    if (bundleName === PAGE_BUNDLE_NAME) {
+      pageBundles.js = aggregate;
+    } else {
+      externalBundles.js.set(bundleName, aggregate);
+    }
     if (aggregate.importPaths.size > 0) {
       externalDepTrackingTasks.push((async () => {
         const result = await getJSImportBundle(aggregate.importPaths);
@@ -595,7 +649,11 @@ export const processPageComponent = async (pageComponent: YetiPageComponent, pag
     if (!bundleImportPaths) {
       throw new Error(`Expected to find bundle import paths for externally referenced HTML bundle "${bundleName}".`);
     }
-    externalBundles.htmlImportPaths.set(bundleName, bundleImportPaths);
+    if (bundleName === PAGE_BUNDLE_NAME) {
+      pageBundles.html = bundleImportPaths;
+    } else {
+      externalBundles.htmlImportPaths.set(bundleName, bundleImportPaths);
+    }
   }
 
   await Promise.all(externalDepTrackingTasks);
@@ -606,6 +664,7 @@ export const processPageComponent = async (pageComponent: YetiPageComponent, pag
   return {
     pageRootNode,
     externalBundles,
+    pageBundles,
     dependencies: pageDependencies,
   };
 };

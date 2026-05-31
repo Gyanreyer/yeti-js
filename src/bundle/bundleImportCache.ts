@@ -5,6 +5,7 @@ import { createHash } from 'node:crypto';
 import { brotliCompress, brotliDecompress } from 'node:zlib';
 import { promisify } from 'node:util';
 import { dirname, join, resolve } from 'node:path';
+import objectHash from 'object-hash';
 
 import { BundleError } from '../error.ts';
 import { getConfig } from '../config.ts';
@@ -16,6 +17,18 @@ import { safeWriteFile } from '../utils/safeWriteFile.ts';
 
 const compress = promisify(brotliCompress);
 const decompress = promisify(brotliDecompress);
+
+/**
+ * Cached final-transformed bundle output. Stored in the bundle output cache so that
+ * repeat builds with identical merged input bytes can skip the final transform pass
+ * entirely (and skip writing to disk via `writeFileIfChanged`).
+ */
+export interface BundleOutputCacheEntry {
+  /** Final post-transform output bytes */
+  code: Uint8Array;
+  /** 8-char SHA-256 prefix of `code`, used as the bundle's placeholder substitution hash */
+  contentHash: string;
+}
 
 /**
  * Result of bundling a set of import paths together for a single asset bundle.
@@ -50,15 +63,25 @@ interface CacheEntry {
 
 const jsCache = new Map<string, CacheEntry>();
 const cssCache = new Map<string, CacheEntry>();
+const bundleOutputCache = new Map<string, BundleOutputCacheEntry>();
 
 // Stats only used internally for tests to verify that cache hits are happening as expected
-const stats = { jsHits: 0, jsMisses: 0, cssHits: 0, cssMisses: 0 };
+const stats = {
+  jsHits: 0,
+  jsMisses: 0,
+  cssHits: 0,
+  cssMisses: 0,
+  bundleOutputHits: 0,
+  bundleOutputMisses: 0,
+};
 export const getBundleCacheStats = () => stats;
 export const resetBundleCacheStats = (): void => {
   stats.jsHits = 0;
   stats.jsMisses = 0;
   stats.cssHits = 0;
   stats.cssMisses = 0;
+  stats.bundleOutputHits = 0;
+  stats.bundleOutputMisses = 0;
 };
 
 // Access tracking for cache eviction
@@ -362,8 +385,83 @@ export const invalidateStaleEntries = async (): Promise<void> => {
 export const clearBundleImportCache = (): void => {
   jsCache.clear();
   cssCache.clear();
+  bundleOutputCache.clear();
   resetBundleCacheStats();
   accessedKeys = new Set<string>();
+};
+
+// ── Bundle output cache ─────────────────────────────────────────────────
+
+/**
+ * Compute the cache key for a final-transformed bundle output. The key uniquely identifies
+ * every input that can affect the transform's output bytes — `combinedCode`, `transformConfig`,
+ * and `outputFilePath` — so identical inputs always produce the same key and cache hits are
+ * correct by construction.
+ *
+ * `outputFilePath` is included because it's passed as the `filename` to `transformCSS`
+ * (and as the error-context label / parse filename for HTML). Even where it can't currently
+ * change the output bytes (e.g. esbuild's JS transform ignores it, and lightningcss only
+ * surfaces it in the discarded source map), keying on it keeps the cache correct if a future
+ * change starts emitting filename-derived output (source maps, `sourceMappingURL` comments).
+ * The trade-off is that two bundles with byte-identical content but different output paths no
+ * longer share a transform result — an uncommon case, and at worst one redundant transform.
+ *
+ * The bytes are hashed directly via Node's native SHA-256 (fast, zero-copy). `combinedCode` is
+ * length-prefixed before being hashed: it is arbitrary binary that may itself contain the `\0`
+ * separator byte, so without a frame a different `(combinedCode, outputFilePath)` split could
+ * produce the same byte stream. The length prefix makes the boundary unambiguous regardless of
+ * the bytes' content. The config is serialized by `object-hash` in `passthrough` mode — it sorts
+ * keys, handles functions (it hashes their full source via `fn.toString()`), and covers exotic
+ * types (RegExp, Date, Map, Set, circular refs) that ad-hoc stringification would mis-handle.
+ *
+ * Caveat: `object-hash` keys functions on their *source text*, not their behavior, so two
+ * `processNodeTree` functions with identical source but different closed-over state would hash the
+ * same. That's an exotic case (transform hooks are normally pure), inherent to source-based
+ * hashing, and at worst yields a stale cached output until the cache version key rolls.
+ */
+export const deriveBundleOutputCacheKey = (
+  combinedCode: Uint8Array,
+  transformConfig: unknown,
+  outputFilePath: string,
+): string => {
+  const hash = createHash('sha256');
+  // Length-prefix the binary content so the (content | path) boundary is unambiguous even when
+  // `combinedCode` contains the `\0` separator byte itself.
+  hash.update(`${combinedCode.byteLength}\0`);
+  hash.update(combinedCode);
+  hash.update('\0');
+  hash.update(outputFilePath);
+  hash.update('\0');
+  hash.update(objectHash(transformConfig as object, {
+    algorithm: 'passthrough',
+    respectFunctionNames: true,
+    respectFunctionProperties: true,
+  }));
+  return hash.digest('hex');
+};
+
+/**
+ * Look up a cached bundle output by key. Records the access for eviction tracking, so
+ * entries that get hit during a build are kept and entries that aren't are dropped at
+ * save time.
+ */
+export const getCachedBundleOutput = (key: string): BundleOutputCacheEntry | null => {
+  accessedKeys.add(key);
+  const entry = bundleOutputCache.get(key);
+  if (entry) {
+    stats.bundleOutputHits++;
+    return entry;
+  }
+  stats.bundleOutputMisses++;
+  return null;
+};
+
+/**
+ * Store a freshly-computed bundle output in the cache. Caller is responsible for first
+ * checking via `getCachedBundleOutput` and only computing + setting on a miss.
+ */
+export const setCachedBundleOutput = (key: string, entry: BundleOutputCacheEntry): void => {
+  bundleOutputCache.set(key, entry);
 };
 
 // ── Persistence ────────────────────────────────────────────────────────
@@ -379,10 +477,19 @@ interface SerializedCacheEntry {
   e: string[];
 }
 
+interface SerializedBundleOutputEntry {
+  /** Final transformed bundle bytes, base64-encoded */
+  c: string;
+  /** 8-char content hash used in placeholder substitution */
+  h: string;
+}
+
 interface SerializedBundleImportCache {
   cacheVersionKey: string;
   jsCache: SerializedCacheEntry[];
   cssCache: SerializedCacheEntry[];
+  /** Keyed by cache key (sha256 hex of combinedCode + transformConfig) */
+  bundleOutputCache: Record<string, SerializedBundleOutputEntry>;
 }
 
 /**
@@ -473,6 +580,13 @@ export const loadBundleImportCache = async (
 
   deserializeCache(jsCache, data.jsCache);
   deserializeCache(cssCache, data.cssCache);
+
+  for (const [key, entry] of Object.entries(data.bundleOutputCache)) {
+    bundleOutputCache.set(key, {
+      code: new Uint8Array(Buffer.from(entry.c, 'base64')),
+      contentHash: entry.h,
+    });
+  }
 };
 
 /**
@@ -498,16 +612,30 @@ export const saveBundleImportCache = async (
       cssCache.delete(key);
     }
   }
+  for (const key of bundleOutputCache.keys()) {
+    if (!accessedKeys.has(key)) {
+      bundleOutputCache.delete(key);
+    }
+  }
 
   const [jsEntries, cssEntries] = await Promise.all([
     serializeCache(jsCache),
     serializeCache(cssCache),
   ]);
 
+  const bundleOutputEntries: Record<string, SerializedBundleOutputEntry> = {};
+  for (const [key, entry] of bundleOutputCache) {
+    bundleOutputEntries[key] = {
+      c: Buffer.from(entry.code).toString('base64'),
+      h: entry.contentHash,
+    };
+  }
+
   const serialized: SerializedBundleImportCache = {
     cacheVersionKey: versionKey,
     jsCache: jsEntries,
     cssCache: cssEntries,
+    bundleOutputCache: bundleOutputEntries,
   };
 
   const compressed = await compress(Buffer.from(JSON.stringify(serialized)));

@@ -12,6 +12,7 @@ import {
   getBundleCacheStats,
   resetBundleCacheStats,
 } from "../bundle/bundleImportCache.ts";
+import { getWriteSkipStats } from "../utils/writeFileIfChanged.ts";
 
 const FIXTURE_ROOT = resolve(import.meta.dirname, "../../test_data/incrementalBuild");
 const SHARED_BUNDLES_FIXTURE = join(FIXTURE_ROOT, "sharedBundles");
@@ -298,6 +299,161 @@ describe("Yeti Plugin — incremental builds", () => {
       assert.equal(build2PageB, build1PageB, "pageB HTML should be identical across builds");
       assert.deepEqual(build2CSS, build1CSS, "CSS bundle should be identical across builds");
       assert.deepEqual(build2JS, build1JS, "JS bundle should be identical across builds");
+    });
+  });
+
+  test("no-change rebuild: bundle outputs hit cache and skip writes", async () => {
+    await withTempFixture(SHARED_BUNDLES_FIXTURE, async (tempDir) => {
+      const outputDir = join(tempDir, "_site");
+      const eleventy = buildEleventyForFixture(tempDir, outputDir);
+
+      // Build 1: full build — populates the bundle output cache and writes outputs.
+      await eleventy.write();
+
+      // Build 2: no source changes. eleventy.before resets both stats counters,
+      // so the values we read after eleventy.write() reflect this build only.
+      await eleventy.write();
+
+      const cacheStats = getBundleCacheStats();
+      const writeStats = getWriteSkipStats();
+
+      assert.ok(
+        cacheStats.bundleOutputHits > 0,
+        "expected at least one bundle output cache hit on no-change rebuild",
+      );
+      assert.equal(
+        cacheStats.bundleOutputMisses, 0,
+        "no-change rebuild should produce zero bundle output cache misses",
+      );
+      assert.ok(
+        writeStats.skips > 0,
+        "expected at least one write to be skipped on no-change rebuild",
+      );
+      assert.equal(
+        writeStats.writes, 0,
+        "no-change rebuild should not write any bundle/external-dep outputs (writeFileIfChanged.writes)",
+      );
+    });
+  });
+
+  test("selective change: only the affected bundle re-transforms; the other is cached and skipped", async () => {
+    await withTempFixture(SHARED_BUNDLES_FIXTURE, async (tempDir) => {
+      const outputDir = join(tempDir, "_site");
+      const eleventy = buildEleventyForFixture(tempDir, outputDir);
+
+      // Build 1: full build
+      await eleventy.write();
+
+      // Mutate pageA-only.css so the CSS bundle changes but JS does not. Use a color
+      // value distinct from the fixture's original (`rebeccapurple`) so the bundled
+      // output bytes actually differ — otherwise the bundle output cache would correctly
+      // detect a semantic no-op even though mtime changed.
+      const cssPath = join(tempDir, "pageA-only.css");
+      await writeFile(cssPath, ".pageA-heading { color: hotpink; }\n");
+
+      eleventy.setIncrementalFile(cssPath);
+      await eleventy.write();
+
+      const cacheStats = getBundleCacheStats();
+      const writeStats = getWriteSkipStats();
+
+      // CSS bundle's combinedCode changed → output cache miss → re-transform → write.
+      // JS bundle's combinedCode unchanged → output cache hit → skip write.
+      assert.ok(
+        cacheStats.bundleOutputHits > 0,
+        "expected the unchanged JS bundle to hit the output cache",
+      );
+      assert.ok(
+        cacheStats.bundleOutputMisses > 0,
+        "expected the modified CSS bundle to miss the output cache",
+      );
+      assert.ok(
+        writeStats.writes > 0,
+        "expected at least one bundle write (the modified CSS bundle)",
+      );
+      assert.ok(
+        writeStats.skips > 0,
+        "expected at least one bundle skip (the unchanged JS bundle)",
+      );
+    });
+  });
+
+  test("persisted bundle output cache: fresh process hits cache for unchanged bundles", async () => {
+    await withTempFixture(SHARED_BUNDLES_FIXTURE, async (tempDir) => {
+      const outputDir = join(tempDir, "_site");
+
+      // Build 1: full build with a fresh Eleventy instance — populates the on-disk
+      // bundle output cache as a side effect of `eleventy.after`.
+      const eleventy1 = buildEleventyForFixture(tempDir, outputDir);
+      await eleventy1.write();
+
+      // Simulate a fresh process: drop the in-memory caches but leave the on-disk
+      // cache file intact. Use a new Eleventy instance so no in-process state leaks.
+      clearBundleImportCache();
+      resetBundleCacheStats();
+
+      const eleventy2 = buildEleventyForFixture(tempDir, outputDir);
+      await eleventy2.write();
+
+      const stats = getBundleCacheStats();
+      assert.ok(
+        stats.bundleOutputHits > 0,
+        "expected at least one bundle output cache hit from persisted state",
+      );
+      assert.equal(
+        stats.bundleOutputMisses, 0,
+        "no bundle output cache misses expected on simulated fresh process with unchanged inputs",
+      );
+    });
+  });
+
+  test("paginated template: a shared-bundle hash change updates every paginated output file", async () => {
+    const PAGINATED_FIXTURE = join(FIXTURE_ROOT, "paginatedSharedBundle");
+    await withTempFixture(PAGINATED_FIXTURE, async (tempDir) => {
+      const outputDir = join(tempDir, "_site");
+      const eleventy = buildEleventyForFixture(tempDir, outputDir);
+
+      const readSlugHashes = async () => {
+        const hashes: Record<string, string | undefined> = {};
+        for (const slug of ["a", "b", "c"]) {
+          const html = await readFile(join(outputDir, `slug/${slug}.html`), "utf-8");
+          hashes[slug] = extractBundleHashes(html).get("/js/global.js");
+        }
+        return hashes;
+      };
+
+      // Build 1: full build. All three paginated outputs reference the same "global" JS hash.
+      await eleventy.write();
+      const build1 = await readSlugHashes();
+      assert.ok(build1.a, "slug/a should reference /js/global.js");
+      assert.equal(build1.a, build1.b, "all paginated variants share the global hash (a vs b)");
+      assert.equal(build1.a, build1.c, "all paginated variants share the global hash (a vs c)");
+
+      // Mutate trigger-dep.js so the shared "global" bundle's content (and hash) changes, but only
+      // the (non-paginated) trigger template depends on it — so the paginated template is NOT
+      // rebuilt and must be updated via the incremental stale-hash pass.
+      const depPath = join(tempDir, "trigger-dep.js");
+      await writeFile(depPath, 'console.log("trigger-dep-v2");\n');
+
+      eleventy.setIncrementalFile(depPath);
+      await eleventy.write();
+
+      const build2 = await readSlugHashes();
+
+      // The hash must have changed...
+      assert.notEqual(build2.a, build1.a, "global hash should change after mutating trigger-dep.js");
+      // ...and crucially, every paginated output file must carry the new hash — not just one.
+      // Before the per-output build-cache change, only a single cached output for this template
+      // was updated, leaving the other variants pointing at a stale hash.
+      assert.equal(build2.b, build2.a, "slug/b must be updated to the new global hash");
+      assert.equal(build2.c, build2.a, "slug/c must be updated to the new global hash");
+
+      // Sanity: the trigger page (which was rebuilt) also reflects the new hash.
+      const triggerHtml = await readFile(join(outputDir, "trigger/index.html"), "utf-8");
+      assert.equal(
+        extractBundleHashes(triggerHtml).get("/js/global.js"), build2.a,
+        "the rebuilt trigger page should reference the same new global hash",
+      );
     });
   });
 });

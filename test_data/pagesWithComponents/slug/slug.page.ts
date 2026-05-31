@@ -33,7 +33,7 @@ SlugPage.css = css`
     font-size: 20px;
   }
 
-  ${css.bundle("slug")}
+  ${css.bundle("reset")}
   h1 {
     color: teal;
   }

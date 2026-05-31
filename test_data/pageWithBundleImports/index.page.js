@@ -7,13 +7,13 @@ export default function IndexPage() {
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Page With Bundle Imports Plugin Test</title>
-    <link rel="preload" as="style" href="${css.src(css.getDefaultBundleName())}" />
+    <link rel="preload" as="style" href="${css.src("reset")}" />
     <link rel="stylesheet" href="${css.src("*")}" />
     <script type="module">
-      ${js.inline("index")}
+      ${js.inline("@page")}
     </script>
     <style>
-      ${css.inline("index")}
+      ${css.inline("@page")}
     </style>
     <script src="${js.src("other")}"></script>
     <link rel="stylesheet" href="${css.src("other")}" />
@@ -29,10 +29,10 @@ export default function IndexPage() {
 }
 
 IndexPage.css = css`
-  ${css.import("./css/reset.css")}
+  ${css.import("./css/reset.css", "reset")}
   ${css.import("./css/other.css", "other")}
 
-  ${css.bundle("index")}
+  ${css.bundle("@page")}
   h1 {
     margin: 0;
     font-size: 2rem;
@@ -40,11 +40,11 @@ IndexPage.css = css`
 `;
 
 IndexPage.js = js`
-  ${js.import("./scripts/global.js")}
+  ${js.import("./scripts/global.js", "global")}
   ${js.import("./scripts/other.js", "other")}
   ${js.import("./scripts/script-with-sub-dep.js")}
 
-  ${js.bundle("index")}
+  ${js.bundle("@page")}
   console.log("Hello, Yeti from JavaScript!");
   ${js.import("./scripts/index.js")}
 `;

@@ -14,5 +14,5 @@ export default function PageA() {
 }
 
 PageA.js = js`
-  ${js.import("./x.js")}
+  ${js.import("./x.js", "global")}
 `;

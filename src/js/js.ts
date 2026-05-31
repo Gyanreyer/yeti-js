@@ -8,10 +8,10 @@ import {
   makeBundleSrcObject,
   makeBundleStartObject,
   makeCssOrJsBundleImportObject,
+  PAGE_BUNDLE_NAME,
   type BundleContribution,
 } from "../bundle/bundle.ts";
 import { resolveImportPath } from "../bundle/import.ts";
-import { getConfig } from "../config.ts";
 import { BundleError } from "../error.ts";
 import { textEncoder } from '../utils/textEncoder.ts';
 
@@ -47,7 +47,7 @@ export const js = (strings: TemplateStringsArray, ...values: unknown[]): JSTempl
   const rawJsBundles = new Map<string, string[]>();
   const bundleImportPaths = new Map<string, Set<string>>();
 
-  let currentBundleName = js.getDefaultBundleName();
+  let currentBundleName: string = PAGE_BUNDLE_NAME;
   const bundleNames = new Set<string>([currentBundleName]);
 
   const stringCount = strings.length;
@@ -130,8 +130,6 @@ export const js = (strings: TemplateStringsArray, ...values: unknown[]): JSTempl
     [jsTemplateResultSymbol]: true,
   };
 };
-
-js.getDefaultBundleName = () => getConfig().js.defaultBundleName;
 
 js.bundle = <TBundleName extends string>(bundleName: TBundleName) => makeBundleStartObject("js", bundleName);
 

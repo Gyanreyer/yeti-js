@@ -208,6 +208,12 @@ This makes it easy to make sure that each page only loads the CSS and JS that it
 or do things like define a separate bundle for critical CSS which should be loaded before the
 rest of the page.
 
+By default, any CSS or JS authored in a component is placed into a **page-scoped bundle** named
+`"@page"` — a reserved bundle name that resolves to a unique bundle per page. This prevents CSS
+or JS authored for one page from accidentally being applied to another. To opt into a shared
+cross-page bundle, explicitly name it via [`css.bundle()`](#cssbundle) / [`js.bundle()`](#jsbundle)
+or pass a name to [`css.import()`](#cssimport) / [`js.import()`](#jsimport).
+
 ```js
 const MyComponent = () => html`<div class="my-component">Hi!</div>`;
 
@@ -218,7 +224,8 @@ MyComponent.css = css`
     height: 400px;
   }
 
-  ${css.bundle("global")}
+  ${css.bundle("@page")}
+  /* This will go into the page-scoped bundle for every page which uses MyComponent */
   .my-component {
     color: red;
   }
@@ -233,7 +240,8 @@ const HomePage = () => {
       </head>
       <body>
         <${MyComponent} />
-        <!-- Deferring all other non-critical CSS after page content -->
+        <!-- Deferring all other non-critical CSS after page content;
+             the wildcard automatically picks up the page-scoped bundle -->
         <link rel="stylesheet" href="${css.src("*")}" />
       </body>
     </html>
@@ -241,6 +249,30 @@ const HomePage = () => {
 };
 export default HomePage;
 ```
+
+### Page-scoped vs shared bundles
+
+`"@page"` is a reserved sentinel bundle name. Each page gets its own `@page` bundle file; bundles
+with any other name (e.g. `"global"`, `"vendor"`, `"critical"`) are shared across every page that
+contributes to them.
+
+| You want… | Use |
+|-----------|-----|
+| Per-page CSS/JS that won't leak to other pages | The default behavior, or `css.bundle("@page")` / `js.bundle("@page")` to be explicit |
+| A shared bundle across all pages that include this component | `css.bundle("global")` (or any name you choose) |
+| Reference the current page's bundle | `css.src("@page")`, `css.inline("@page")` |
+| Pull every unreferenced bundle (including `@page`) into one place | `css.src("*")` or `css.inline("*")` |
+
+Paginated variants of the same template (multiple pages produced by a single
+`*.page.ts` file via `pagination`) share a single `@page` bundle — the merge key is the page
+template's `inputPath`.
+
+Because `@page` is the default bundle, it's common to reference it from a shared layout (e.g.
+`<link rel="stylesheet" href="${css.src("@page")}" />`) even on pages that contribute no CSS or
+JS. When a referenced `@page` bundle turns out to be empty for a given page, the reference is
+**silently dropped** (the `href`/`src` attribute is removed and no bundle file is written) — no
+warning, since this is an expected, benign case. Referencing an empty *named* bundle (anything
+other than `"@page"`) still logs a warning, since that usually indicates a mistake.
 
 ### CSS Bundling
 
@@ -258,11 +290,15 @@ MyComponent.css = css`
 `;
 ```
 
-Unless otherwise specified, all CSS contents in a `css` template string will be placed in a
-default global CSS bundle which will need to be included on the page somewhere via [`css.inline()`](#cssinline)
-or [`css.src()`](#csssrc).
+Unless otherwise specified, all CSS contents in a `css` template string will be placed into the
+page-scoped `"@page"` bundle, which is unique per page. To include this bundle on the page, use
+[`css.inline("@page")`](#cssinline), [`css.src("@page")`](#csssrc), or the `"*"` wildcard, which
+picks it up automatically.
 
-The default CSS bundle is named `"global"`, but you can [configure the plugin to use a different default CSS bundle name](#cssdefaultbundlename) instead.
+If you want CSS to be shared across multiple pages (e.g. a `"global"` reset stylesheet, or a
+`"vendor"` bundle), opt into it explicitly via [`css.bundle()`](#cssbundle) or by passing an
+explicit bundle name to [`css.import()`](#cssimport). Bundles with any name other than `"@page"`
+are shared across every page that contributes to them.
 
 #### `css.bundle()`
 
@@ -277,7 +313,7 @@ import { html, css } from 'yeti-js';
 const MyComponent = () => html`<div>Hello</div>`;
 
 MyComponent.css = css`
-  /* When not specified, all styles go into the "styles" bucket by default */
+  /* When no bundle is specified, styles go into the page-scoped "@page" bundle */
   div {
     font-weight: bold;
   }
@@ -308,7 +344,7 @@ import { html, css } from 'yeti-js';
 const MyComponent = () => html`<div>Hello</div>`;
 
 MyComponent.css = css`
-  /* Import MyComponent.css into the default "styles" bundle */
+  /* Import MyComponent.css into the page-scoped "@page" bundle (the default) */
   ${css.import("./MyComponent.css")}
   /* Import reset.css into the "critical" bundle */
   ${css.import("./reset.css", "critical")}
@@ -343,13 +379,15 @@ const HomePage = () => html`<html>
 ```
 
 You can also pass in a `"*"` wildcard to `css.src()` to automatically include every bundle that was
-used on the page and has not been loaded by any other tags tags. In this case, the `<link>` tag
-will be repeated for each bundle.
+used on the page and has not been loaded by any other tags. The page-scoped `"@page"` bundle is
+included in the wildcard expansion when present. In this case, the `<link>` tag will be repeated
+for each bundle.
 
 ```js
 import { html, css } from 'yeti-js';
 
-// HomePage's components have styles in the "styles" and "home" bundles.
+// HomePage's components contribute styles to a shared "global" bundle and to the
+// page-scoped "@page" bundle (the default for unspecified styles).
 const HomePage = () => html`<html>
   <head>
     <link rel="stylesheet" href="${css.src("*")}" />
@@ -360,8 +398,8 @@ const HomePage = () => html`<html>
  * Expected output:
  * <html>
  *  <head>
- *    <link rel="stylesheet" href="/css/styles.css">
- *    <link rel="stylesheet" href="/css/home.css">
+ *    <link rel="stylesheet" href="/css/global.css">
+ *    <link rel="stylesheet" href="/css/_pages/index.css">
  *  </head>
  * </html>
  */
@@ -450,11 +488,15 @@ MyComponent.js = js`
 `;
 ```
 
-Unless otherwise specified, all JavaScript contents in a `js` template string will be placed in a
-default global JavaScript bundle which will need to be included on the page somewhere via [`js.inline()`](#jsinline)
-or [`js.src()`](#jssrc).
+Unless otherwise specified, all JavaScript contents in a `js` template string will be placed into
+the page-scoped `"@page"` bundle, which is unique per page. To include this bundle on the page,
+use [`js.inline("@page")`](#jsinline), [`js.src("@page")`](#jssrc), or the `"*"` wildcard, which
+picks it up automatically.
 
-The default JavaScript bundle is named `"global"`, but you can [configure the plugin to use a different default JavaScript bundle name](#jsdefaultbundlename) instead.
+If you want JavaScript to be shared across multiple pages (e.g. a `"global"` script bundle, or a
+`"vendor"` bundle), opt into it explicitly via [`js.bundle()`](#jsbundle) or by passing an
+explicit bundle name to [`js.import()`](#jsimport). Bundles with any name other than `"@page"`
+are shared across every page that contributes to them.
 
 #### `js.bundle()`
 
@@ -469,8 +511,8 @@ import { html, js } from 'yeti-js';
 const MyComponent = () => html`<div>Hello</div>`;
 
 MyComponent.js = js`
-  /* When not specified, all JavaScript goes into the "global" bundle by default */
-  console.log('This is in the default bundle');
+  /* When no bundle is specified, JavaScript goes into the page-scoped "@page" bundle */
+  console.log('This is in the page bundle');
 
   ${js.bundle("vendor")}
   // Third-party library code
@@ -496,7 +538,7 @@ import { html, js } from 'yeti-js';
 const MyComponent = () => html`<div>Hello</div>`;
 
 MyComponent.js = js`
-  /* Import utils.js into the default "global" bundle */
+  /* Import utils.js into the page-scoped "@page" bundle (the default) */
   ${js.import("./utils.js")}
   /* Import jquery.js into the "vendor" bundle */
   ${js.import("./vendor/jquery.js", "vendor")}
@@ -818,33 +860,53 @@ eleventyConfig.addPlugin(yetiPlugin, {
 
 The plugin offers some options for customizing how bundled JavaScript assets are processed and output.
 
-#### `js.defaultBundleName`
-
-String indicating the default global bundle name to gather JS assets into unless another bundle name is specified.
-Defaults to `"global"`.
-
-```js
-eleventyConfig.addPlugin(yetiPlugin, {
-  js: {
-    defaultBundleName: "scripts",
-  },
-});
-```
-
 #### `js.deriveBundleFilePath`
 
-Function to derive custom file paths for where external JavaScript bundle files should be written.
+Function to derive custom file paths that external JavaScript bundle files should be written to.
 This function will be called for each bundle with the bundle name, and should return a string representing
 the path relative to the site's root where the bundle should be written.
 Defaults to `` `/js/${bundleName}.js` ``.
 
 Leading slashes are optional.
+Note that this does not run for the special page-scoped `"@page"` bundle; see [`js.derivePageBundleFilePath`](#jsderivepagebundlefilepath).
 
 ```js
 eleventyConfig.addPlugin(yetiPlugin, {
   js: {
     // Bundle files should go in the "assets/js" directory with a `.bundle.js` suffix
     deriveBundleFilePath: (bundleName) => `assets/js/${bundleName}.bundle.js`,
+  },
+});
+```
+
+#### `js.derivePageBundleFilePath`
+
+Function to derive the file path where each page's `@page` JS bundle should be written. The function
+receives the page's `EleventyPageData["page"]` object (with `inputPath`, `fileSlug`, `url`, etc.) and
+should return a string representing the path relative to the site's root.
+
+By default, the path is derived from the page template's `inputPath`, stripping the input dir prefix
+and the page template extension, then prepending `/js/_pages/` and appending `.js`. For example,
+with input dir `src` and template extension `page.ts`, `src/blog/post.page.ts` becomes
+`/js/_pages/blog/post.js`.
+
+This deriver is called once per page template (pagination variants of the same template share a
+bundle file). The path returned must be unique per template — otherwise pages with the same derived
+path will overwrite each other.
+
+> [!IMPORTANT]
+> Derive the path only from **template-constant** fields (`inputPath`, `fileSlug`, `filePathStem`).
+> Pagination variants of one template share a single `@page` bundle file, so a deriver that keys off
+> a **per-page** field (`url`, `outputPath`, `date`) makes each variant reference a different path
+> while only one file is written — the other variants then 404. Yeti logs a warning if it detects
+> this, but it's safest to never key off per-page fields here. (`fileSlug` is the *template's* slug,
+> which is constant across pagination variants, so the example below is safe.)
+
+```js
+eleventyConfig.addPlugin(yetiPlugin, {
+  js: {
+    // Flatten bundles into one dir keyed by the template's file slug (constant across pagination)
+    derivePageBundleFilePath: (page) => `/js/pages/${page.fileSlug}.js`,
   },
 });
 ```
@@ -912,33 +974,53 @@ eleventyConfig.addPlugin(yetiPlugin, {
 
 The plugin offers some options for customizing how bundled CSS assets are processed and output.
 
-#### `css.defaultBundleName`
-
-String indicating the default global bundle name to gather CSS assets into unless another bundle name is specified.
-Defaults to `"global"`.
-
-```js
-eleventyConfig.addPlugin(yetiPlugin, {
-  css: {
-    defaultBundleName: "styles",
-  },
-});
-```
-
 #### `css.deriveBundleFilePath`
 
-Function to derive custom file paths for where external CSS bundle files should be written.
+Function to derive custom file paths that external CSS bundle files should be written to.
 This function will be called for each bundle with the bundle name, and should return a string representing
 the path relative to the site's root where the bundle should be written.
 Defaults to `` `/css/${bundleName}.css` ``.
 
 Leading slashes are optional.
+Note that this does not run for the special page-scoped `"@page"` bundle; see [`css.derivePageBundleFilePath`](#cssderivepagebundlefilepath).
 
 ```js
 eleventyConfig.addPlugin(yetiPlugin, {
   css: {
     // Bundle files should go in the "assets/css" directory with a `.bundle.css` suffix
     deriveBundleFilePath: (bundleName) => `assets/css/${bundleName}.bundle.css`,
+  },
+});
+```
+
+#### `css.derivePageBundleFilePath`
+
+Function to derive the file path where each page's `@page` CSS bundle should be written. The function
+receives the page's `EleventyPageData["page"]` object (with `inputPath`, `fileSlug`, `url`, etc.) and
+should return a string representing the path relative to the site's root.
+
+By default, the path is derived from the page template's `inputPath`, stripping the input dir prefix
+and the page template extension, then prepending `/css/_pages/` and appending `.css`. For example,
+with input dir `src` and template extension `page.ts`, `src/blog/post.page.ts` becomes
+`/css/_pages/blog/post.css`.
+
+This deriver is called once per page template (pagination variants of the same template share a
+bundle file). The path returned must be unique per template — otherwise pages with the same derived
+path will overwrite each other.
+
+> [!IMPORTANT]
+> Derive the path only from **template-constant** fields (`inputPath`, `fileSlug`, `filePathStem`).
+> Pagination variants of one template share a single `@page` bundle file, so a deriver that keys off
+> a **per-page** field (`url`, `outputPath`, `date`) makes each variant reference a different path
+> while only one file is written — the other variants then 404. Yeti logs a warning if it detects
+> this, but it's safest to never key off per-page fields here. (`fileSlug` is the *template's* slug,
+> which is constant across pagination variants, so the example below is safe.)
+
+```js
+eleventyConfig.addPlugin(yetiPlugin, {
+  css: {
+    // Flatten bundles into one dir keyed by the template's file slug (constant across pagination)
+    derivePageBundleFilePath: (page) => `/css/pages/${page.fileSlug}.css`,
   },
 });
 ```
@@ -1008,6 +1090,30 @@ eleventyConfig.addPlugin(yetiPlugin, {
     // "spritesheet" bundle should get a `.svg` extension instead of the default `.html`
     deriveBundleFilePath: (bundleName) =>
       bundleName === "spritesheet" ? `/icons/spritesheet.svg` : `/html/${bundleName}.html`,
+  },
+});
+```
+
+#### `html.derivePageBundleFilePath`
+
+Function to derive the file path where each page's `@page` HTML bundle should be written. The function
+receives the page's `EleventyPageData["page"]` object and should return a string representing the
+path relative to the site's root.
+
+By default, the path is derived from the page template's `inputPath`, stripping the input dir prefix
+and the page template extension, then prepending `/html/_pages/` and appending `.html`. For example,
+`src/blog/post.page.ts` becomes `/html/_pages/blog/post.html`.
+
+> [!IMPORTANT]
+> Derive the path only from **template-constant** fields (`inputPath`, `fileSlug`, `filePathStem`),
+> never **per-page** fields (`url`, `outputPath`, `date`) — pagination variants share one `@page`
+> bundle file, so a per-page-keyed deriver leaves some variants referencing a path that 404s. Yeti
+> warns if it detects this.
+
+```js
+eleventyConfig.addPlugin(yetiPlugin, {
+  html: {
+    derivePageBundleFilePath: (page) => `/html/pages/${page.fileSlug}.html`,
   },
 });
 ```

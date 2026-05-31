@@ -2,6 +2,24 @@ import type { YetiChildNode, YetiRootNode } from "../html/types.ts";
 import type { CSSTemplateResult } from "../css/css.ts";
 import type { JSTemplateResult } from "../js/js.ts";
 
+/**
+ * Per-page metadata supplied by Eleventy: the `page` subobject of `EleventyPageData`.
+ * This is what user-supplied page-bundle path derivers receive; surrounding context
+ * (`pagination`, `collections`, etc.) is intentionally excluded both because those fields
+ * contain circular references that don't survive build-cache JSON serialization, and
+ * because the values we need to derive paths from (`inputPath`, `url`, `fileSlug`, etc.)
+ * all live on the `page` subobject.
+ */
+export type PageContext = {
+  inputPath: string;
+  fileSlug: string;
+  filePathStem: string;
+  templateSyntax: string;
+  date: Date;
+  url: string;
+  outputPath: string;
+};
+
 export type EleventyPageData = {
   eleventy: {
     version: string;
@@ -20,15 +38,7 @@ export type EleventyPageData = {
       output: string;
     }
   };
-  page: {
-    inputPath: string;
-    fileSlug: string;
-    filePathStem: string;
-    templateSyntax: string;
-    date: Date;
-    url: string;
-    outputPath: string;
-  };
+  page: PageContext;
   collections: Record<string, any>;
 };
 

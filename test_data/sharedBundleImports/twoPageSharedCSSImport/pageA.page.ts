@@ -16,5 +16,5 @@ export default function PageA() {
 }
 
 PageA.css = css`
-  ${css.import("./shared.css")}
+  ${css.import("./shared.css", "global")}
 `;

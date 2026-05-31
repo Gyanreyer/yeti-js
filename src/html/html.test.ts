@@ -1824,7 +1824,7 @@ Line 3 with no indentation
           css: new Map([
             ["component-styles", new Set([Component1.css.bundles.get("component-styles")!, Component2.css.bundles.get("component-styles")!])],
             ["other-bundle", new Set([Component1.css.bundles.get("other-bundle")!])],
-            ["global", new Set([Component1.css.bundles.get("global")!])],
+            ["@page", new Set([Component1.css.bundles.get("@page")!])],
           ]),
         },
         children: [
@@ -1888,7 +1888,7 @@ Line 3 with no indentation
           js: new Map([
             ["component-scripts", new Set([Component1.js.bundles.get("component-scripts")!, Component2.js.bundles.get("component-scripts")!])],
             ["other-bundle", new Set([Component1.js.bundles.get("other-bundle")!])],
-            ["global", new Set([Component1.js.bundles.get("global")!])],
+            ["@page", new Set([Component1.js.bundles.get("@page")!])],
           ]),
         },
         children: [

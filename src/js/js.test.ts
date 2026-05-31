@@ -27,26 +27,26 @@ describe("js", () => {
   });
 
   describe("js templates", () => {
-    test("A simple string-only js template produces a contribution with raw content and no imports", () => {
+    test("A simple string-only js template produces a contribution with raw content under the page-scoped @page key by default", () => {
       const result = js`
       console.log("Hello, world!");
     `;
       assert(isJSTemplateResult(result));
-      assert.deepStrictEqual(Array.from(result.bundles.keys()), ["global"]);
+      assert.deepStrictEqual(Array.from(result.bundles.keys()), ["@page"]);
 
-      const globalContribution = result.bundles.get("global") as BundleContribution;
-      assert(globalContribution);
-      assert.strictEqual(globalContribution.importPaths.size, 0);
+      const pageContribution = result.bundles.get("@page") as BundleContribution;
+      assert(pageContribution);
+      assert.strictEqual(pageContribution.importPaths.size, 0);
       assert.deepStrictEqual(
-        globalContribution.rawContent,
+        pageContribution.rawContent,
         textEncoder.encode(`\n      console.log("Hello, world!");\n    `),
       );
-      assert.strictEqual(globalContribution.callerFilePath, import.meta.filename);
+      assert.strictEqual(pageContribution.callerFilePath, import.meta.filename);
     });
 
     test("A js template with multiple bundles separates raw content per bundle name", () => {
       const result = js`
-      console.log("This is the global bundle.");
+      console.log("This is the page bundle.");
       ${js.bundle("bundle1")}
       console.log("This is bundle 1.");
       ${js.bundle("bundle2")}
@@ -54,20 +54,20 @@ describe("js", () => {
     `;
 
       assert(isJSTemplateResult(result));
-      assert.deepStrictEqual(Array.from(result.bundles.keys()), ["global", "bundle1", "bundle2"]);
+      assert.deepStrictEqual(Array.from(result.bundles.keys()), ["@page", "bundle1", "bundle2"]);
 
-      const globalContribution = result.bundles.get("global") as BundleContribution;
+      const pageContribution = result.bundles.get("@page") as BundleContribution;
       const bundle1Contribution = result.bundles.get("bundle1") as BundleContribution;
       const bundle2Contribution = result.bundles.get("bundle2") as BundleContribution;
-      assert(globalContribution);
+      assert(pageContribution);
       assert(bundle1Contribution);
       assert(bundle2Contribution);
 
       assert.deepStrictEqual(
-        globalContribution.rawContent,
-        textEncoder.encode(`\n      console.log("This is the global bundle.");\n      `),
+        pageContribution.rawContent,
+        textEncoder.encode(`\n      console.log("This is the page bundle.");\n      `),
       );
-      assert.strictEqual(globalContribution.importPaths.size, 0);
+      assert.strictEqual(pageContribution.importPaths.size, 0);
 
       assert.deepStrictEqual(
         bundle1Contribution.rawContent,
@@ -114,7 +114,7 @@ describe("js", () => {
 
     test("A js template with mixed bundle targets correctly partitions imports and raw content", () => {
       const result = js`
-      console.log("This is the global bundle.");
+      console.log("This is the page bundle.");
 
       ${js.import("/test_data/js/external-script.js", "my-bundle")}
 
@@ -124,14 +124,14 @@ describe("js", () => {
       ${js.import("/test_data/js/external-script-2.js")}
     `;
 
-      assert.deepEqual(Array.from(result.bundles.keys()), ["global", "my-bundle", "another-bundle"]);
+      assert.deepEqual(Array.from(result.bundles.keys()), ["@page", "my-bundle", "another-bundle"]);
 
       const myBundleContribution = result.bundles.get("my-bundle") as BundleContribution;
       const anotherBundleContribution = result.bundles.get("another-bundle") as BundleContribution;
-      const globalContribution = result.bundles.get("global") as BundleContribution;
+      const pageContribution = result.bundles.get("@page") as BundleContribution;
       assert(myBundleContribution);
       assert(anotherBundleContribution);
-      assert(globalContribution);
+      assert(pageContribution);
 
       assert.deepStrictEqual(
         myBundleContribution.importPaths,
@@ -149,10 +149,10 @@ describe("js", () => {
         textEncoder.encode(`\n      console.log("Another bundle.");\n\n      \n    `),
       );
 
-      assert.strictEqual(globalContribution.importPaths.size, 0);
+      assert.strictEqual(pageContribution.importPaths.size, 0);
       assert.deepStrictEqual(
-        globalContribution.rawContent,
-        textEncoder.encode(`\n      console.log("This is the global bundle.");\n\n      \n\n      `),
+        pageContribution.rawContent,
+        textEncoder.encode(`\n      console.log("This is the page bundle.");\n\n      \n\n      `),
       );
     });
 
@@ -251,11 +251,11 @@ describe("js", () => {
 
     test("getJSImportBundle throws when an import path does not exist", async () => {
       const result = js`${js.import("/test_data/js/nonexistent-file.js")}`;
-      const globalContribution = result.bundles.get("global") as BundleContribution;
-      assert(globalContribution);
+      const pageContribution = result.bundles.get("@page") as BundleContribution;
+      assert(pageContribution);
 
       await assert.rejects(
-        () => getJSImportBundle(globalContribution.importPaths),
+        () => getJSImportBundle(pageContribution.importPaths),
         (err: unknown): err is BundleError => {
           assert(err instanceof BundleError);
           assert(err.cause instanceof Error);

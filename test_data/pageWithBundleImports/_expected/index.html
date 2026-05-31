@@ -3,8 +3,12 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Page With Bundle Imports Plugin Test</title>
-    <link rel="preload" as="style" href="/css/global.css?v=c0cc8fa5">
+    <link rel="preload" as="style" href="/css/reset.css?v=c0cc8fa5">
     <script type="module">console.log("Hello from index.js");
+var sayHi = (name) => {
+  console.log(`Hi ${name} from sub-dep!`);
+};
+sayHi("Bob");
 console.log("Hello, Yeti from JavaScript!");
 
     </script>
@@ -21,6 +25,6 @@ console.log("Hello, Yeti from JavaScript!");
     <h1>Hello, Yeti!</h1>
     <p>I&#39;m an imported fragment!</p>
     <p>I&#39;m some &lt;strong&gt;escaped text&lt;/strong&gt; in a text file.</p>
-    <script type="module" src="/js/global.js?v=a0cc159e"></script>
+    <script type="module" src="/js/global.js?v=d3c6f2ad"></script>
   </body>
 </html>

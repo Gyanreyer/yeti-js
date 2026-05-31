@@ -8,11 +8,11 @@ import { MessageChannel } from 'node:worker_threads';
 
 import { updateConfig, type YetiConfig } from '../config.ts';
 import { log, logError } from '../log.ts';
-import type { EleventyPageData, YetiPageComponent } from './types.ts';
+import type { EleventyPageData, PageContext, YetiPageComponent } from './types.ts';
 import { YETI_NODE_TYPE } from '../html/types.ts';
 import { isYetiNode } from '../html/utils.ts';
 import { renderHTML } from '../html/renderHTML.ts';
-import { processPageComponent, type PageBundleAggregate } from './processPageComponent.ts';
+import { processPageComponent } from './processPageComponent.ts';
 import {
   resetUsedExternalSpecifiers,
   buildAndWriteExternalDependencies,
@@ -22,14 +22,28 @@ import {
   resetAccessTracking,
   invalidateStaleEntries,
   loadBundleImportCache,
+  resetBundleCacheStats,
   saveBundleImportCache,
 } from '../bundle/bundleImportCache.ts';
+import { resetWriteSkipStats } from '../utils/writeFileIfChanged.ts';
 import {
   processAndWriteExternalCSSBundle,
   processAndWriteExternalJSBundle,
   processAndWriteExternalHTMLBundle,
   mergePageBundleAggregates,
+  mergePageScopedBundles,
+  mergeRenderContributions,
+  collectRawContentRefs,
+  warnOnPageBundlePathCollisions,
+  recordRenderedPageBundlePaths,
+  warnOnInconsistentPageBundlePaths,
+  processAndWriteCSSPageBundle,
+  processAndWriteJSPageBundle,
+  processAndWriteHTMLPageBundle,
   type MergedBundleAggregate,
+  type MergedPageBundle,
+  type PageRenderContributions,
+  type PageBundlePathTracker,
 } from './processExternalBundles.ts';
 import {
   computeCacheVersionKey,
@@ -73,13 +87,29 @@ export const yetiPlugin = (eleventyConfig: EleventyUserConfig, userConfig: Parti
 
   // Maps input paths to the per-page external bundle aggregates which we should merge across
   // pages in the "eleventy.after" hook before bundling, transforming, and writing to files.
+  // Each entry also carries the page-scoped (`@page`) bundle aggregates and the most recent
+  // `PageContext` observed for that input path so the page bundle file path / placeholder
+  // can be derived in `eleventy.after`. We carry only the `page` subobject (not full
+  // `EleventyPageData`) because surrounding fields like `pagination` contain circular refs
+  // that won't survive build-cache JSON serialization. Pagination variants of the same
+  // template share an inputPath and have their per-render contributions merged before that
+  // hook runs.
   let globalExternalBundleContents: {
-    [inputPath: string]: {
-      css: Map<string, PageBundleAggregate>;
-      js: Map<string, PageBundleAggregate>;
-      htmlImportPaths: Map<string, Set<string>>;
-    };
+    [inputPath: string]: PageRenderContributions & { page: PageContext };
   } = {};
+
+  // Tracks which template inputPaths have been rendered during the *current* build. The first
+  // render of an inputPath this build replaces any entry loaded from the build cache; subsequent
+  // renders (pagination variants of the same template) merge their contributions instead of
+  // overwriting. Both reset in `eleventy.before`.
+  let inputPathsRenderedThisBuild = new Set<string>();
+  // Per-template reference-dedupe membership index for rawContents, seeded lazily on the first
+  // pagination merge for a template (see `collectRawContentRefs`). Keeps the merge O(1) per chunk.
+  let perBuildSeenRawContents = new Map<string, Set<Uint8Array>>();
+  // Per-template set of distinct `@page` bundle paths derived across this build's renders. Used in
+  // `eleventy.after` to warn when a `derivePageBundleFilePath` returns different paths for
+  // pagination variants of the same template (which silently 404s). Reset in `eleventy.before`.
+  let pageBundlePathTracker: PageBundlePathTracker = new Map();
 
   eleventyConfig.on("eleventy.before", async ({
     directories: {
@@ -105,6 +135,8 @@ export const yetiPlugin = (eleventyConfig: EleventyUserConfig, userConfig: Parti
 
     resetUsedExternalSpecifiers();
     resetAccessTracking();
+    resetBundleCacheStats();
+    resetWriteSkipStats();
 
     // Compute the cache version key once per process. Both the page build cache and the
     // bundle import cache are gated by this same key (yeti + esbuild + lightningcss + format).
@@ -128,9 +160,16 @@ export const yetiPlugin = (eleventyConfig: EleventyUserConfig, userConfig: Parti
     // Replace globalExternalBundleContents with what's in the cache.
     // Pages that recompile this build will overwrite their entries in compile().
     globalExternalBundleContents = {};
+    inputPathsRenderedThisBuild = new Set<string>();
+    perBuildSeenRawContents = new Map<string, Set<Uint8Array>>();
+    pageBundlePathTracker = new Map();
     if (buildCache) {
       for (const [inputPath, entry] of buildCache.pages) {
-        globalExternalBundleContents[inputPath] = entry.externalBundles;
+        globalExternalBundleContents[inputPath] = {
+          ...entry.externalBundles,
+          pageBundles: entry.pageBundles,
+          page: entry.page,
+        };
       }
       // Evict cache entries for pages whose source files no longer exist on disk.
       await evictDeletedPages(buildCache.pages);
@@ -138,8 +177,6 @@ export const yetiPlugin = (eleventyConfig: EleventyUserConfig, userConfig: Parti
   });
 
   eleventyConfig.addTemplateFormats(config.pageTemplateFileExtension);
-
-
 
   eleventyConfig.addExtension(config.pageTemplateFileExtension, {
     useJavaScriptImport: true,
@@ -162,6 +199,7 @@ export const yetiPlugin = (eleventyConfig: EleventyUserConfig, userConfig: Parti
           pageRootNode,
           dependencies,
           externalBundles,
+          pageBundles,
         } = await processPageComponent(pageComponent, data);
         if (!isYetiNode(pageRootNode) || pageRootNode.type !== YETI_NODE_TYPE.ROOT) {
           logError(`Error rendering page component for "${inputPath}": Expected component to return a YetiNode of type "ROOT". Page components must return an html template literal.`);
@@ -169,7 +207,37 @@ export const yetiPlugin = (eleventyConfig: EleventyUserConfig, userConfig: Parti
         }
 
         this.addDependencies(inputPath, Array.from(dependencies));
-        globalExternalBundleContents[inputPath] = externalBundles;
+
+        // Record the @page bundle paths this render derived so `eleventy.after` can detect a
+        // deriver that returns inconsistent paths across a template's pagination variants. Called
+        // for every render (each variant) since each may carry a different page context.
+        recordRenderedPageBundlePaths(pageBundlePathTracker, inputPath, pageBundles, data.page, config);
+
+        if (!inputPathsRenderedThisBuild.has(inputPath)) {
+          // First render of this template this build: replace any entry carried over from the
+          // build cache with these fresh contributions.
+          inputPathsRenderedThisBuild.add(inputPath);
+          globalExternalBundleContents[inputPath] = {
+            ...externalBundles,
+            pageBundles,
+            page: data.page,
+          };
+        } else {
+          // A subsequent render of the same template (a pagination variant). Merge its
+          // contributions into the accumulated entry instead of overwriting, so the shared
+          // bundles contain every variant's assets. rawContents dedupe by reference identity, so
+          // identical-across-variants component content is kept exactly once.
+          const accumulated = globalExternalBundleContents[inputPath];
+          let seenRawContents = perBuildSeenRawContents.get(inputPath);
+          if (!seenRawContents) {
+            // Seed the dedupe index once, from the first render's already-stored contributions.
+            seenRawContents = collectRawContentRefs(accumulated);
+            perBuildSeenRawContents.set(inputPath, seenRawContents);
+          }
+          mergeRenderContributions(accumulated, { ...externalBundles, pageBundles }, seenRawContents);
+          // Track the most recently observed page context for path/placeholder derivation.
+          accumulated.page = data.page;
+        }
 
         return renderHTML(pageRootNode, {
           indentation: config.html.minify ? null : "  ",
@@ -192,17 +260,29 @@ export const yetiPlugin = (eleventyConfig: EleventyUserConfig, userConfig: Parti
     const mergedCSSBundles = new Map<string, MergedBundleAggregate>();
     const mergedJSBundles = new Map<string, MergedBundleAggregate>();
     const combinedHTMLImportPaths = new Map<string, Set<string>>();
+    // Page-scoped bundles are keyed by inputPath so pagination variants of the same template
+    // share a bundle file. Each entry carries pageProps for path/placeholder derivation.
+    const mergedPageBundles = new Map<string, MergedPageBundle>();
 
-    for (const { css, js, htmlImportPaths } of Object.values(globalExternalBundleContents)) {
+    for (const { css, js, htmlImportPaths, pageBundles, page } of Object.values(globalExternalBundleContents)) {
       mergePageBundleAggregates(mergedCSSBundles, css);
       mergePageBundleAggregates(mergedJSBundles, js);
       mergeBundleSetMaps(combinedHTMLImportPaths, htmlImportPaths);
+      mergePageScopedBundles(mergedPageBundles, pageBundles, page);
     }
+
+    // Warn if any two templates derive the same @page bundle output path (silent overwrite footgun).
+    warnOnPageBundlePathCollisions(mergedPageBundles, config);
+    // Warn if a single template derived inconsistent @page bundle paths across its pagination
+    // variants (silent 404 footgun — variants share one bundle file, written to a single path).
+    warnOnInconsistentPageBundlePaths(pageBundlePathTracker, mergedPageBundles, config);
 
     // Map of placeholder token → content hash, populated as bundles are transformed and written
     const bundleContentHashes = new Map<string, string>();
 
-    const processBundlePromises = new Array<Promise<void>>(mergedCSSBundles.size + mergedJSBundles.size + combinedHTMLImportPaths.size);
+    const processBundlePromises = new Array<Promise<void>>(
+      mergedCSSBundles.size + mergedJSBundles.size + combinedHTMLImportPaths.size + mergedPageBundles.size * 3
+    );
     let i = 0;
     for (const [bundleName, mergedAggregate] of mergedCSSBundles) {
       processBundlePromises[i++] = processAndWriteExternalCSSBundle(bundleName, mergedAggregate, output, config, bundleContentHashes);
@@ -213,18 +293,25 @@ export const yetiPlugin = (eleventyConfig: EleventyUserConfig, userConfig: Parti
     for (const [bundleName, importPaths] of combinedHTMLImportPaths) {
       processBundlePromises[i++] = processAndWriteExternalHTMLBundle(bundleName, importPaths, output, config, bundleContentHashes);
     }
+    for (const pageBundle of mergedPageBundles.values()) {
+      processBundlePromises[i++] = processAndWriteCSSPageBundle(pageBundle, output, config, bundleContentHashes);
+      processBundlePromises[i++] = processAndWriteJSPageBundle(pageBundle, output, config, bundleContentHashes);
+      processBundlePromises[i++] = processAndWriteHTMLPageBundle(pageBundle, output, config, bundleContentHashes);
+    }
     await Promise.all(processBundlePromises);
 
     // Rewrite page HTML files to replace bundle version placeholder tokens with actual content hashes.
     // Track the exact character positions of each substituted hash so that future incremental
     // builds can update unchanged pages' hashes by direct offset splicing (zero false-match risk).
-    const pageHashPositions = new Map<string, HashPosition[]>();
+    // Keyed by output path (not input path): one template can produce many output files via
+    // pagination, each with its own hash positions.
+    const outputHashPositions = new Map<string, HashPosition[]>();
 
     if (bundleContentHashes.size > 0) {
       // Pass 1: rebuilt pages — substitute placeholder tokens with content hashes,
       // tracking the output position of each hash for the build cache.
       await Promise.all(
-        results.map(async ({ inputPath, outputPath }) => {
+        results.map(async ({ outputPath }) => {
           const original = await readFile(outputPath, "utf-8");
 
           // Find all placeholder occurrences across all bundles, sorted by position.
@@ -267,7 +354,7 @@ export const yetiPlugin = (eleventyConfig: EleventyUserConfig, userConfig: Parti
           parts.push(original.slice(cursor));
           const substituted = parts.join("");
 
-          pageHashPositions.set(inputPath, positions);
+          outputHashPositions.set(outputPath, positions);
           await writeFile(outputPath, substituted);
         })
       );
@@ -289,15 +376,17 @@ export const yetiPlugin = (eleventyConfig: EleventyUserConfig, userConfig: Parti
         await Promise.all(
           Array.from(buildCache.pages.entries())
             .filter(([inputPath]) => !rebuiltInputPaths.has(inputPath))
-            .map(async ([inputPath, entry]) => {
-              if (entry.hashPositions.length === 0) {
+            // Each unchanged template may have several output files (pagination); splice every one.
+            .flatMap(([, entry]) => entry.outputs)
+            .map(async ({ outputPath, hashPositions }) => {
+              if (hashPositions.length === 0) {
                 return;
               }
 
-              let content = await readFile(entry.outputPath, "utf-8");
+              let content = await readFile(outputPath, "utf-8");
               let modified = false;
 
-              for (const { position, placeholder } of entry.hashPositions) {
+              for (const { position, placeholder } of hashPositions) {
                 const currentHash = bundleContentHashes.get(placeholder);
                 if (!currentHash) {
                   continue;
@@ -310,14 +399,13 @@ export const yetiPlugin = (eleventyConfig: EleventyUserConfig, userConfig: Parti
               }
 
               if (modified) {
-                await writeFile(entry.outputPath, content);
-                log(`Updated stale bundle hash${entry.hashPositions.length > 1 ? "es" : ""} in unchanged page "${entry.outputPath}"`);
+                await writeFile(outputPath, content);
+                log(`Updated stale bundle hash${hashPositions.length > 1 ? "es" : ""} in unchanged page "${outputPath}"`);
               }
-
-              // Carry forward the cached positions for unchanged pages
-              pageHashPositions.set(inputPath, entry.hashPositions);
             })
         );
+        // Note: unchanged pages keep their cached `outputs` (positions don't change — hashes are a
+        // fixed width), so the save loop below reuses them directly rather than re-deriving here.
       }
     }
 
@@ -328,17 +416,25 @@ export const yetiPlugin = (eleventyConfig: EleventyUserConfig, userConfig: Parti
 
     // Persist the build cache to disk for future incremental builds.
     const updatedPages = new Map<string, PageCacheEntry>();
-    for (const [inputPath, externalBundles] of Object.entries(globalExternalBundleContents)) {
-      // Find the outputPath for this page. Rebuilt pages have it in results;
-      // cached pages have it in the existing cache.
-      const resultEntry = results.find((r) => r.inputPath === inputPath);
-      const outputPath = resultEntry?.outputPath
-        ?? buildCache?.pages.get(inputPath)?.outputPath;
-      if (outputPath) {
+    for (const [inputPath, entry] of Object.entries(globalExternalBundleContents)) {
+      // Gather every output for this template. Rebuilt templates have all their outputs in
+      // `results` (each with freshly-recorded hash positions); unchanged templates reuse their
+      // cached outputs (whose positions are still valid — hashes are a fixed width).
+      const rebuiltOutputs = results.filter((r) => r.inputPath === inputPath);
+      const outputs = rebuiltOutputs.length > 0
+        ? rebuiltOutputs.map((r) => ({
+          outputPath: r.outputPath,
+          hashPositions: outputHashPositions.get(r.outputPath) ?? [],
+        }))
+        : buildCache?.pages.get(inputPath)?.outputs ?? [];
+
+      if (outputs.length > 0) {
+        const { pageBundles, page, ...externalBundles } = entry;
         updatedPages.set(inputPath, {
-          outputPath,
-          hashPositions: pageHashPositions.get(inputPath) ?? [],
+          outputs,
           externalBundles,
+          pageBundles,
+          page,
         });
       }
     }

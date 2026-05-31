@@ -15,6 +15,9 @@ import {
   loadBundleImportCache,
   resetBundleCacheStats,
   saveBundleImportCache,
+  deriveBundleOutputCacheKey,
+  getCachedBundleOutput,
+  setCachedBundleOutput,
 } from './bundleImportCache.ts';
 import { BundleError } from '../error.ts';
 import { getConfig, updateConfig } from '../config.ts';
@@ -420,4 +423,146 @@ describe('bundleImportCache — persistence + replay', () => {
       });
     }
   });
+});
+
+describe('bundleImportCache — bundle output cache', () => {
+  afterEach(() => {
+    clearBundleImportCache();
+  });
+
+  test('miss returns null and increments miss counter', () => {
+    const key = deriveBundleOutputCacheKey(new Uint8Array([1, 2, 3]), { minify: true }, '/css/a.css');
+    const result = getCachedBundleOutput(key);
+    assert.equal(result, null);
+    assert.equal(getBundleCacheStats().bundleOutputMisses, 1);
+    assert.equal(getBundleCacheStats().bundleOutputHits, 0);
+  });
+
+  test('hit returns the stored entry and increments hit counter', () => {
+    const key = deriveBundleOutputCacheKey(new Uint8Array([1, 2, 3]), { minify: true }, '/css/a.css');
+    const entry = { code: new Uint8Array([10, 20, 30]), contentHash: 'abcd1234' };
+    setCachedBundleOutput(key, entry);
+
+    resetBundleCacheStats();
+    const result = getCachedBundleOutput(key);
+    assert.strictEqual(result, entry);
+    assert.equal(getBundleCacheStats().bundleOutputHits, 1);
+    assert.equal(getBundleCacheStats().bundleOutputMisses, 0);
+  });
+
+  test('identical inputs produce identical cache keys', () => {
+    const code = new Uint8Array([1, 2, 3, 4, 5]);
+    const config = { minify: true, target: 'es2022' };
+    const k1 = deriveBundleOutputCacheKey(code, config, '/css/a.css');
+    const k2 = deriveBundleOutputCacheKey(new Uint8Array([1, 2, 3, 4, 5]), { minify: true, target: 'es2022' }, '/css/a.css');
+    assert.equal(k1, k2);
+  });
+
+  test('different combinedCode produces different keys', () => {
+    const config = { minify: true };
+    const k1 = deriveBundleOutputCacheKey(new Uint8Array([1, 2, 3]), config, '/css/a.css');
+    const k2 = deriveBundleOutputCacheKey(new Uint8Array([1, 2, 4]), config, '/css/a.css');
+    assert.notEqual(k1, k2);
+  });
+
+  test('different transformConfig produces different keys', () => {
+    const code = new Uint8Array([1, 2, 3]);
+    const k1 = deriveBundleOutputCacheKey(code, { minify: true }, '/css/a.css');
+    const k2 = deriveBundleOutputCacheKey(code, { minify: false }, '/css/a.css');
+    assert.notEqual(k1, k2);
+  });
+
+  test('different outputFilePath produces different keys', () => {
+    // outputFilePath is fed to the CSS/HTML transform as `filename`, so it's part of the key.
+    const code = new Uint8Array([1, 2, 3]);
+    const config = { minify: true };
+    const k1 = deriveBundleOutputCacheKey(code, config, '/css/_pages/pageA.css');
+    const k2 = deriveBundleOutputCacheKey(code, config, '/css/_pages/pageB.css');
+    assert.notEqual(k1, k2);
+  });
+
+  test('cache key is stable across object key insertion order', () => {
+    const code = new Uint8Array([1, 2, 3]);
+    const k1 = deriveBundleOutputCacheKey(code, { minify: true, target: 'es2022' }, '/css/a.css');
+    const k2 = deriveBundleOutputCacheKey(code, { target: 'es2022', minify: true }, '/css/a.css');
+    assert.equal(k1, k2);
+  });
+
+  test('cache key reflects function bodies in transformConfig', () => {
+    const code = new Uint8Array([1, 2, 3]);
+    const k1 = deriveBundleOutputCacheKey(code, { processNodeTree: (n: unknown) => n }, '/html/a.html');
+    const k2 = deriveBundleOutputCacheKey(code, { processNodeTree: (n: unknown) => ({ ...(n as object) }) }, '/html/a.html');
+    assert.notEqual(k1, k2, 'different function bodies should produce different keys');
+
+    const k3 = deriveBundleOutputCacheKey(code, { processNodeTree: (n: unknown) => n }, '/html/a.html');
+    const k4 = deriveBundleOutputCacheKey(code, { processNodeTree: (n: unknown) => n }, '/html/a.html');
+    assert.equal(k3, k4, "identical function bodies should produce the same key even if they aren't referentially equal");
+  });
+
+  test('cache key handles nested objects and arrays stably', () => {
+    const code = new Uint8Array([1, 2, 3]);
+    const k1 = deriveBundleOutputCacheKey(code, { targets: { chrome: 95, firefox: 90 }, plugins: ['a', 'b'] }, '/css/a.css');
+    const k2 = deriveBundleOutputCacheKey(code, { plugins: ['a', 'b'], targets: { firefox: 90, chrome: 95 } }, '/css/a.css');
+    assert.equal(k1, k2);
+  });
+
+  test('clearBundleImportCache drops bundle output entries', () => {
+    const key = deriveBundleOutputCacheKey(new Uint8Array([1]), {}, '/css/a.css');
+    setCachedBundleOutput(key, { code: new Uint8Array([2]), contentHash: 'xxxxxxxx' });
+    clearBundleImportCache();
+    assert.equal(getCachedBundleOutput(key), null);
+  });
+
+  test('persistence round-trip: save → clear → load yields a hit', async () => {
+    const cacheDir = await makeTempDir();
+    const versionKey = 'output-cache-test-key';
+    const inputDir = getConfig().inputDir;
+
+    const code = new Uint8Array([0xde, 0xad, 0xbe, 0xef, 0xca, 0xfe]);
+    const config = { minify: true, target: 'es2022' };
+    const key = deriveBundleOutputCacheKey(code, config, '/css/a.css');
+    const stored = { code: new Uint8Array([1, 2, 3, 4, 5]), contentHash: 'deadbeef' };
+    setCachedBundleOutput(key, stored);
+    // Mark accessed so it survives eviction at save time.
+    getCachedBundleOutput(key);
+
+    await saveBundleImportCache(cacheDir, versionKey, inputDir);
+    clearBundleImportCache();
+
+    assert.equal(getCachedBundleOutput(key), null);
+    resetBundleCacheStats();
+
+    await loadBundleImportCache(cacheDir, versionKey, inputDir);
+
+    const loaded = getCachedBundleOutput(key);
+    assert.ok(loaded, 'expected hit after load');
+    assert.equal(loaded.contentHash, 'deadbeef');
+    assert.deepEqual(Array.from(loaded.code), [1, 2, 3, 4, 5]);
+    assert.equal(getBundleCacheStats().bundleOutputHits, 1);
+  });
+
+  test('persistence: unaccessed bundle output entries are evicted at save', async () => {
+    const cacheDir = await makeTempDir();
+    const versionKey = 'output-cache-eviction-key';
+    const inputDir = getConfig().inputDir;
+
+    const accessedKey = deriveBundleOutputCacheKey(new Uint8Array([1]), { a: 1 }, '/css/a.css');
+    const unaccessedKey = deriveBundleOutputCacheKey(new Uint8Array([2]), { a: 2 }, '/css/b.css');
+
+    setCachedBundleOutput(accessedKey, { code: new Uint8Array([10]), contentHash: 'aaaaaaaa' });
+    setCachedBundleOutput(unaccessedKey, { code: new Uint8Array([20]), contentHash: 'bbbbbbbb' });
+
+    // Only mark `accessedKey` as accessed.
+    resetAccessTracking();
+    getCachedBundleOutput(accessedKey);
+
+    await saveBundleImportCache(cacheDir, versionKey, inputDir);
+    clearBundleImportCache();
+    await loadBundleImportCache(cacheDir, versionKey, inputDir);
+
+    assert.ok(getCachedBundleOutput(accessedKey), 'accessed entry survives');
+    resetBundleCacheStats();
+    assert.equal(getCachedBundleOutput(unaccessedKey), null, 'unaccessed entry evicted');
+  });
+
 });

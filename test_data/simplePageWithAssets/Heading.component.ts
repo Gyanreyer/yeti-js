@@ -21,7 +21,7 @@ Heading.css = css`
     font-family: sans-serif;
   }
 
-  ${css.bundle(css.getDefaultBundleName())}
+  ${css.bundle("@page")}
   header {
     background-color: red;
   }

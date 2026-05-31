@@ -1,11 +1,49 @@
 import type { CustomAtRules, TransformOptions as LightningCSSTransformOptions } from 'lightningcss';
 import type { TransformOptions as EsbuildTransformOptions } from 'esbuild';
-import { join } from 'node:path';
+import { join, relative, resolve, sep } from 'node:path';
 
 import type { YetiNode, YetiRootNode } from './html/types.ts';
 import type { DeepPartial } from './utils/utilityTypes.ts';
+import type { PageContext } from './plugin/types.ts';
 import { YetiConfigError } from './error.ts';
 import { logWarning } from './log.ts';
+
+/**
+ * Compute the default per-page bundle file path. Resolves the page's `inputPath` against the
+ * current working directory (Eleventy passes it as a cwd-relative string), then computes its
+ * path relative to the configured `inputDir`. Any registered page template extension is
+ * stripped, and the result is prepended with the asset's `_pages` directory.
+ *
+ * For example, with input dir `src` and template extension `page.ts`:
+ *   `./src/blog/post.page.ts` → `/{assetType}/_pages/blog/post.{assetType}`
+ */
+const defaultDerivePageBundleFilePath = (page: PageContext, assetType: "css" | "js" | "html"): string => {
+  // Get the input path relative to our config input dir
+  // config.inputDir is absolute but page.inputPath is relative to the cwd,
+  // so we'll resolve inputPath to an absolute path first
+  let relativePath = relative(config.inputDir, resolve(page.inputPath));
+
+  // Bundle paths are URL paths and always use forward slashes, so normalize away any
+  // platform-specific separators that `path.relative` might have returned.
+  if (sep !== "/") {
+    relativePath = relativePath.replaceAll(sep, "/");
+  }
+
+  const extensions = Array.isArray(config.pageTemplateFileExtension)
+    ? config.pageTemplateFileExtension
+    : [config.pageTemplateFileExtension];
+
+  // Strip the page template extension from the end of the path
+  for (const ext of extensions) {
+    const suffix = `.${ext}`;
+    if (relativePath.endsWith(suffix)) {
+      relativePath = relativePath.slice(0, -suffix.length);
+      break;
+    }
+  }
+
+  return `/${assetType}/_pages/${relativePath}.${assetType}`;
+};
 
 export type JSBundleTransformConfig = Omit<EsbuildTransformOptions, "sourcefile" | "sourcesContent" | "sourceRoot">;
 export type CSSBundleTransformConfig = Omit<LightningCSSTransformOptions<CustomAtRules>, "code" | "filename" | "inputSourceMap" | "analyzeDependencies">;
@@ -82,11 +120,6 @@ export type YetiConfig = {
    */
   js: {
     /**
-     * The default global JS bundle name to use when no bundle name is specified.
-     * @default "global"
-     */
-    defaultBundleName: string;
-    /**
      * Function to derive custom file paths for where external JavaScript bundle files should be written.
      * This function will be called for each bundle with a JavaScript bundle name,
      * and should return a string representing the path relative to the site's `outputDir`
@@ -107,6 +140,26 @@ export type YetiConfig = {
      * ```
      */
     deriveBundleFilePath: (bundleName: string) => string;
+    /**
+     * Function to derive the file path where a page-scoped JS bundle (`@page`) should be written.
+     * Called once per page (or template — pagination variants of the same template share a bundle file).
+     * Must produce a unique path per template input path; otherwise pages with the same derived path
+     * will overwrite each other's bundle files.
+     *
+     * Derive the path only from *template-constant* fields (`inputPath`, `fileSlug`, `filePathStem`).
+     * Pagination variants of one template share a single `@page` bundle file, so a deriver that keys
+     * off a *per-page* field (`url`, `outputPath`, `date`) would make each variant reference a
+     * different path while only one file is written — the other variants would then 404. Yeti logs a
+     * warning if it detects this, but the safest choice is to never key off per-page fields here.
+     *
+     * If not provided, the default derives the path from the template's `inputPath`, stripping the
+     * input dir prefix and the page template extension, then prepending `/js/_pages/` and appending
+     * `.js`. For example, `src/blog/post.page.ts` becomes `/js/_pages/blog/post.js`.
+     *
+     * @param {PageContext} pageData - Data from 11ty describing the page being built,
+     *                                  including the page's input path, output path, URL, file slug, and more.
+     */
+    derivePageBundleFilePath: (pageData: PageContext) => string;
     /**
      * Default esbuild transform config to use when processing JavaScript bundles, which can be overridden on a per-bundle basis with `deriveBundleTransformConfig`.
      * This allows you to specify custom esbuild transform options like minification, target environments, and more.
@@ -147,11 +200,6 @@ export type YetiConfig = {
   };
   css: {
     /**
-     * The default global CSS bundle name to use when no bundle name is specified.
-     * @default "global"
-     */
-    defaultBundleName: string;
-    /**
      * Function to derive custom file paths for where external CSS bundle files should be written.
      * This function will be called for each bundle with a CSS bundle name,
      * and should return a string representing the path relative to the site's `outputDir`
@@ -172,6 +220,26 @@ export type YetiConfig = {
      * ```
      */
     deriveBundleFilePath: (bundleName: string) => string;
+    /**
+     * Function to derive the file path where a page-scoped CSS bundle (`@page`) should be written.
+     * Called once per page (or template — pagination variants of the same template share a bundle file).
+     * Must produce a unique path per template input path; otherwise pages with the same derived path
+     * will overwrite each other's bundle files.
+     *
+     * Derive the path only from *template-constant* fields (`inputPath`, `fileSlug`, `filePathStem`).
+     * Pagination variants of one template share a single `@page` bundle file, so a deriver that keys
+     * off a *per-page* field (`url`, `outputPath`, `date`) would make each variant reference a
+     * different path while only one file is written — the other variants would then 404. Yeti logs a
+     * warning if it detects this, but the safest choice is to never key off per-page fields here.
+     *
+     * If not provided, the default derives the path from the template's `inputPath`, stripping the
+     * input dir prefix and the page template extension, then prepending `/css/_pages/` and appending
+     * `.css`. For example, `src/blog/post.page.ts` becomes `/css/_pages/blog/post.css`.
+     *
+     * @param {PageContext} pageData - Data from 11ty describing the page being built,
+     *                                  including the page's input path, output path, URL, file slug, and more.
+     */
+    derivePageBundleFilePath: (pageData: PageContext) => string;
     defaultBundleTransformConfig: CSSBundleTransformConfig;
     deriveBundleTransformConfig: (bundleName: string, defaultConfig: CSSBundleTransformConfig) => CSSBundleTransformConfig;
   };
@@ -203,6 +271,26 @@ export type YetiConfig = {
      * ```
      */
     deriveBundleFilePath: (bundleName: string) => string;
+    /**
+     * Function to derive the file path where a page-scoped HTML bundle (`@page`) should be written.
+     * Called once per page (or template — pagination variants of the same template share a bundle file).
+     * Must produce a unique path per template input path; otherwise pages with the same derived path
+     * will overwrite each other's bundle files.
+     *
+     * Derive the path only from *template-constant* fields (`inputPath`, `fileSlug`, `filePathStem`).
+     * Pagination variants of one template share a single `@page` bundle file, so a deriver that keys
+     * off a *per-page* field (`url`, `outputPath`, `date`) would make each variant reference a
+     * different path while only one file is written — the other variants would then 404. Yeti logs a
+     * warning if it detects this, but the safest choice is to never key off per-page fields here.
+     *
+     * If not provided, the default derives the path from the template's `inputPath`, stripping the
+     * input dir prefix and the page template extension, then prepending `/html/_pages/` and appending
+     * `.html`. For example, `src/blog/post.page.ts` becomes `/html/_pages/blog/post.html`.
+     *
+     * @param {PageContext} pageData - Data from 11ty describing the page being built,
+     *                                  including the page's input path, output path, URL, file slug, and more.
+     */
+    derivePageBundleFilePath: (pageData: PageContext) => string;
     defaultBundleTransformConfig: HTMLBundleTransformConfig;
     deriveBundleTransformConfig: (bundleName: string, defaultConfig: HTMLBundleTransformConfig) => HTMLBundleTransformConfig;
     /**
@@ -260,20 +348,20 @@ const config: YetiConfig = {
   // Default outputDir is a "_site" directory in the current working directory, but we will override this with the actual Eleventy output dir when we initialize the plugin.
   outputDir: join(process.cwd(), "_site"),
   js: {
-    defaultBundleName: "global",
     defaultBundleTransformConfig: {
       minify: true,
     },
     deriveBundleTransformConfig: (bundleName, defaultConfig) => defaultConfig,
     deriveBundleFilePath: (bundleName) => `/js/${bundleName}.js`,
+    derivePageBundleFilePath: (pageData) => defaultDerivePageBundleFilePath(pageData, "js"),
   },
   css: {
-    defaultBundleName: "global",
     defaultBundleTransformConfig: {
       minify: true,
     },
     deriveBundleTransformConfig: (bundleName, defaultConfig) => defaultConfig,
     deriveBundleFilePath: (bundleName) => `/css/${bundleName}.css`,
+    derivePageBundleFilePath: (pageData) => defaultDerivePageBundleFilePath(pageData, "css"),
   },
   html: {
     minify: true,
@@ -282,6 +370,7 @@ const config: YetiConfig = {
     },
     deriveBundleTransformConfig: (bundleName, defaultConfig) => defaultConfig,
     deriveBundleFilePath: (bundleName) => `/html/${bundleName}.html`,
+    derivePageBundleFilePath: (pageData) => defaultDerivePageBundleFilePath(pageData, "html"),
   },
   pageTemplateFileExtension: ["page.js", "page.ts"],
   cacheDir: join(process.cwd(), "node_modules/.cache/yeti-js"),
@@ -316,25 +405,6 @@ const validateJSConfig = (jsConfig: PartialYetiConfig["js"]): {
   if (jsConfig) {
     for (const key of Object.keys(jsConfig) as (keyof YetiConfig["js"])[]) {
       switch (key) {
-        case "defaultBundleName": {
-          const value = jsConfig[key];
-          if (value === undefined) {
-            // undefined is permitted
-            break;
-          } else if (typeof value === "string") {
-            // Must be a non-empty string
-            if (value.length === 0) {
-              (errors ??= []).push(
-                `"js.defaultBundleName" must be a non-empty string, got ""`
-              );
-            }
-          } else {
-            (errors ??= []).push(
-              `"js.defaultBundleName" must be a string, got ${describeType(value)}`
-            );
-          }
-          break;
-        }
         case "defaultBundleTransformConfig": {
           const value = jsConfig[key];
           if (value === undefined) {
@@ -355,6 +425,15 @@ const validateJSConfig = (jsConfig: PartialYetiConfig["js"]): {
           } else if (typeof value !== "function") {
             // Must be a function
             (errors ??= []).push(`"js.deriveBundleFilePath" must be a function, got ${describeType(value)}`);
+          }
+          break;
+        }
+        case "derivePageBundleFilePath": {
+          const value = jsConfig[key];
+          if (value === undefined) {
+            break;
+          } else if (typeof value !== "function") {
+            (errors ??= []).push(`"js.derivePageBundleFilePath" must be a function, got ${describeType(value)}`);
           }
           break;
         }
@@ -411,25 +490,6 @@ const validateCSSConfig = (cssConfig: PartialYetiConfig["css"] | undefined): {
   if (cssConfig) {
     for (const key of Object.keys(cssConfig) as (keyof YetiConfig["css"])[]) {
       switch (key) {
-        case "defaultBundleName": {
-          const value = cssConfig[key];
-          if (value === undefined) {
-            // undefined is permitted
-            break;
-          } else if (typeof value === "string") {
-            // Must be a non-empty string
-            if (value.length === 0) {
-              (errors ??= []).push(
-                `"css.defaultBundleName" must be a non-empty string, got ""`
-              );
-            }
-          } else {
-            (errors ??= []).push(
-              `"css.defaultBundleName" must be a string, got ${describeType(value)}`
-            );
-          }
-          break;
-        }
         case "defaultBundleTransformConfig": {
           const value = cssConfig[key];
           if (value === undefined) {
@@ -450,6 +510,15 @@ const validateCSSConfig = (cssConfig: PartialYetiConfig["css"] | undefined): {
           } else if (typeof value !== "function") {
             // Must be a function
             (errors ??= []).push(`"css.deriveBundleFilePath" must be a function, got ${describeType(value)}`);
+          }
+          break;
+        }
+        case "derivePageBundleFilePath": {
+          const value = cssConfig[key];
+          if (value === undefined) {
+            break;
+          } else if (typeof value !== "function") {
+            (errors ??= []).push(`"css.derivePageBundleFilePath" must be a function, got ${describeType(value)}`);
           }
           break;
         }
@@ -517,6 +586,15 @@ const validateHTMLConfig = (htmlConfig: PartialYetiConfig["html"] | undefined): 
           } else if (typeof value !== "function") {
             // Must be a function
             (errors ??= []).push(`"html.deriveBundleFilePath" must be a function, got ${describeType(value)}`);
+          }
+          break;
+        }
+        case "derivePageBundleFilePath": {
+          const value = htmlConfig[key];
+          if (value === undefined) {
+            break;
+          } else if (typeof value !== "function") {
+            (errors ??= []).push(`"html.derivePageBundleFilePath" must be a function, got ${describeType(value)}`);
           }
           break;
         }

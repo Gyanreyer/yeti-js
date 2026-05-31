@@ -14,21 +14,22 @@ describe("validateConfig", () => {
       validateConfig({
         pageTemplateFileExtension: ["page.js", "page.ts"],
         js: {
-          defaultBundleName: "scripts",
           deriveBundleFilePath: (name) => `/js/${name}.js`,
+          derivePageBundleFilePath: (page) => `/js/_pages/${page.fileSlug}.js`,
           deriveBundleTransformConfig: (_name, config) => config,
           defaultBundleTransformConfig: { minify: true },
           externalDependencies: { alpinejs: "/js/ext/alpine.js" },
         },
         css: {
-          defaultBundleName: "styles",
           deriveBundleFilePath: (name) => `/css/${name}.css`,
+          derivePageBundleFilePath: (page) => `/css/_pages/${page.fileSlug}.css`,
           deriveBundleTransformConfig: (_name, config) => config,
           defaultBundleTransformConfig: { minify: false },
         },
         html: {
           minify: false,
           deriveBundleFilePath: (name) => `/html/${name}.html`,
+          derivePageBundleFilePath: (page) => `/html/_pages/${page.fileSlug}.html`,
           deriveBundleTransformConfig: (_name, config) => config,
           defaultBundleTransformConfig: { minify: true },
           processImport: (_path, content) => content,
@@ -134,25 +135,14 @@ describe("validateConfig", () => {
     );
   });
 
-  test("rejects js.defaultBundleName as non-string", () => {
+  test("rejects js.derivePageBundleFilePath as non-function", () => {
     assert.throws(
       // @ts-expect-error testing invalid input
-      () => validateConfig({ js: { defaultBundleName: 42 } }),
+      () => validateConfig({ js: { derivePageBundleFilePath: "/some/path" } }),
       (err: Error) => {
         assert(err instanceof YetiConfigError);
-        assert.match(err.message, /js\.defaultBundleName/);
-        return true;
-      }
-    );
-  });
-
-  test("rejects js.defaultBundleName as empty string", () => {
-    assert.throws(
-      () => validateConfig({ js: { defaultBundleName: "" } }),
-      (err: Error) => {
-        assert(err instanceof YetiConfigError);
-        assert.match(err.message, /js\.defaultBundleName/);
-        assert.match(err.message, /non-empty string/);
+        assert.match(err.message, /js\.derivePageBundleFilePath/);
+        assert.match(err.message, /function/);
         return true;
       }
     );
@@ -250,12 +240,13 @@ describe("validateConfig", () => {
     );
   });
 
-  test("rejects css.defaultBundleName as empty string", () => {
+  test("rejects css.derivePageBundleFilePath as non-function", () => {
     assert.throws(
-      () => validateConfig({ css: { defaultBundleName: "" } }),
+      // @ts-expect-error testing invalid input
+      () => validateConfig({ css: { derivePageBundleFilePath: 42 } }),
       (err: Error) => {
         assert(err instanceof YetiConfigError);
-        assert.match(err.message, /css\.defaultBundleName/);
+        assert.match(err.message, /css\.derivePageBundleFilePath/);
         return true;
       }
     );
@@ -358,13 +349,13 @@ describe("validateConfig", () => {
       () =>
         validateConfig({
           // @ts-expect-error testing invalid input
-          js: { defaultBundleName: 42, deriveBundleFilePath: "not-a-fn" },
+          js: { derivePageBundleFilePath: 42, deriveBundleFilePath: "not-a-fn" },
           // @ts-expect-error testing invalid input
           html: { minify: "yes" },
         }),
       (err: Error) => {
         assert(err instanceof YetiConfigError);
-        assert.match(err.message, /js\.defaultBundleName/);
+        assert.match(err.message, /js\.derivePageBundleFilePath/);
         assert.match(err.message, /js\.deriveBundleFilePath/);
         assert.match(err.message, /html\.minify/);
         return true;
@@ -408,7 +399,7 @@ describe("validateConfig", () => {
     });
 
     validateConfig({
-      js: { defaultBundleName: "scripts" },
+      js: { defaultBundleTransformConfig: { minify: false } },
       html: { minify: false },
     });
 
@@ -426,27 +417,27 @@ describe("mergeConfigs", () => {
 
   test("retains the base value when a nested key is explicitly undefined", () => {
     const base = {
-      js: { defaultBundleName: "global", deriveBundleFilePath: (n: string) => `/js/${n}.js` },
+      js: { minify: true, deriveBundleFilePath: (n: string) => `/js/${n}.js` },
     };
     const merged = mergeConfigs(base, {
-      js: { defaultBundleName: undefined },
+      js: { minify: undefined },
     });
-    assert.strictEqual(merged.js.defaultBundleName, "global");
+    assert.strictEqual(merged.js.minify, true);
     assert.strictEqual(merged.js.deriveBundleFilePath, base.js.deriveBundleFilePath);
   });
 
   test("does not blow away a nested object when its key is explicitly undefined", () => {
-    const base = { js: { defaultBundleName: "global" } };
+    const base = { js: { minify: true } };
     const merged = mergeConfigs(base, { js: undefined });
-    assert.deepStrictEqual(merged.js, { defaultBundleName: "global" });
+    assert.deepStrictEqual(merged.js, { minify: true });
   });
 
   test("applies sibling keys even when one is explicitly undefined", () => {
-    const base = { js: { defaultBundleName: "global", minify: true } };
+    const base = { js: { minify: true, target: "es2022" as const } };
     const merged = mergeConfigs(base, {
-      js: { defaultBundleName: undefined, minify: false },
+      js: { target: undefined, minify: false },
     });
-    assert.strictEqual(merged.js.defaultBundleName, "global");
+    assert.strictEqual(merged.js.target, "es2022");
     assert.strictEqual(merged.js.minify, false);
   });
 });
