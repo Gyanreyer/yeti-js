@@ -74,6 +74,8 @@ html like an html tag name like `<${MyComponent}>`.
 - You can spread props with the following syntax: `<div ...${props}>`
 - `<!DOCTYPE>` declarations, HTML comments, and self-closing tags are all supported.
 - Multiple root-level elements are supported without requiring a fragment wrapper.
+- Raw `undefined`, `null`, or `""` empty string values in HTML child content will be ignored. This provides some options for conditionally rendering content.
+  - ``` html`${shouldRender ? "Conditional content" : null}` ```
 
 ## Page components
 

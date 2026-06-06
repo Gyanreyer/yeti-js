@@ -420,8 +420,10 @@ export const parseHTML = async (htmlStringChars: Uint8Array, dynamicValues: unkn
         // Finalize any previous open attribute before we start another one
         finalizeOpenAttribute();
 
-        // The next token should be either an attribute value or an equals sign followed by an attribute value.
-        // For simplicity, we'll assume that attributes are always in the form name="value" for now, and we'll handle the other cases later.
+        // An ATTR_NAME may be followed by an ATTR_VALUE (double-quoted, single-quoted, or
+        // unquoted) or by nothing at all (a value-less/boolean attribute). The lexer normalizes
+        // all of these forms; here we just open the attribute and let finalizeOpenAttribute()
+        // resolve it to a value or `true` when the next token arrives.
         openAttributeName = tokenValue;
 
         if (currentParent.attributes && openAttributeName in currentParent.attributes) {

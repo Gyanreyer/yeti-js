@@ -67,3 +67,28 @@ export interface YetiElementNode extends BaseYetiNode {
 
 export type YetiChildNode = YetiElementNode | YetiTextNode | YetiCommentNode | YetiDoctypeNode;
 export type YetiNode = YetiChildNode | YetiRootNode;
+
+/**
+ * Anything you can interpolate into an `html` template as child content.
+ * This can be useful for typing component props that accept content that will be directly
+ * rendered as HTML.
+ *
+ * @example
+ * ```ts
+ * const MyComponent = (props: { name: YetiContent }) => {
+ *   return html`<div>${props.name}</div>`;
+ * }
+ * ```
+ */
+export type YetiContent =
+  | YetiNode
+  | string
+  | number
+  | boolean
+  | bigint
+  | null
+  | undefined
+  | Iterable<YetiContent>
+  | AsyncIterable<YetiContent>
+  | Promise<YetiContent>
+  | (() => YetiContent);
