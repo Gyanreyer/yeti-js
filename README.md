@@ -137,6 +137,39 @@ const NamePage: YetiPageComponent<{ name: string; }> = ({
 See [11ty's data configuration docs](https://www.11ty.dev/docs/data-configuration/) for more
 details on ways to configure your page's output.
 
+### Module state and watch-mode rebuilds
+
+> [!IMPORTANT]
+> Do not rely on module-level (in-memory) state persisting across rebuilds in watch mode.
+
+In watch mode, incremental rebuilds may cache-bust and re-import your page and component modules as fresh
+modules so that changes to source files (and the assets they
+attach via `` css`...` ``, `` js`...` ``, etc.) are always picked up. A side effect is that **any module-level state may be reset to its initial value at the start of every build**. Top-level
+variables are re-initialized, and module initialization code runs again from scratch.
+
+This means a pattern like an in-memory cache declared at module scope will _not_ carry over
+between builds; you'll get a cache miss on every rebuild:
+
+```ts
+// This cache is wiped on every watch rebuild — it never gets a hit across builds.
+const expensiveResultCache = new Map();
+
+const MyPage = async () => {
+  if (!expensiveResultCache.has("key")) {
+    expensiveResultCache.set("key", await computeExpensiveThing());
+  }
+  return html`<div>${expensiveResultCache.get("key")}</div>`;
+};
+```
+
+This is intentional — it's what keeps incremental builds correct when your source changes. If you really
+need state to survive across builds, it is recommended that you either persist
+it to the disk, or you may attach it to `globalThis` since it is process-global and therefore isn't affected by module reloads:
+
+```ts
+const cache = ((globalThis as any).__myCache ??= new Map());
+```
+
 ## Head Component
 
 Yeti provides a built-in `Head` component that allows you to declare `<head>` content from any component in the tree, similar to libraries like React Helmet. Content placed inside `Head` is automatically hoisted and merged into the document's `<head>` element.
