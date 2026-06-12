@@ -252,6 +252,63 @@ data-quoted-static-then-dynamic-then-static="static-${myObj}-static"
         ],
       });
     });
+
+    test("passes a standalone symbol attribute through to a component as a prop key", async () => {
+      const specialAttr = Symbol("special-attr");
+
+      const MyComponent = ({ [specialAttr]: mySpecialAttrValue }: Record<symbol, string>) =>
+        html`<div>Special Attr Value: ${mySpecialAttrValue}</div>`;
+
+      const result = await html`<${MyComponent} ${specialAttr}="hello, world!" />`;
+
+      assert.deepStrictEqual<YetiRootNode>(result, {
+        type: YETI_NODE_TYPE.ROOT,
+        assets: makeBasicAssetsObject(),
+        children: [
+          {
+            type: YETI_NODE_TYPE.ELEMENT,
+            tagName: "div",
+            children: [
+              {
+                type: YETI_NODE_TYPE.TEXT,
+                content: "Special Attr Value: hello, world!",
+              },
+            ],
+          },
+        ],
+      });
+    });
+
+    test("preserves a standalone symbol attribute name on a real element's attributes", async () => {
+      const symbolAttr = Symbol("dropped");
+
+      // The symbol survives parsing onto the element's attributes object just like on a component.
+      // It only gets dropped later, at render time (see renderHTML.test.ts), since a Symbol is not
+      // a valid HTML attribute name. The adjacent string attribute confirms normal attributes are
+      // unaffected.
+      const result = await html`<div ${symbolAttr}="ignored" data-keep="kept">Content</div>`;
+
+      assert.deepStrictEqual<YetiRootNode>(result, {
+        type: YETI_NODE_TYPE.ROOT,
+        assets: makeBasicAssetsObject(),
+        children: [
+          {
+            type: YETI_NODE_TYPE.ELEMENT,
+            tagName: "div",
+            attributes: {
+              [symbolAttr]: "ignored",
+              "data-keep": "kept",
+            },
+            children: [
+              {
+                type: YETI_NODE_TYPE.TEXT,
+                content: "Content",
+              },
+            ],
+          },
+        ],
+      });
+    });
   });
 
   describe("opening tags", async () => {

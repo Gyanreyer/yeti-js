@@ -495,6 +495,54 @@ describe("lexHTML", () => {
       ]);
     });
 
+    test("preserves a standalone symbol as the attribute name", async () => {
+      const symbolAttr = Symbol("special-attr");
+
+      const tokens = await htmlTokens`<div ${symbolAttr}="hello, world!" />`;
+      assert.deepStrictEqual<LexerToken[]>(tokens, [
+        [TOKEN_TYPE.OPENING_TAGNAME, "div"],
+        [TOKEN_TYPE.ATTR_NAME, symbolAttr],
+        [TOKEN_TYPE.ATTR_VALUE, "hello, world!"],
+        [TOKEN_TYPE.OPENING_TAG_END, true],
+      ]);
+    });
+
+    test("preserves a value-less standalone symbol attribute name", async () => {
+      const symbolA = Symbol("a");
+      const symbolB = Symbol("b");
+
+      // Two bare symbol attributes separated by whitespace should each be emitted as their own name.
+      const tokens = await htmlTokens`<div ${symbolA} ${symbolB} />`;
+      assert.deepStrictEqual<LexerToken[]>(tokens, [
+        [TOKEN_TYPE.OPENING_TAGNAME, "div"],
+        [TOKEN_TYPE.ATTR_NAME, symbolA],
+        [TOKEN_TYPE.ATTR_NAME, symbolB],
+        [TOKEN_TYPE.OPENING_TAG_END, true],
+      ]);
+    });
+
+    test("falls back to the string form when a symbol is not a standalone attribute name", async () => {
+      const symbolAttr = Symbol("special-attr");
+
+      // A symbol mixed with surrounding name characters can't be a key, so it's coerced to a string
+      // just like any other dynamic value used as part of an attribute name.
+      const tokensPrefixed = await htmlTokens`<div data-${symbolAttr}="value" />`;
+      assert.deepStrictEqual<LexerToken[]>(tokensPrefixed, [
+        [TOKEN_TYPE.OPENING_TAGNAME, "div"],
+        [TOKEN_TYPE.ATTR_NAME, `data-${String(symbolAttr)}`],
+        [TOKEN_TYPE.ATTR_VALUE, "value"],
+        [TOKEN_TYPE.OPENING_TAG_END, true],
+      ]);
+
+      const tokensSuffixed = await htmlTokens`<div ${symbolAttr}-suffix="value" />`;
+      assert.deepStrictEqual<LexerToken[]>(tokensSuffixed, [
+        [TOKEN_TYPE.OPENING_TAGNAME, "div"],
+        [TOKEN_TYPE.ATTR_NAME, `${String(symbolAttr)}-suffix`],
+        [TOKEN_TYPE.ATTR_VALUE, "value"],
+        [TOKEN_TYPE.OPENING_TAG_END, true],
+      ]);
+    });
+
     test("returns error token for dynamic attribute names which aren't valid attribute names", async () => {
       const dynamicAttrName1 = "invalid attribute name";
 

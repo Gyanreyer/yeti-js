@@ -50,7 +50,7 @@ export type LexerTokenValueTypeMap = {
   [TOKEN_TYPE.OPENING_TAG_END]: boolean; // Whether the opening tag is self-closing or not (i.e., whether we lexed a "/>" or a ">")
   [TOKEN_TYPE.OPENING_TAGNAME]: string | Function; // A tag name can be a string or a function placeholder for components
   [TOKEN_TYPE.CLOSING_TAGNAME]: string | Function; // A tag name can be a string or a function placeholder for components
-  [TOKEN_TYPE.ATTR_NAME]: string; // Should be a string, but we allow dynamic values that resolve to strings
+  [TOKEN_TYPE.ATTR_NAME]: string | symbol; // Usually a string, but a standalone dynamic value that is a symbol is preserved as-is so it can be used as a component prop key
   [TOKEN_TYPE.ATTR_VALUE]: unknown; // Can be a string or a raw dynamic value
   [TOKEN_TYPE.SPREAD_ATTR]: unknown; // A raw dynamic value representing the object to spread
   [TOKEN_TYPE.COMMENT_PART]: unknown; // Should be a string, but we allow dynamic values that resolve to strings
@@ -412,7 +412,11 @@ const lexAttributeName: LexerFunction<"ATTR_NAME" | "SPREAD_ATTR" | "ERROR"> = a
 
   let chunkStartIndex = ctx.getIndex();
   let chunkLength = 0;
-  let stringParts: string[] | null = null;
+  // The pieces of the attribute name in order: literal character chunks (already decoded to
+  // strings) interleaved with raw dynamic values. At the end we either use a lone symbol part
+  // directly (so it can serve as a collision-free component prop key) or coerce every part to a
+  // string and join them together.
+  const attrNameParts: unknown[] = [];
 
   // When we encounter whitespace after an attribute name, we still need
   // to wait until we find the next non-whitespace character to determine
@@ -427,7 +431,7 @@ const lexAttributeName: LexerFunction<"ATTR_NAME" | "SPREAD_ATTR" | "ERROR"> = a
     const nextCharCode = ctx.peekCharCode();
 
     // Check for spread attributes (e.g., ...{object})
-    if (chunkLength === 0 && !stringParts && nextCharCode === CHAR_CODE_DOT) {
+    if (chunkLength === 0 && attrNameParts.length === 0 && nextCharCode === CHAR_CODE_DOT) {
       if (ctx.peekCharCode(1) === CHAR_CODE_DOT && ctx.peekCharCode(2) === CHAR_CODE_DOT) {
         // We have "..." so this could be a spread attribute. We need to check if it's followed by a dynamic value placeholder to confirm.
         // Check for dynamic value after "..."
@@ -444,14 +448,19 @@ const lexAttributeName: LexerFunction<"ATTR_NAME" | "SPREAD_ATTR" | "ERROR"> = a
     // Check for dynamic value as part of attribute name
     const dynamicValue = ctx.peekDynamicValue();
     if (dynamicValue !== NO_DYNAMIC_VALUE) {
-      // Flush current chunk before adding dynamic value
-      stringParts ??= [];
-
-      if (chunkLength > 0) {
-        stringParts.push(ctx.getSubstring(chunkStartIndex, chunkLength));
+      if (hasWhitespaceTerminatedAttributeName) {
+        // Whitespace already closed off the previous attribute name, so this dynamic value begins
+        // a separate attribute. Re-enter attribute-name lexing so the previous name is emitted on
+        // its own before we start lexing the new one.
+        nextLexerFunction = lexAttributeName;
+        break;
       }
-      // Add the dynamic value to the attribute name
-      stringParts.push(String(dynamicValue));
+
+      // Flush the current literal chunk, then add the raw dynamic value as its own part.
+      if (chunkLength > 0) {
+        attrNameParts.push(ctx.getSubstring(chunkStartIndex, chunkLength));
+      }
+      attrNameParts.push(dynamicValue);
       chunkStartIndex = ctx.advance(DYNAMIC_VALUE_CHARACTER_SEQUENCE_BYTE_LENGTH);
       chunkLength = 0;
       continue;
@@ -459,7 +468,7 @@ const lexAttributeName: LexerFunction<"ATTR_NAME" | "SPREAD_ATTR" | "ERROR"> = a
 
     // Attribute names can contain any non-terminating character.
     // Terminating characters are: whitespace, "=", ">", and "/>"
-    if (nextCharCode === CHAR_CODE_EQUAL && (chunkLength > 0 || stringParts !== null)) {
+    if (nextCharCode === CHAR_CODE_EQUAL && (chunkLength > 0 || attrNameParts.length > 0)) {
       nextLexerFunction = lexAttributeValue;
       break;
     } else if (
@@ -484,29 +493,35 @@ const lexAttributeName: LexerFunction<"ATTR_NAME" | "SPREAD_ATTR" | "ERROR"> = a
     }
   }
 
-  let attrName: string | null = null;
-  // Flush final chunk
+  // Flush any trailing literal chunk into the parts list.
   if (chunkLength > 0) {
-    if (!stringParts) {
-      attrName = ctx.getSubstring(chunkStartIndex, chunkLength);
-    } else {
-      stringParts.push(ctx.getSubstring(chunkStartIndex, chunkLength));
-      attrName = stringParts.join('');
-    }
-  } else if (stringParts) {
-    attrName = stringParts.join('');
+    attrNameParts.push(ctx.getSubstring(chunkStartIndex, chunkLength));
   }
 
+  if (attrNameParts.length === 0) {
+    // No attribute name was accumulated (e.g. we hit a terminator immediately), so there's
+    // nothing to emit. That's fine as long as we're not transitioning to attribute value lexing.
+    return nextLexerFunction;
+  }
+
+  // A lone symbol part is preserved as-is so it can serve as a collision-free component prop key.
+  // Anything else — multiple parts, or a single non-symbol part — is coerced to a string. We use
+  // String() rather than a bare join() since implicit coercion of a symbol throws a TypeError.
+  const attrName: string | symbol = attrNameParts.length === 1 && typeof attrNameParts[0] === "symbol"
+    ? attrNameParts[0]
+    : attrNameParts.map(String).join('');
+
+  // Skip emitting empty strings
   if (attrName) {
-    if (!isValidHTMLAttributeNameString(attrName)) {
+    if (typeof attrName === "string" && !isValidHTMLAttributeNameString(attrName)) {
+      // Validate the final attribute name string against the spec.
+      // If it's invalid, emit an error token and skip it
       await ctx.emitToken(
         TOKEN_TYPE.ERROR,
         new YetiHTMLParsingError(`lexAttributeName received invalid attribute name "${attrName}"`),
       );
       return null;
     }
-    // Only add attribute name token if we found a valid name.
-    // It's okay if we didn't as long as we're not transitioning to attribute value lexing.
     await ctx.emitToken(TOKEN_TYPE.ATTR_NAME, attrName);
   }
 

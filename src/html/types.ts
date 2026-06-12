@@ -61,7 +61,10 @@ export interface YetiDoctypeNode extends BaseYetiNode {
 export interface YetiElementNode extends BaseYetiNode {
   type: typeof YETI_NODE_TYPE.ELEMENT;
   tagName: string;
-  attributes?: Record<string, unknown>;
+  // Attribute names are usually strings, but a symbol may be used as a collision-free prop key
+  // when a component tag is given a standalone symbol attribute name. Symbol-keyed attributes are
+  // only meaningful to components — they are silently skipped when serializing a real element to HTML.
+  attributes?: Record<string | symbol, unknown>;
   children?: YetiChildNode[];
 }
 

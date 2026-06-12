@@ -71,6 +71,9 @@ html like an html tag name like `<${MyComponent}>`.
 - Any attributes set on the component tag will be passed to the component as props.
   - Boolean attributes are supported, so `<${MyComponent} active />` will
     render `MyComponent` with `{ active: true }` props.
+  - A `Symbol` can be used as an attribute name for collision-free component prop keys
+    - Symbol-keyed attributes are only meaningful for components. If a symbol attribute name is placed on a regular HTML element, it is **silently dropped** when rendering to the final HTML string.
+    - Example: `<${MyComponent} ${specialAttr}="hello" />`
 - You can spread props with the following syntax: `<div ...${props}>`
 - `<!DOCTYPE>` declarations, HTML comments, and self-closing tags are all supported.
 - Multiple root-level elements are supported without requiring a fragment wrapper.

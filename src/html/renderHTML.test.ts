@@ -96,6 +96,20 @@ describe("renderHTML", () => {
     );
   });
 
+  test("drops symbol-keyed attributes from real elements", async () => {
+    const symbolAttr = Symbol("dropped");
+    // A Symbol can be used as a component prop key, but it's not a valid HTML attribute name, so a
+    // symbol-keyed attribute on a real element is silently omitted from the serialized output
+    // (for...in iteration over the attributes skips symbol keys). The adjacent string attribute
+    // confirms normal attributes are unaffected.
+    const htmlRoot = await html`<div ${symbolAttr}="ignored" data-keep="kept">Content</div>`;
+    const result = renderHTML(htmlRoot);
+    assert.strictEqual(
+      result,
+      `<div data-keep="kept">Content</div>`
+    );
+  });
+
   describe("minification", () => {
     test("minifies whitespace and strips comments", async () => {
       const htmlRoot = await html`<!DOCTYPE html>

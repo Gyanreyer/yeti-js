@@ -22,7 +22,7 @@ const COMPONENT_NODE_TYPE = 1000;
 type OpenComponentNode = {
   type: typeof COMPONENT_NODE_TYPE;
   component: Function;
-  attributes?: Record<string, unknown>;
+  attributes?: Record<string | symbol, unknown>;
   children?: YetiChildNode[];
 };
 
@@ -215,7 +215,7 @@ export const parseHTML = async (htmlStringChars: Uint8Array, dynamicValues: unkn
     return stackLength > 0 ? openParentStack[stackLength - 1] : rootNode;
   };
 
-  let openAttributeName: string | null = null;
+  let openAttributeName: string | symbol | null = null;
   let openCommentNode: YetiCommentNode | null = null;
   let openDoctypeNode: YetiDoctypeNode | null = null;
 
