@@ -121,6 +121,54 @@ describe("validateConfig", () => {
     );
   });
 
+  // --- browserslist ---
+
+  test("accepts browserslist as a string", () => {
+    assert.doesNotThrow(() =>
+      validateConfig({ browserslist: "> 0.5%, last 2 versions" })
+    );
+  });
+
+  test("accepts browserslist as an array of strings", () => {
+    assert.doesNotThrow(() =>
+      validateConfig({ browserslist: ["chrome 90", "firefox 88"] })
+    );
+  });
+
+  test("rejects browserslist with wrong type", () => {
+    assert.throws(
+      () => validateConfig({ browserslist: 42 as unknown as string }),
+      (err: Error) => {
+        assert(err instanceof YetiConfigError);
+        assert.match(err.message, /browserslist/);
+        assert.match(err.message, /string or array of strings/);
+        return true;
+      }
+    );
+  });
+
+  test("rejects empty string for browserslist", () => {
+    assert.throws(
+      () => validateConfig({ browserslist: "" }),
+      (err: Error) => {
+        assert(err instanceof YetiConfigError);
+        assert.match(err.message, /browserslist/);
+        return true;
+      }
+    );
+  });
+
+  test("rejects non-string entries inside browserslist array", () => {
+    assert.throws(
+      () => validateConfig({ browserslist: ["chrome 90", 5 as unknown as string] }),
+      (err: Error) => {
+        assert(err instanceof YetiConfigError);
+        assert.match(err.message, /browserslist\[1\]/);
+        return true;
+      }
+    );
+  });
+
   // --- js ---
 
   test("rejects js as a non-object", () => {

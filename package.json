@@ -1,6 +1,6 @@
 {
   "name": "yeti-js",
-  "version": "0.0.7-alpha.2",
+  "version": "0.0.7-alpha.3",
   "type": "module",
   "author": "Ryan Geyer",
   "license": "MIT",
@@ -43,6 +43,8 @@
     "typescript": "^6.0.2"
   },
   "dependencies": {
+    "browserslist": "^4.28.2",
+    "browserslist-to-esbuild": "^2.1.1",
     "object-hash": "^3.0.0"
   }
 }

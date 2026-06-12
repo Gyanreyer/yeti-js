@@ -323,6 +323,22 @@ export type YetiConfig = {
     processImport?: (importPath: string, content: string) => string | YetiRootNode | Promise<string | YetiNode>;
   };
   /**
+   * A [browserslist](https://github.com/browserslist/browserslist) query describing the browsers
+   * your site should support. Yeti translates it once into **both** esbuild's `target` (for JS) and
+   * lightningcss's `targets` (for CSS), so browser support is expressed a single way and applied
+   * consistently across assets.
+   *
+   * If omitted, yeti auto-detects a project browserslist config (`.browserslistrc`,
+   * `package.json#browserslist`, etc.). If there's neither an explicit query nor a project config,
+   * no targets are injected and the bundlers keep their defaults.
+   *
+   * An explicit `target`/`targets` in `js`/`css.defaultBundleTransformConfig` overrides the value
+   * computed from this query.
+   *
+   * @example '> 0.5%, last 2 versions, not dead'
+   */
+  browserslist: string | string[] | null;
+  /**
    * The file extension used for Yeti page template files.
    * Values must not include a leading dot — Eleventy's `addTemplateFormats`/`addExtension`
    * APIs will silently fail to register extensions that start with `.`.
@@ -373,6 +389,7 @@ const config: YetiConfig = {
     derivePageBundleFilePath: (pageData) => defaultDerivePageBundleFilePath(pageData, "html"),
   },
   pageTemplateFileExtension: ["page.js", "page.ts"],
+  browserslist: null,
   cacheDir: join(process.cwd(), "node_modules/.cache/yeti-js"),
   quietMode: false,
 };
@@ -703,6 +720,36 @@ export const validateConfig = (newConfig: PartialYetiConfig) => {
         } else {
           (errors ??= []).push(
             `"cacheDir" must be a string, got ${describeType(value)}`
+          );
+        }
+        break;
+      }
+      case "browserslist": {
+        const value = newConfig[key];
+        if (value === null) {
+          // null is permitted
+          break;
+        } else if (typeof value === "string") {
+          if (value.length === 0) {
+            (errors ??= []).push(
+              `"browserslist" must be a non-empty string, got ""`
+            );
+          }
+        } else if (Array.isArray(value)) {
+          for (let i = 0; i < value.length; i++) {
+            if (typeof value[i] !== "string") {
+              (errors ??= []).push(
+                `"browserslist[${i}]" must be a string, got ${describeType(value[i])}`
+              );
+            } else if (value[i].length === 0) {
+              (errors ??= []).push(
+                `"browserslist[${i}]" must be a non-empty string, got ""`
+              );
+            }
+          }
+        } else {
+          (errors ??= []).push(
+            `"browserslist" must be a string or array of strings, got ${describeType(value)}`
           );
         }
         break;

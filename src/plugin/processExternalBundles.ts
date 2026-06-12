@@ -20,6 +20,7 @@ import {
   getCachedBundleOutput,
   setCachedBundleOutput,
 } from '../bundle/bundleImportCache.ts';
+import { withESBuildBrowserTargets, withLightningCSSBrowserTargets } from '../browserTargets.ts';
 import { makeBundleVersionPlaceholder, makePageBundleVersionPlaceholder } from './bundleVersionPlaceholder.ts';
 import type { PageBundleAggregate, PageScopedBundles } from './processPageComponent.ts';
 import type { PageContext } from './types.ts';
@@ -149,7 +150,12 @@ export const processAndWriteExternalCSSBundle = async (
 ) => {
   const combinedCode = await buildCombinedCSSCode(bundleAggregate.importPaths, bundleAggregate.rawContents);
   const outputFilePath = config.css.deriveBundleFilePath(bundleName);
-  const transformConfig = config.css.deriveBundleTransformConfig(bundleName, config.css.defaultBundleTransformConfig);
+  const transformConfig = config.css.deriveBundleTransformConfig(
+    bundleName,
+    withLightningCSSBrowserTargets(
+      config.css.defaultBundleTransformConfig
+    ),
+  );
 
   await processAndWriteBundle({
     combinedCode,
@@ -183,7 +189,12 @@ export const processAndWriteExternalJSBundle = async (
 ) => {
   const combinedCode = await buildCombinedJSCode(bundleAggregate.importPaths, bundleAggregate.rawContents);
   const outputFilePath = config.js.deriveBundleFilePath(bundleName);
-  const transformConfig = config.js.deriveBundleTransformConfig(bundleName, config.js.defaultBundleTransformConfig);
+  const transformConfig = config.js.deriveBundleTransformConfig(
+    bundleName,
+    withESBuildBrowserTargets(
+      config.js.defaultBundleTransformConfig
+    ),
+  );
 
   await processAndWriteBundle({
     combinedCode,
@@ -575,7 +586,12 @@ export const processAndWriteCSSPageBundle = async (
   if (!pageBundle.css) return;
   const combinedCode = await buildCombinedCSSCode(pageBundle.css.importPaths, pageBundle.css.rawContents);
   const outputFilePath = config.css.derivePageBundleFilePath(pageBundle.page);
-  const transformConfig = config.css.deriveBundleTransformConfig("@page", config.css.defaultBundleTransformConfig);
+  const transformConfig = config.css.deriveBundleTransformConfig(
+    "@page",
+    withLightningCSSBrowserTargets(
+      config.css.defaultBundleTransformConfig
+    ),
+  );
 
   await processAndWriteBundle({
     combinedCode,
@@ -604,7 +620,12 @@ export const processAndWriteJSPageBundle = async (
   if (!pageBundle.js) return;
   const combinedCode = await buildCombinedJSCode(pageBundle.js.importPaths, pageBundle.js.rawContents);
   const outputFilePath = config.js.derivePageBundleFilePath(pageBundle.page);
-  const transformConfig = config.js.deriveBundleTransformConfig("@page", config.js.defaultBundleTransformConfig);
+  const transformConfig = config.js.deriveBundleTransformConfig(
+    "@page",
+    withESBuildBrowserTargets(
+      config.js.defaultBundleTransformConfig
+    ),
+  );
 
   await processAndWriteBundle({
     combinedCode,

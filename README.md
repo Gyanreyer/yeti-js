@@ -891,6 +891,24 @@ eleventyConfig.addPlugin(yetiPlugin, {
 });
 ```
 
+### `browserslist`
+
+A [browserslist](https://github.com/browserslist/browserslist) query describing which browsers your site needs to support. Yeti translates it **once** into both esbuild's `target` (for JS) and lightningcss's `targets` (for CSS), so you express browser support a single way and it's applied consistently across every JS and CSS bundle.
+
+```js
+eleventyConfig.addPlugin(yetiPlugin, {
+  browserslist: "> 0.5%, last 2 versions, not dead",
+});
+// An array of queries is also accepted:
+eleventyConfig.addPlugin(yetiPlugin, {
+  browserslist: ["chrome 90", "firefox 88", "safari 15"],
+});
+```
+
+If you don't set `browserslist`, Yeti **auto-detects** a project browserslist config (a `.browserslistrc` file, a `browserslist` key in `package.json`, etc.). If there's neither an explicit query nor a project config, Yeti injects no targets and the bundlers keep their own defaults — so this option is opt-in and never silently changes existing output.
+
+An explicit [`js.defaultBundleTransformConfig.target`](#jsdefaultbundletransformconfig) or [`css.defaultBundleTransformConfig.targets`](#cssdefaultbundletransformconfig) always overrides the value computed from this query.
+
 ### `js`
 
 The plugin offers some options for customizing how bundled JavaScript assets are processed and output.

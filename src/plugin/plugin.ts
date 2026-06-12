@@ -7,6 +7,7 @@ import { register } from 'node:module';
 import { MessageChannel } from 'node:worker_threads';
 
 import { updateConfig, type YetiConfig } from '../config.ts';
+import { resetBrowserTargetsCache } from '../browserTargets.ts';
 import { log, logError } from '../log.ts';
 import type { EleventyPageData, PageContext, YetiPageComponent } from './types.ts';
 import { YETI_NODE_TYPE } from '../html/types.ts';
@@ -137,6 +138,8 @@ export const yetiPlugin = (eleventyConfig: EleventyUserConfig, userConfig: Parti
     resetAccessTracking();
     resetBundleCacheStats();
     resetWriteSkipStats();
+    // Re-resolve browser targets this build (the project's browserslist query/config may have changed).
+    resetBrowserTargetsCache();
 
     // Compute the cache version key once per process. Both the page build cache and the
     // bundle import cache are gated by this same key (yeti + esbuild + lightningcss + format).
